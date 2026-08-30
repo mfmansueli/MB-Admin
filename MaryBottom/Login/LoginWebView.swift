@@ -5,8 +5,10 @@ import WebKit
 ///
 /// É separada da WebView de sessão de propósito: compartilhar uma única `WKWebView` entre duas
 /// telas faz o UIKit derrubar o app quando ela troca de lugar no meio de um toque. As duas usam o
-/// mesmo `WKWebsiteDataStore.default()`, então o login feito aqui vale para a outra também.
+/// mesmo `WKWebsiteDataStore(forIdentifier:)` da conta, então o login feito aqui vale para a outra
+/// também.
 struct LoginWebView: UIViewRepresentable {
+    let dataStoreIdentifier: EnjoeiAccountID
     let onNavigationFinished: (URL?) -> Void
 
     func makeCoordinator() -> LoginWebViewCoordinator {
@@ -15,7 +17,7 @@ struct LoginWebView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: dataStoreIdentifier)
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator

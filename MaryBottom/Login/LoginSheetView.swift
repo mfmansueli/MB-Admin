@@ -2,18 +2,21 @@ import SwiftUI
 
 /// Tela modal com o login do Enjoei. Fecha sozinha assim que a sessão aparece.
 struct LoginSheetView: View {
-    @Environment(AppSession.self) private var session
+    let accountID: EnjoeiAccountID
+
+    @Environment(AccountsStore.self) private var accountsStore
     @Environment(\.dismiss) private var dismiss
     @State private var isCheckingSession = false
+    @State private var feedback: String?
 
     var body: some View {
         NavigationStack {
-            LoginWebView { _ in
+            LoginWebView(dataStoreIdentifier: accountID) { _ in
                 checkSession(triggeredByUser: false)
             }
             .ignoresSafeArea(edges: .bottom)
             .safeAreaInset(edge: .top) {
-                if let feedback = session.loginFeedback {
+                if let feedback {
                     Text(feedback)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
@@ -44,7 +47,16 @@ struct LoginSheetView: View {
         guard !isCheckingSession else { return }
         isCheckingSession = true
         Task {
-            await session.checkLoginFromWebView(triggeredByUser: triggeredByUser)
+            let outcome = await accountsStore.checkLoginFromWebView(accountID: accountID)
+            switch outcome {
+            case .loggedIn:
+                feedback = nil
+                dismiss()
+            case .pending(let message):
+                // Só o toque no botão merece recado na tela; a conferência automática roda a cada
+                // página e ficaria barulhenta.
+                if triggeredByUser { feedback = message }
+            }
             isCheckingSession = false
         }
     }

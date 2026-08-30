@@ -16,7 +16,7 @@ struct EnjoeiUserPayloadTests {
         #expect(user?.name == "antonia")
         #expect(user?.availableProductsCount == 1496)
         #expect(user?.avatarURL?.absoluteString
-            == "https://photos.enjoei.com.br/public/100x100/czM6Ly9hdmF0YXI")
+            == "https://photos.enjoei.com.br/public/200x200/czM6Ly9hdmF0YXI")
     }
 
     @Test("corpo vazio de visitante não vira usuário")

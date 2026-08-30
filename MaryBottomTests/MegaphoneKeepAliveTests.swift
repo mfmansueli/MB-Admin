@@ -15,7 +15,7 @@ struct MegaphoneKeepAliveTests {
     func segundoPlanoComAudioNaoPausa() async {
         let runner = makeRunner()
         let audio = FakeBackgroundAudio()
-        let keepAlive = MegaphoneKeepAlive(runner: runner, audio: audio)
+        let keepAlive = MegaphoneKeepAlive(runner: runner, coordinator: MegaphoneKeepAliveCoordinator(audio: audio))
         runner.start(sellerID: 1)
         keepAlive.start()
 
@@ -33,7 +33,7 @@ struct MegaphoneKeepAliveTests {
         let runner = makeRunner()
         let audio = FakeBackgroundAudio()
         audio.failsToStart = true
-        let keepAlive = MegaphoneKeepAlive(runner: runner, audio: audio)
+        let keepAlive = MegaphoneKeepAlive(runner: runner, coordinator: MegaphoneKeepAliveCoordinator(audio: audio))
         runner.start(sellerID: 1)
         keepAlive.start()
 
@@ -52,7 +52,7 @@ struct MegaphoneKeepAliveTests {
     func interrupcaoDeAudioPausaERetoma() async {
         let runner = makeRunner()
         let audio = FakeBackgroundAudio()
-        let keepAlive = MegaphoneKeepAlive(runner: runner, audio: audio)
+        let keepAlive = MegaphoneKeepAlive(runner: runner, coordinator: MegaphoneKeepAliveCoordinator(audio: audio))
         runner.start(sellerID: 1)
         keepAlive.start()
 
@@ -70,12 +70,40 @@ struct MegaphoneKeepAliveTests {
     func fimDaRodadaDesligaOAudio() async {
         let runner = makeRunner()
         let audio = FakeBackgroundAudio()
-        let keepAlive = MegaphoneKeepAlive(runner: runner, audio: audio)
+        let keepAlive = MegaphoneKeepAlive(runner: runner, coordinator: MegaphoneKeepAliveCoordinator(audio: audio))
 
         keepAlive.start()
         keepAlive.stop()
 
         #expect(audio.stopCount == 1)
         #expect(audio.isKeepingAwake == false)
+    }
+
+    @Test("parar uma conta não desliga o áudio de outra ainda rodando")
+    func duasContasCompartilhamOCoordenador() async {
+        let audio = FakeBackgroundAudio()
+        let coordinator = MegaphoneKeepAliveCoordinator(audio: audio)
+        let runnerA = makeRunner()
+        let runnerB = makeRunner()
+        let keepAliveA = MegaphoneKeepAlive(runner: runnerA, coordinator: coordinator)
+        let keepAliveB = MegaphoneKeepAlive(runner: runnerB, coordinator: coordinator)
+
+        keepAliveA.start()
+        keepAliveB.start()
+        #expect(audio.startCount == 1)
+
+        // A conta A termina primeiro; a conta B continua rodando.
+        keepAliveA.stop()
+        #expect(audio.isKeepingAwake)
+        #expect(coordinator.isKeepingAwake)
+
+        keepAliveB.stop()
+        #expect(audio.isKeepingAwake == false)
+        #expect(audio.stopCount == 1)
+
+        runnerA.cancel()
+        runnerB.cancel()
+        await runnerA.waitUntilFinished()
+        await runnerB.waitUntilFinished()
     }
 }

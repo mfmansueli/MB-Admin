@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Estado deslogado: explica o que o app faz e abre o login.
 struct LoggedOutView: View {
-    @Environment(AppSession.self) private var session
+    @Environment(AccountsStore.self) private var accountsStore
 
     var body: some View {
         VStack(spacing: 24) {
@@ -20,20 +20,13 @@ struct LoggedOutView: View {
             }
 
             Button {
-                session.startLogin()
+                accountsStore.beginAddingAccount()
             } label: {
                 Text("entrar no enjoei")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-
-            if let errorMessage = session.errorMessage {
-                Text(errorMessage)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .multilineTextAlignment(.center)
-            }
         }
         .padding(32)
     }
@@ -41,5 +34,5 @@ struct LoggedOutView: View {
 
 #Preview {
     LoggedOutView()
-        .environment(AppSession())
+        .environment(AccountsStore())
 }

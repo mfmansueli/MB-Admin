@@ -294,6 +294,73 @@ struct MegaphoneRunnerTests {
         #expect(runner.round == 1)
     }
 
+    @Test("fim da rodada avisa quem guarda o resumo")
+    func fimDaRodadaAvisaOResumo() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)],
+            failuresByProductID: [2: .http(status: 429, message: "calma lá")]
+        )
+        let runner = makeRunner(client: client)
+        var summaries: [MegaphoneRoundSummary] = []
+        runner.onRoundFinished = { summaries.append($0) }
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(summaries.count == 1)
+        #expect(summaries.first?.succeeded == 2)
+        #expect(summaries.first?.failed == 1)
+    }
+
+    @Test("cancelar também avisa o resumo, com o que já tinha sido feito")
+    func cancelarAvisaOResumo() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
+        let runner = MegaphoneRunner(client: client)
+        runner.delayBetweenProducts = .seconds(30)
+        var summaries: [MegaphoneRoundSummary] = []
+        runner.onRoundFinished = { summaries.append($0) }
+
+        runner.start(sellerID: 1)
+        await waitUntil { runner.processedCount >= 1 }
+        runner.cancel()
+        await runner.waitUntilFinished()
+
+        #expect(summaries.count == 1)
+        #expect(summaries.first?.succeeded == 1)
+    }
+
+    @Test("sessão expirada avisa quem precisa marcar a conta como deslogada")
+    func sessaoExpiradaAvisaOSessionExpired() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)],
+            failuresByProductID: [1: .notAuthenticated]
+        )
+        let runner = makeRunner(client: client)
+        var sessionExpiredCount = 0
+        runner.onSessionExpired = { sessionExpiredCount += 1 }
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(sessionExpiredCount == 1)
+    }
+
+    @Test("uma falha comum não é confundida com sessão expirada")
+    func falhaComumNaoDisparaSessionExpired() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)],
+            failuresByProductID: [2: .http(status: 429, message: "calma lá")]
+        )
+        let runner = makeRunner(client: client)
+        var sessionExpiredCount = 0
+        runner.onSessionExpired = { sessionExpiredCount += 1 }
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(sessionExpiredCount == 0)
+    }
+
     /// Espera uma condição do runner sem prender o teste para sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {

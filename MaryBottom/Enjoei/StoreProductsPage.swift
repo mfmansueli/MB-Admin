@@ -43,6 +43,7 @@ nonisolated extension StoreProductsPage: Decodable {
         let title: Title?
         let photo: Photo?
         let price: Price?
+        let regularPrice: RegularPrice?
 
         struct Title: Decodable { let name: String? }
         struct Photo: Decodable {
@@ -53,6 +54,14 @@ nonisolated extension StoreProductsPage: Decodable {
             let current: Double?
             let original: Double?
         }
+        /// Preço "de tabela" do produto, fora de qualquer promoção — o que a página mostra riscado.
+        struct RegularPrice: Decodable {
+            let values: Values?
+            struct Values: Decodable {
+                let price: Price?
+                struct Price: Decodable { let listed: Double? }
+            }
+        }
 
         func makeProduct() -> EnjoeiProduct? {
             guard let id, let numericID = Int(id) else { return nil }
@@ -62,7 +71,9 @@ nonisolated extension StoreProductsPage: Decodable {
                 path: path ?? "",
                 photoPublicID: photo?.imagePublicID,
                 currentPrice: price?.current,
-                originalPrice: price?.original
+                // `regularPrice.values.price.listed` é o preço original de verdade; cai pra
+                // `price.original` quando a busca não devolve esse campo pra esse produto.
+                originalPrice: regularPrice?.values?.price?.listed ?? price?.original
             )
         }
     }

@@ -12,7 +12,7 @@ struct UserHeaderView: View {
             } placeholder: {
                 Circle().fill(.quaternary)
             }
-            .frame(width: 52, height: 52)
+            .frame(width: 72, height: 72)
             .clipShape(.circle)
 
             VStack(alignment: .leading, spacing: 2) {

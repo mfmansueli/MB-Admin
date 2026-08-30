@@ -1,23 +1,33 @@
 import SwiftUI
 
-/// Estado logado: identifica o usuário e conduz o megafone da loja dele.
-struct LoggedInView: View {
-    let user: EnjoeiUser
+/// Detalhe de uma conta: identifica o usuário e conduz o megafone da loja dele.
+struct AccountDetailView: View {
+    let account: AccountSession
 
-    @Environment(AppSession.self) private var session
+    @Environment(AccountsStore.self) private var accountsStore
+    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
-    @State private var runner: MegaphoneRunner
-    @State private var keepAlive: MegaphoneKeepAlive
-    /// Quantas vezes repetir a lista. Fica guardado entre execuções do app (0 = infinito).
-    @AppStorage("megaphone.rounds") private var storedRounds = 1
+    /// Quantas vezes repetir a lista. Fica guardado entre execuções do app (0 = infinito). Por
+    /// conta: com contas rodando em paralelo, uma preferência global faria trocar a velocidade de
+    /// uma afetar silenciosamente as outras já em andamento.
+    @AppStorage private var storedRounds: Int
     /// Intervalo entre um megafone e o próximo, em milissegundos.
-    @AppStorage("megaphone.speed") private var storedSpeed = MegaphoneSpeed.standard.milliseconds
+    @AppStorage private var storedSpeed: Int
 
-    init(user: EnjoeiUser, client: EnjoeiClientProtocol) {
-        let runner = MegaphoneRunner(client: client)
-        self.user = user
-        _runner = State(initialValue: runner)
-        _keepAlive = State(initialValue: MegaphoneKeepAlive(runner: runner))
+    @State private var selectedTab: Tab = .queue
+
+    private var runner: MegaphoneRunner { account.runner }
+    private var keepAlive: MegaphoneKeepAlive { account.keepAlive }
+
+    private enum Tab {
+        case queue
+        case discounts
+    }
+
+    init(account: AccountSession) {
+        self.account = account
+        _storedRounds = AppStorage(wrappedValue: 1, "megaphone.rounds.\(account.id)")
+        _storedSpeed = AppStorage(wrappedValue: MegaphoneSpeed.standard.milliseconds, "megaphone.speed.\(account.id)")
     }
 
     private var rounds: MegaphoneRounds { MegaphoneRounds(rawValue: storedRounds) }
@@ -25,9 +35,12 @@ struct LoggedInView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            UserHeaderView(user: user) {
+            UserHeaderView(user: account.user) {
                 runner.cancel()
-                Task { await session.logout() }
+                Task {
+                    await accountsStore.logout(accountID: account.id)
+                    dismiss()
+                }
             }
 
             roundsMenu
@@ -38,7 +51,9 @@ struct LoggedInView: View {
 
             actionButtons
 
-            productList
+            tabPicker
+
+            tabContent
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
@@ -133,7 +148,7 @@ struct LoggedInView: View {
         } else {
             Button {
                 runner.delayBetweenProducts = speed.duration
-                runner.start(sellerID: user.id, rounds: rounds)
+                runner.start(sellerID: account.user.id, rounds: rounds)
             } label: {
                 Label(buttonTitle, systemImage: "megaphone.fill")
                     .frame(maxWidth: .infinity)
@@ -148,6 +163,24 @@ struct LoggedInView: View {
         case ...0: "megafonar tudo sem parar"
         case 1: "megafonar todos os produtos"
         default: "megafonar tudo \(rounds.rawValue) vezes"
+        }
+    }
+
+    private var tabPicker: some View {
+        Picker("aba", selection: $selectedTab) {
+            Text("megafone").tag(Tab.queue)
+            Text("desconto").tag(Tab.discounts)
+        }
+        .pickerStyle(.segmented)
+    }
+
+    @ViewBuilder
+    private var tabContent: some View {
+        switch selectedTab {
+        case .queue:
+            productList
+        case .discounts:
+            DiscountCandidatesListView(loader: account.discountCandidatesLoader, sellerID: account.user.id)
         }
     }
 

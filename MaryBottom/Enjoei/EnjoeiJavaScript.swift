@@ -55,6 +55,9 @@ nonisolated enum EnjoeiJavaScript {
 
     /// Megafona um produto pela mesma rota que o site usa. Devolve status e corpo para o app poder
     /// explicar a falha em vez de só dizer que não deu.
+    ///
+    /// `newPrice` chega como `null` quando é pra megafonar sem desconto — nesse caso `new_price`
+    /// nem entra no corpo (mandar `null` pro Enjoei não é a mesma coisa que omitir o campo).
     static let megaphone = """
     const headers = {
         "Content-Type": "application/json",
@@ -63,11 +66,14 @@ nonisolated enum EnjoeiJavaScript {
     };
     if (token) { headers["X-CSRF-Token"] = token; }
 
+    const body = { version: "v2", product_id: productID };
+    if (newPrice !== null && newPrice !== undefined) { body.new_price = newPrice; }
+
     const response = await fetch("/api/megaphones", {
         method: "POST",
         credentials: "include",
         headers: headers,
-        body: JSON.stringify({ version: "v2", product_id: productID })
+        body: JSON.stringify(body)
     });
     return { status: response.status, body: await response.text() };
     """
@@ -76,5 +82,16 @@ nonisolated enum EnjoeiJavaScript {
     static let csrfToken = """
     const meta = document.querySelector('meta[name="csrf-token"]');
     return meta ? (meta.getAttribute("content") || "") : "";
+    """
+
+    /// Consulta se cada produto pede desconto pra alcançar exposição máxima no megafone — a mesma
+    /// rota que o site chama antes de abrir o popup de desconto. `productIDs` chega pronto,
+    /// separado por vírgula.
+    static let megaphoneExposures = """
+    const response = await fetch(`/api/megaphones/v2?product_ids=${productIDs}&version=v2`, {
+        credentials: "include",
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
+    });
+    return { status: response.status, body: await response.text() };
     """
 }

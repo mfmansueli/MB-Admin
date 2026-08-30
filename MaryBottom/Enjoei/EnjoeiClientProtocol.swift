@@ -12,6 +12,9 @@ nonisolated protocol EnjoeiClientProtocol: Sendable {
     func storeProductsPage(sellerID: Int, after: String?) async throws -> StoreProductsPage
     /// Token CSRF atual da sessão. Vazio quando a página não expõe nenhum.
     func csrfToken() async throws -> String
-    /// Megafona um produto.
-    func megaphone(productID: Int, csrfToken: String) async throws
+    /// Megafona um produto. `newPrice` aplica o desconto sugerido junto (ver
+    /// `MegaphoneExposure.priceToIncreaseExposure`); `nil` megafona sem mexer no preço.
+    func megaphone(productID: Int, csrfToken: String, newPrice: Double?) async throws
+    /// Como cada produto se encaixa no megafone: se pede desconto pra alcançar exposição máxima.
+    func megaphoneExposures(productIDs: [Int]) async throws -> [MegaphoneExposure]
 }

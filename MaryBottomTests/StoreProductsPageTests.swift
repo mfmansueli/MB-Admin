@@ -14,8 +14,26 @@ struct StoreProductsPageTests {
         #expect(page.products.map(\.id) == [145657034, 147640589])
         #expect(page.products.first?.title == "brinco argola estrela 50mm")
         #expect(page.products.first?.currentPrice == 273)
+        // Sem `regularPrice` nesse recorte, cai pra `price.original`.
+        #expect(page.products.first?.originalPrice == 399)
         // O cursor de continuação é o da última aresta: é ele que vai no parâmetro `after`.
         #expect(page.endCursor == "165537526022505319:1")
+    }
+
+    @Test("preço original prioriza regularPrice.values.price.listed sobre price.original")
+    func preferePrecoOriginalDoRegularPrice() throws {
+        let json = """
+        {"data":{"seller":{"search":{"products":{"total":1,"edges":[
+          {"cursor":"a","node":{
+            "id":"1",
+            "price":{"current":273,"original":399},
+            "regularPrice":{"values":{"price":{"listed":599}}}
+          }}
+        ]}}}}}
+        """
+        let page = try JSONDecoder().decode(StoreProductsPage.self, from: Data(json.utf8))
+
+        #expect(page.products.first?.originalPrice == 599)
     }
 
     @Test("página sem arestas encerra a paginação")

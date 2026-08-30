@@ -6,13 +6,7 @@ struct MegaphoneRowView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: item.product.photoURL) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                RoundedRectangle(cornerRadius: 8).fill(.quaternary)
-            }
-            .frame(width: 48, height: 48)
-            .clipShape(.rect(cornerRadius: 8))
+            ProductPhotoView(product: item.product)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.product.title)

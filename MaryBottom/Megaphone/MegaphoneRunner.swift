@@ -24,6 +24,13 @@ final class MegaphoneRunner {
     /// Depois desta quantidade de falhas seguidas paramos: sinal de bloqueio ou cota estourada.
     var maxConsecutiveFailures = 5
 
+    /// Chamado ao fim de uma rodada (concluída, cancelada ou interrompida por falha), para quem
+    /// guarda o resumo entre execuções — a tela só observa `phase`, que reseta a cada novo `start`.
+    var onRoundFinished: ((MegaphoneRoundSummary) -> Void)?
+    /// Chamado quando a sessão do Enjoei caiu no meio da rodada, para sinalizar a conta como
+    /// precisando logar de novo sem depender de a tela estar aberta observando `phase`.
+    var onSessionExpired: (() -> Void)?
+
     private let client: EnjoeiClientProtocol
     private var task: Task<Void, Never>?
     private var pauseGate: CheckedContinuation<Void, Never>?
@@ -114,7 +121,7 @@ final class MegaphoneRunner {
         do {
             let products = try await loadAllProducts(sellerID: sellerID)
             guard !products.isEmpty else {
-                phase = .finished
+                finish(.finished)
                 return
             }
             items = products.map { MegaphoneItem(product: $0) }
@@ -128,17 +135,27 @@ final class MegaphoneRunner {
                 token = try await megaphoneAll(token: token)
                 currentRound += 1
             }
-            phase = .finished
+            finish(.finished)
         } catch is CancellationError {
             stopInFlight()
-            phase = .cancelled
+            finish(.cancelled)
         } catch Stop.tooManyFailures(let message) {
             stopInFlight()
-            phase = .failed(message)
+            finish(.failed(message))
         } catch {
             stopInFlight()
-            phase = .failed(error.localizedDescription)
+            if case EnjoeiError.notAuthenticated = error {
+                onSessionExpired?()
+            }
+            finish(.failed(error.localizedDescription))
         }
+    }
+
+    private func finish(_ phase: MegaphonePhase) {
+        self.phase = phase
+        onRoundFinished?(
+            MegaphoneRoundSummary(succeeded: totalSucceeded, failed: totalFailed, finishedAt: .now)
+        )
     }
 
     private func loadAllProducts(sellerID: Int) async throws -> [EnjoeiProduct] {
@@ -207,11 +224,11 @@ final class MegaphoneRunner {
     /// token — ele roda junto com a sessão.
     private func megaphone(productID: Int, token: String) async throws -> String {
         do {
-            try await client.megaphone(productID: productID, csrfToken: token)
+            try await client.megaphone(productID: productID, csrfToken: token, newPrice: nil)
             return token
         } catch let error as EnjoeiError where error.isCSRFRejection {
             let refreshed = try await client.csrfToken()
-            try await client.megaphone(productID: productID, csrfToken: refreshed)
+            try await client.megaphone(productID: productID, csrfToken: refreshed, newPrice: nil)
             return refreshed
         }
     }

@@ -1,22 +1,22 @@
 import Foundation
 import WebKit
 
-/// A WebView de bastidores, onde rodam as chamadas que exigem sessão.
+/// A WebView de bastidores, onde rodam as chamadas que exigem sessão — uma instância por conta,
+/// isolada por `WKWebsiteDataStore(forIdentifier:)` para várias contas ficarem logadas ao mesmo
+/// tempo sem misturar cookies.
 ///
 /// O Enjoei recusa os cookies replicados para fora do navegador (responde 401 e ainda derruba o
 /// `remember_user_token`), então identificação e megafone acontecem de dentro de uma página dele.
-/// Esta WebView e a do login usam o mesmo `WKWebsiteDataStore.default()` — que persiste em disco —,
+/// Esta WebView e a do login da mesma conta usam o mesmo `identifier`, que persiste em disco —
 /// então o login feito lá vale aqui, e sobrevive ao fechamento do app.
 @MainActor
 final class EnjoeiWebSession: EnjoeiSessionClearing {
-    static let shared = EnjoeiWebSession()
-
     let webView: WKWebView
     private let navigationDelegate = WebSessionNavigationDelegate()
 
-    init() {
+    init(dataStoreIdentifier: EnjoeiAccountID) {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = .default()
+        configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: dataStoreIdentifier)
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
         webView.navigationDelegate = navigationDelegate
     }
@@ -74,5 +74,15 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
             for: records.filter { $0.displayName.contains("enjoei") }
         )
         await load(EnjoeiAPI.webBaseURL)
+    }
+
+    /// Monta as dependências de uma conta a partir do id dela — factory padrão do `AccountsStore`.
+    static func makeDependencies(for accountID: EnjoeiAccountID) -> AccountDependencies {
+        let session = EnjoeiWebSession(dataStoreIdentifier: accountID)
+        return AccountDependencies(
+            client: WebViewEnjoeiClient(webSession: session),
+            sessionClearer: session,
+            webView: session.webView
+        )
     }
 }

@@ -1,6 +1,7 @@
 import Foundation
 
-/// Resposta do `POST /api/megaphones` feito dentro da WebView.
+/// Envelope `{status, body}` que os scripts de `/api/megaphones*` devolvem — usado tanto pelo
+/// `POST /api/megaphones` (megafonar) quanto pelo `GET /api/megaphones/v2` (exposição/desconto).
 nonisolated struct MegaphoneWebResponse: Equatable, Sendable {
     let status: Int
     let body: String

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Usuário logado no Enjoei, do ponto de vista do app.
-nonisolated struct EnjoeiUser: Identifiable, Equatable, Sendable {
+nonisolated struct EnjoeiUser: Identifiable, Equatable, Sendable, Codable {
     let id: Int
     let nickname: String
     let name: String
@@ -12,6 +12,8 @@ nonisolated struct EnjoeiUser: Identifiable, Equatable, Sendable {
 
     var avatarURL: URL? {
         guard let avatarPublicID else { return nil }
-        return EnjoeiPhoto.url(publicID: avatarPublicID, size: .avatar)
+        // `.bigAvatar`, não `.avatar`: o avatar aparece maior na tela, e uma foto de origem maior
+        // evita ela ficar borrada ao esticar.
+        return EnjoeiPhoto.url(publicID: avatarPublicID, size: .bigAvatar)
     }
 }

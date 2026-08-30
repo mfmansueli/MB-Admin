@@ -7,8 +7,8 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
     private let webSession: EnjoeiWebSession
     private let publicAPI: EnjoeiPublicAPI
 
-    init(webSession: EnjoeiWebSession? = nil, publicAPI: EnjoeiPublicAPI? = nil) {
-        self.webSession = webSession ?? .shared
+    init(webSession: EnjoeiWebSession, publicAPI: EnjoeiPublicAPI? = nil) {
+        self.webSession = webSession
         self.publicAPI = publicAPI ?? EnjoeiPublicClient()
     }
 
@@ -35,12 +35,26 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
         try await webSession.run(EnjoeiJavaScript.csrfToken) as? String ?? ""
     }
 
-    func megaphone(productID: Int, csrfToken: String) async throws {
+    func megaphone(productID: Int, csrfToken: String, newPrice: Double?) async throws {
         let result = try await webSession.run(
             EnjoeiJavaScript.megaphone,
-            arguments: ["productID": productID, "token": csrfToken]
+            // NSNull vira `null` do lado do JS — omitir a chave faria o script referenciar uma
+            // variável inexistente, e `callAsyncJavaScript` não aceita valor `nil` direto num `Any`.
+            arguments: ["productID": productID, "token": csrfToken, "newPrice": newPrice ?? NSNull()]
         )
         let response = MegaphoneWebResponse(javaScriptResult: result)
         if let error = response.failure { throw error }
+    }
+
+    func megaphoneExposures(productIDs: [Int]) async throws -> [MegaphoneExposure] {
+        guard !productIDs.isEmpty else { return [] }
+        let result = try await webSession.run(
+            EnjoeiJavaScript.megaphoneExposures,
+            arguments: ["productIDs": productIDs.map(String.init).joined(separator: ",")]
+        )
+        let response = MegaphoneWebResponse(javaScriptResult: result)
+        if let error = response.failure { throw error }
+        let payload = try JSONDecoder().decode(MegaphoneExposuresPayload.self, from: Data(response.body.utf8))
+        return payload.products
     }
 }
