@@ -60,6 +60,12 @@ struct MegaphoneRowView: View {
             if let current = item.product.formattedPrice {
                 Text(current)
                     .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.green)
+            }
+            if let percent = item.computedDiscountPercent {
+                Text("-\(percent)%")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.orange)
             }
         }
     }

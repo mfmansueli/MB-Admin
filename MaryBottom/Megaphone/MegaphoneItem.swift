@@ -9,4 +9,12 @@ nonisolated struct MegaphoneItem: Identifiable, Equatable, Sendable {
     var exposure: MegaphoneExposure? = nil
 
     var id: Int { product.id }
+
+    /// Percentual de desconto entre o preço original da loja e o preço sugerido pelo megafone,
+    /// calculado aqui — não é o `discount` que já vem pronto da API (esse só é usado no botão).
+    var computedDiscountPercent: Int? {
+        guard let original = product.originalPrice, original > 0,
+              let suggested = exposure?.priceToIncreaseExposure else { return nil }
+        return Int(((original - suggested) / original * 100).rounded())
+    }
 }

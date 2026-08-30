@@ -205,11 +205,31 @@ struct AccountDetailView: View {
     @ViewBuilder
     private var filterPicker: some View {
         if !runner.items.isEmpty {
-            Picker("filtro", selection: $filter) {
-                Text("todos").tag(ProductFilter.all)
-                Text("pede desconto").tag(ProductFilter.discountOnly)
+            Menu {
+                Picker("filtro", selection: $filter) {
+                    Text("todos").tag(ProductFilter.all)
+                    Text("pede desconto").tag(ProductFilter.discountOnly)
+                }
+                .pickerStyle(.inline)
+            } label: {
+                HStack {
+                    Text("mostrar")
+                    Spacer()
+                    Text(filterLabel)
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .contentShape(.rect)
             }
-            .pickerStyle(.segmented)
+        }
+    }
+
+    private var filterLabel: String {
+        switch filter {
+        case .all: "todos"
+        case .discountOnly: "pede desconto"
         }
     }
 
