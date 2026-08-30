@@ -23,6 +23,9 @@ final class MegaphoneRunner {
     var delayBetweenProducts: Duration = .milliseconds(900)
     /// Depois desta quantidade de falhas seguidas paramos: sinal de bloqueio ou cota estourada.
     var maxConsecutiveFailures = 5
+    /// Quantos ids pedir por chamada ao endpoint de exposição — o Enjoei aceita vários de uma vez,
+    /// mas evitamos mandar a loja inteira numa URL só.
+    var exposureBatchSize = 80
 
     /// Chamado ao fim de uma rodada (concluída, cancelada ou interrompida por falha), para quem
     /// guarda o resumo entre execuções — a tela só observa `phase`, que reseta a cada novo `start`.
@@ -124,7 +127,9 @@ final class MegaphoneRunner {
                 finish(.finished)
                 return
             }
-            items = products.map { MegaphoneItem(product: $0) }
+            phase = .checkingExposure(checked: 0, total: products.count)
+            let exposures = try await loadExposures(productIDs: products.map(\.id))
+            items = products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) }
 
             var token = try await client.csrfToken()
             var currentRound = 1
@@ -178,20 +183,43 @@ final class MegaphoneRunner {
         }
     }
 
+    private func loadExposures(productIDs: [Int]) async throws -> [Int: MegaphoneExposure] {
+        var exposuresByProductID: [Int: MegaphoneExposure] = [:]
+        var checked = 0
+
+        for batch in chunks(of: productIDs, size: exposureBatchSize) {
+            try Task.checkCancellation()
+            let exposures = try await client.megaphoneExposures(productIDs: batch)
+            for exposure in exposures { exposuresByProductID[exposure.productID] = exposure }
+            checked += batch.count
+            phase = .checkingExposure(checked: checked, total: productIDs.count)
+        }
+        return exposuresByProductID
+    }
+
+    private func chunks(of ids: [Int], size: Int) -> [[Int]] {
+        stride(from: 0, to: ids.count, by: size).map {
+            Array(ids[$0..<min($0 + size, ids.count)])
+        }
+    }
+
     /// Megafona a fila inteira uma vez. Devolve o token em uso ao final — ele pode ter sido
-    /// renovado no caminho.
+    /// renovado no caminho. Pula produtos já concluídos ou em andamento por fora — um desconto
+    /// aplicado na mão (`applyDiscount`) enquanto a rodada corria não pode ser megafonado de novo
+    /// por cima, ou os dois chamariam a rota ao mesmo tempo pro mesmo produto.
     private func megaphoneAll(token: String) async throws -> String {
         var token = token
         var consecutiveFailures = 0
 
         for index in items.indices {
+            if items[index].status == .succeeded || items[index].status == .megaphoning { continue }
             await waitWhilePaused()
             try Task.checkCancellation()
             items[index].status = .megaphoning
             currentItemID = items[index].id
 
             do {
-                token = try await megaphone(productID: items[index].id, token: token)
+                token = try await megaphone(productID: items[index].id, newPrice: nil, token: token)
                 items[index].status = .succeeded
                 totalSucceeded += 1
                 consecutiveFailures = 0
@@ -221,16 +249,50 @@ final class MegaphoneRunner {
     }
 
     /// Megafona um produto, renovando o token CSRF e tentando de novo quando o servidor recusa o
-    /// token — ele roda junto com a sessão.
-    private func megaphone(productID: Int, token: String) async throws -> String {
+    /// token — ele roda junto com a sessão. `newPrice` aplica o desconto sugerido junto.
+    private func megaphone(productID: Int, newPrice: Double?, token: String) async throws -> String {
         do {
-            try await client.megaphone(productID: productID, csrfToken: token, newPrice: nil)
+            try await client.megaphone(productID: productID, csrfToken: token, newPrice: newPrice)
             return token
         } catch let error as EnjoeiError where error.isCSRFRejection {
             let refreshed = try await client.csrfToken()
-            try await client.megaphone(productID: productID, csrfToken: refreshed, newPrice: nil)
+            try await client.megaphone(productID: productID, csrfToken: refreshed, newPrice: newPrice)
             return refreshed
         }
+    }
+
+    /// Aplica o desconto sugerido pelo megafone num produto específico e o megafona. Funciona
+    /// mesmo com a rodada automática rodando — o item marcado `.succeeded` na hora é pulado por
+    /// `megaphoneAll` quando o laço chegar nele.
+    func applyDiscount(for productID: Int) {
+        guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
+        // Pendente ou falhou antes (retry): tudo bem. Já rodando ou já feito: um segundo toque não
+        // dispara outra chamada.
+        guard items[index].status != .megaphoning, items[index].status != .succeeded else { return }
+        let newPrice = items[index].exposure?.priceToIncreaseExposure
+        items[index].status = .megaphoning
+        Task { [weak self] in
+            await self?.performApplyDiscount(productID: productID, newPrice: newPrice)
+        }
+    }
+
+    private func performApplyDiscount(productID: Int, newPrice: Double?) async {
+        do {
+            let token = try await client.csrfToken()
+            _ = try await megaphone(productID: productID, newPrice: newPrice, token: token)
+            setStatus(.succeeded, for: productID)
+            totalSucceeded += 1
+        } catch {
+            setStatus(.failed(error.localizedDescription), for: productID)
+            totalFailed += 1
+        }
+    }
+
+    /// Procura de novo o índice em vez de guardar o de antes do `await`: uma rodada nova
+    /// (`start`) recria `items` do zero enquanto isso estava em andamento.
+    private func setStatus(_ status: MegaphoneStatus, for productID: Int) {
+        guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
+        items[index].status = status
     }
 
     /// Segura o laço enquanto o app está em segundo plano.

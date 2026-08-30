@@ -17,12 +17,12 @@ struct AccountRowView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(account.user.name)
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                 Text("@\(account.user.nickname)")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Text(statusLine)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }

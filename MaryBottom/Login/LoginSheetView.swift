@@ -18,7 +18,7 @@ struct LoginSheetView: View {
             .safeAreaInset(edge: .top) {
                 if let feedback {
                     Text(feedback)
-                        .font(.footnote)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)

@@ -361,6 +361,120 @@ struct MegaphoneRunnerTests {
         #expect(sessionExpiredCount == 0)
     }
 
+    @Test("cada item carregado vem com a exposição correspondente, quando a API devolve uma")
+    func itensVemComExposicao() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            exposuresByProductID: [
+                1: MegaphoneExposure(
+                    productID: 1, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.items.first { $0.id == 1 }?.exposure?.kind == .maximumAfterDiscount)
+        #expect(runner.items.first { $0.id == 2 }?.exposure == nil)
+    }
+
+    @Test("pede exposição em lotes do tamanho configurado")
+    func pedeExposicaoEmLotes() async {
+        let ids = Array(1...5)
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: ids, endCursor: nil)])
+        let runner = makeRunner(client: client)
+        runner.exposureBatchSize = 2
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        let batches = await client.requestedExposureBatches
+        #expect(batches.count == 3)
+        #expect(batches.flatMap { $0 } == ids)
+    }
+
+    @Test("aplicar desconto num item ainda não alcançado pelo laço megafona com o preço sugerido")
+    func aplicarDescontoComSucesso() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            exposuresByProductID: [
+                2: MegaphoneExposure(
+                    productID: 2, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+        runner.start(sellerID: 1)
+        runner.pause()
+        await waitUntil { !runner.items.isEmpty }
+
+        runner.applyDiscount(for: 2)
+        await waitUntil { runner.items.first { $0.id == 2 }?.status != .megaphoning }
+
+        #expect(runner.items.first { $0.id == 2 }?.status == .succeeded)
+        #expect(await client.appliedDiscounts[2] == 100)
+
+        runner.cancel()
+        await runner.waitUntilFinished()
+    }
+
+    @Test("token CSRF recusado ao aplicar desconto é renovado e o desconto sai aplicado do mesmo jeito")
+    func aplicarDescontoRenovaTokenRecusado() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            csrfRejectionsRemaining: 1,
+            exposuresByProductID: [
+                2: MegaphoneExposure(
+                    productID: 2, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+        runner.start(sellerID: 1)
+        runner.pause()
+        await waitUntil { !runner.items.isEmpty }
+
+        runner.applyDiscount(for: 2)
+        await waitUntil { runner.items.first { $0.id == 2 }?.status != .megaphoning }
+
+        #expect(runner.items.first { $0.id == 2 }?.status == .succeeded)
+        // "token-1" já saiu antes da pausa valer: `run` busca um token pra fila logo depois de
+        // carregar os itens, antes do laço checar `pauseReason`.
+        #expect(await client.usedTokens == ["token-2", "token-3"])
+
+        runner.cancel()
+        await runner.waitUntilFinished()
+    }
+
+    @Test("laço automático pula um item que está sendo aplicado na mão, sem chamar a rota duas vezes")
+    func lacoPulaItemEmAplicacaoManual() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            exposuresByProductID: [
+                1: MegaphoneExposure(
+                    productID: 1, kind: .maximumAfterDiscount, priceToIncreaseExposure: 50, discountLabel: "- 50%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+        runner.start(sellerID: 1)
+        runner.pause()
+        await waitUntil { !runner.items.isEmpty }
+
+        runner.applyDiscount(for: 1)
+        await waitUntil { runner.items.first { $0.id == 1 }?.status != .megaphoning }
+
+        runner.resume()
+        await runner.waitUntilFinished()
+
+        #expect(runner.items.first { $0.id == 1 }?.status == .succeeded)
+        #expect(await client.appliedDiscounts[1] == 50)
+        #expect(await client.megaphonedIDs.filter { $0 == 1 }.count == 1)
+        #expect(runner.phase == .finished)
+    }
+
     /// Espera uma condição do runner sem prender o teste para sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {

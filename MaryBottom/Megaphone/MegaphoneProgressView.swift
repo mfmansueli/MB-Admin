@@ -18,7 +18,7 @@ struct MegaphoneProgressView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(statusText.headline)
-                .font(.subheadline.weight(.medium))
+                .font(.headline.weight(.medium))
 
             if let progress = statusText.progress {
                 ProgressView(value: progress)
@@ -26,7 +26,7 @@ struct MegaphoneProgressView: View {
 
             if !runner.items.isEmpty {
                 Text(totals)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
         }

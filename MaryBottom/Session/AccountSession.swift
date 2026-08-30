@@ -17,7 +17,6 @@ final class AccountSession: Identifiable {
     let client: EnjoeiClientProtocol
     let runner: MegaphoneRunner
     let keepAlive: MegaphoneKeepAlive
-    let discountCandidatesLoader: DiscountCandidatesLoader
     let webView: WKWebView?
 
     private let sessionClearer: EnjoeiSessionClearing
@@ -38,7 +37,6 @@ final class AccountSession: Identifiable {
         let runner = MegaphoneRunner(client: dependencies.client)
         self.runner = runner
         keepAlive = MegaphoneKeepAlive(runner: runner)
-        discountCandidatesLoader = DiscountCandidatesLoader(client: dependencies.client)
     }
 
     var record: AccountRecord {

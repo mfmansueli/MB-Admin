@@ -5,6 +5,8 @@ nonisolated enum MegaphonePhase: Equatable, Sendable {
     case idle
     /// Buscando a lista de produtos da loja (vem paginada).
     case loadingProducts(loaded: Int, total: Int)
+    /// Conferindo, em lotes, quais produtos já carregados pedem decisão de desconto.
+    case checkingExposure(checked: Int, total: Int)
     case megaphoning(round: Int, of: MegaphoneRounds)
     case paused(round: Int, of: MegaphoneRounds, reason: MegaphonePauseReason)
     case finished
@@ -14,7 +16,7 @@ nonisolated enum MegaphonePhase: Equatable, Sendable {
 
     var isActive: Bool {
         switch self {
-        case .loadingProducts, .megaphoning, .paused: true
+        case .loadingProducts, .checkingExposure, .megaphoning, .paused: true
         case .idle, .finished, .cancelled, .failed: false
         }
     }

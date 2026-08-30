@@ -42,6 +42,8 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
             "pronto para megafonar."
         case .loadingProducts(let loaded, let total):
             total > 0 ? "buscando seus produtos… \(loaded) de \(total)" : "buscando seus produtos…"
+        case .checkingExposure(let checked, let total):
+            "conferindo quais pedem desconto… \(checked) de \(total)"
         case .megaphoning(let round, let rounds):
             "\(roundLabel(round, of: rounds))megafonando \(processedCount + 1) de \(itemsCount)…"
         case .paused(let round, let rounds, let reason):
@@ -60,6 +62,8 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
         switch phase {
         case .loadingProducts(let loaded, let total):
             return total > 0 ? Double(loaded) / Double(total) : nil
+        case .checkingExposure(let checked, let total):
+            return total > 0 ? Double(checked) / Double(total) : nil
         case .megaphoning(let round, let rounds), .paused(let round, let rounds, _):
             guard itemsCount > 0 else { return nil }
             if rounds.isUnlimited {

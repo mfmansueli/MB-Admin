@@ -14,7 +14,7 @@ struct LoggedOutView: View {
                 Text("megafone em série")
                     .font(.largeTitle.bold())
                 Text("entre com sua conta do enjoei para megafonar todos os produtos da sua loja de uma vez.")
-                    .font(.body)
+                    .font(.title3)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             }

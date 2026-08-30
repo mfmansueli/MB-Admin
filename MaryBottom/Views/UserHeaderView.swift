@@ -17,13 +17,13 @@ struct UserHeaderView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(user.name)
-                    .font(.headline)
+                    .font(.title3.weight(.semibold))
                 Text("@\(user.nickname)")
-                    .font(.subheadline)
+                    .font(.headline)
                     .foregroundStyle(.secondary)
                 if let count = user.availableProductsCount {
                     Text("\(count) produtos à venda")
-                        .font(.caption)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             }

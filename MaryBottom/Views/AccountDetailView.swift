@@ -14,14 +14,14 @@ struct AccountDetailView: View {
     /// Intervalo entre um megafone e o próximo, em milissegundos.
     @AppStorage private var storedSpeed: Int
 
-    @State private var selectedTab: Tab = .queue
+    @State private var filter: ProductFilter = .all
 
     private var runner: MegaphoneRunner { account.runner }
     private var keepAlive: MegaphoneKeepAlive { account.keepAlive }
 
-    private enum Tab {
-        case queue
-        case discounts
+    private enum ProductFilter {
+        case all
+        case discountOnly
     }
 
     init(account: AccountSession) {
@@ -51,9 +51,9 @@ struct AccountDetailView: View {
 
             actionButtons
 
-            tabPicker
+            filterPicker
 
-            tabContent
+            productList
         }
         .padding(.horizontal, 20)
         .padding(.top, 16)
@@ -73,6 +73,17 @@ struct AccountDetailView: View {
             @unknown default: break
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    runner.delayBetweenProducts = speed.duration
+                    runner.start(sellerID: account.user.id, rounds: rounds)
+                } label: {
+                    Label("recarregar produtos", systemImage: "arrow.clockwise")
+                }
+                .disabled(runner.isRunning)
+            }
+        }
     }
 
     private var roundsMenu: some View {
@@ -89,7 +100,7 @@ struct AccountDetailView: View {
                 Text(rounds.label)
                     .foregroundStyle(.secondary)
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             .contentShape(.rect)
@@ -112,7 +123,7 @@ struct AccountDetailView: View {
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
                 Image(systemName: "chevron.up.chevron.down")
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
             .contentShape(.rect)
@@ -166,21 +177,23 @@ struct AccountDetailView: View {
         }
     }
 
-    private var tabPicker: some View {
-        Picker("aba", selection: $selectedTab) {
-            Text("megafone").tag(Tab.queue)
-            Text("desconto").tag(Tab.discounts)
+    @ViewBuilder
+    private var filterPicker: some View {
+        if !runner.items.isEmpty {
+            Picker("filtro", selection: $filter) {
+                Text("todos").tag(ProductFilter.all)
+                Text("pede desconto").tag(ProductFilter.discountOnly)
+            }
+            .pickerStyle(.segmented)
         }
-        .pickerStyle(.segmented)
     }
 
-    @ViewBuilder
-    private var tabContent: some View {
-        switch selectedTab {
-        case .queue:
-            productList
-        case .discounts:
-            DiscountCandidatesListView(loader: account.discountCandidatesLoader, sellerID: account.user.id)
+    private var filteredItems: [MegaphoneItem] {
+        switch filter {
+        case .all:
+            runner.items
+        case .discountOnly:
+            runner.items.filter { $0.exposure?.kind.requiresDiscountDecision == true }
         }
     }
 
@@ -193,10 +206,17 @@ struct AccountDetailView: View {
                 description: Text("toque em megafonar para buscar os produtos da sua loja.")
             )
             .frame(maxHeight: .infinity)
+        } else if filteredItems.isEmpty {
+            ContentUnavailableView(
+                "nenhum produto pede desconto agora",
+                systemImage: "checkmark.circle",
+                description: Text("toque em \"todos\" pra ver a fila inteira.")
+            )
+            .frame(maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in
-                List(runner.items) { item in
-                    MegaphoneRowView(item: item)
+                List(filteredItems) { item in
+                    MegaphoneRowView(item: item, runner: runner)
                         .id(item.id)
                 }
                 .listStyle(.plain)

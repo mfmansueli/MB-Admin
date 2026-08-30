@@ -43,6 +43,13 @@ struct MegaphoneStatusTextTests {
         #expect(status.progress == nil)
     }
 
+    @Test("conferindo exposição mostra quantos já foram conferidos")
+    func conferindoExposicao() {
+        let status = statusText(phase: .checkingExposure(checked: 30, total: 80))
+        #expect(status.headline == "conferindo quais pedem desconto… 30 de 80")
+        #expect(status.progress == 0.375)
+    }
+
     @Test("megafonando numa rodada única não menciona rodada")
     func megafonandoRodadaUnica() {
         let status = statusText(
