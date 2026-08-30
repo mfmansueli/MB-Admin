@@ -77,13 +77,24 @@ struct AccountDetailView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     runner.delayBetweenProducts = speed.duration
-                    runner.start(sellerID: account.user.id, rounds: rounds)
+                    runner.reload(sellerID: account.user.id, rounds: rounds)
                 } label: {
                     Label("recarregar produtos", systemImage: "arrow.clockwise")
                 }
                 .disabled(runner.isRunning)
             }
         }
+        // Ao entrar na conta pela primeira vez, já busca os produtos sozinho — sem começar a
+        // megafonar por conta própria (isso continua exigindo o toque explícito no botão).
+        .task {
+            guard runner.items.isEmpty, !runner.isRunning else { return }
+            runner.load(sellerID: account.user.id)
+        }
+    }
+
+    private func startLoading() {
+        runner.delayBetweenProducts = speed.duration
+        runner.start(sellerID: account.user.id, rounds: rounds)
     }
 
     private var roundsMenu: some View {
@@ -93,6 +104,9 @@ struct AccountDetailView: View {
                     Text(option.label).tag(option.rawValue)
                 }
             }
+            // Sem isso, o Menu trata o Picker como um submenu à parte ("repetições" com seta),
+            // exigindo um segundo toque pra ver as opções — .inline mostra tudo de uma vez.
+            .pickerStyle(.inline)
         } label: {
             HStack {
                 Text("repetir a lista")
@@ -115,6 +129,7 @@ struct AccountDetailView: View {
                     Text(option.label).tag(option.milliseconds)
                 }
             }
+            .pickerStyle(.inline)
         } label: {
             HStack {
                 Text("intervalo entre megafones")
@@ -130,9 +145,18 @@ struct AccountDetailView: View {
         }
     }
 
+    /// Só faz sentido pausar/parar quando já está megafonando de verdade — durante a busca (seja
+    /// pelo carregamento automático ou pelo botão), não tem o que pausar ainda.
+    private var isMegaphoning: Bool {
+        switch runner.phase {
+        case .megaphoning, .paused: true
+        case .idle, .loadingProducts, .checkingExposure, .finished, .cancelled, .failed: false
+        }
+    }
+
     @ViewBuilder
     private var actionButtons: some View {
-        if runner.isRunning {
+        if isMegaphoning {
             HStack(spacing: 12) {
                 Button {
                     if runner.isPaused { runner.resume() } else { runner.pause() }
@@ -156,10 +180,11 @@ struct AccountDetailView: View {
                 .controlSize(.large)
                 .tint(.red)
             }
+        } else if runner.isRunning {
+            EmptyView()
         } else {
             Button {
-                runner.delayBetweenProducts = speed.duration
-                runner.start(sellerID: account.user.id, rounds: rounds)
+                startLoading()
             } label: {
                 Label(buttonTitle, systemImage: "megaphone.fill")
                     .frame(maxWidth: .infinity)

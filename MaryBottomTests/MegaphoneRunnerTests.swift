@@ -475,6 +475,112 @@ struct MegaphoneRunnerTests {
         #expect(runner.phase == .finished)
     }
 
+    @Test("load só carrega e confere exposição, sem megafonar nada")
+    func loadSoCarrega() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            exposuresByProductID: [
+                1: MegaphoneExposure(
+                    productID: 1, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.items.map(\.id) == [1, 2])
+        #expect(runner.items.first { $0.id == 1 }?.exposure?.kind == .maximumAfterDiscount)
+        #expect(await client.megaphonedIDs.isEmpty)
+        #expect(runner.phase == .idle)
+        #expect(runner.isRunning == false)
+    }
+
+    @Test("load numa loja vazia deixa a lista vazia, sem erro")
+    func loadLojaVazia() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [], endCursor: nil)])
+        let runner = makeRunner(client: client)
+
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.items.isEmpty)
+        #expect(runner.phase == .idle)
+    }
+
+    @Test("load não faz nada enquanto já está rodando")
+    func loadIgnoradoEnquantoRoda() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
+        let runner = MegaphoneRunner(client: client)
+        runner.delayBetweenProducts = .seconds(30)
+        runner.start(sellerID: 1)
+        await waitUntil { runner.processedCount >= 1 }
+
+        runner.load(sellerID: 1)
+
+        #expect(runner.isRunning)
+        runner.cancel()
+        await runner.waitUntilFinished()
+    }
+
+    @Test("start reaproveita a lista já carregada em vez de buscar a loja de novo")
+    func startReaproveitaListaCarregada() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
+        let runner = makeRunner(client: client)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        #expect(await client.requestedCursors.count == 1)
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.phase == .finished)
+        #expect(await client.megaphonedIDs == [1, 2])
+        #expect(await client.requestedCursors.count == 1)
+    }
+
+    @Test("reload descarta a lista carregada e busca a loja de novo")
+    func reloadBuscaDeNovo() async {
+        let client = StubEnjoeiClient(pages: [
+            EnjoeiFixtures.page(ids: [1], endCursor: nil),
+            EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)
+        ])
+        let runner = makeRunner(client: client)
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+        #expect(runner.items.map(\.id) == [1])
+
+        runner.reload(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.items.map(\.id) == [1, 2])
+        #expect(await client.requestedCursors.count == 2)
+    }
+
+    @Test("start soma aos totais o que a lista carregada já tinha de sucesso")
+    func startSomaSucessosJaAplicados() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            exposuresByProductID: [
+                1: MegaphoneExposure(
+                    productID: 1, kind: .maximumAfterDiscount, priceToIncreaseExposure: 50, discountLabel: "- 50%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        runner.applyDiscount(for: 1)
+        await waitUntil { runner.items.first { $0.id == 1 }?.status != .megaphoning }
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.totalSucceeded == 2)
+        #expect(await client.megaphonedIDs == [1, 2])
+    }
+
     /// Espera uma condição do runner sem prender o teste para sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {

@@ -53,20 +53,63 @@ final class MegaphoneRunner {
     var failedCount: Int { items.filter { $0.status.failureMessage != nil }.count }
     var processedCount: Int { items.filter { $0.status.isFinished }.count }
 
+    /// Começa a megafonar. Reaproveita os produtos já carregados (por `load` ou por uma rodada
+    /// anterior) quando a lista não está vazia — só busca a loja de novo quando não tem nada
+    /// carregado ainda. Use `reload` pra forçar uma busca nova mesmo com lista carregada.
+    ///
     /// - Parameter rounds: quantas vezes a lista inteira será percorrida.
     func start(sellerID: Int, rounds: MegaphoneRounds = .once) {
         guard task == nil else { return }
-        items = []
         currentItemID = nil
         round = 0
         self.rounds = rounds
         pauseReason = nil
-        totalSucceeded = 0
-        totalFailed = 0
-        phase = .loadingProducts(loaded: 0, total: 0)
+        // Reaproveitando a lista, os somatórios partem do que ela já mostra (ex.: desconto
+        // aplicado na mão antes de tocar em megafonar) em vez de zerar e subcontar.
+        totalSucceeded = items.filter { $0.status == .succeeded }.count
+        totalFailed = items.filter { $0.status.failureMessage != nil }.count
+        if items.isEmpty { phase = .loadingProducts(loaded: 0, total: 0) }
         task = Task { [weak self] in
             await self?.run(sellerID: sellerID)
             self?.task = nil
+        }
+    }
+
+    /// Descarta a lista carregada e busca a loja de novo do zero antes de megafonar — pro botão de
+    /// recarregar, quando o usuário quer garantir que está vendo o catálogo atual.
+    func reload(sellerID: Int, rounds: MegaphoneRounds = .once) {
+        guard task == nil else { return }
+        items = []
+        start(sellerID: sellerID, rounds: rounds)
+    }
+
+    /// Só carrega os produtos da loja e confere a exposição — não começa a megafonar. Serve pra
+    /// popular a lista sozinho ao abrir a tela, sem disparar boost nenhum sem o usuário pedir
+    /// (isso continua exigindo o toque em "megafonar", que sempre busca tudo de novo).
+    func load(sellerID: Int) {
+        guard task == nil else { return }
+        task = Task { [weak self] in
+            await self?.loadOnly(sellerID: sellerID)
+            self?.task = nil
+        }
+    }
+
+    private func loadOnly(sellerID: Int) async {
+        phase = .loadingProducts(loaded: 0, total: 0)
+        do {
+            let products = try await loadAllProducts(sellerID: sellerID)
+            guard !products.isEmpty else {
+                phase = .idle
+                return
+            }
+            phase = .checkingExposure(checked: 0, total: products.count)
+            let exposures = try await loadExposures(productIDs: products.map(\.id))
+            items = products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) }
+            phase = .idle
+        } catch {
+            // Falha ou cancelamento na busca automática não vira alarme — o usuário ainda pode
+            // tocar em "megafonar" pra tentar de propósito e ver o erro de verdade.
+            phase = .idle
         }
     }
 
@@ -122,14 +165,16 @@ final class MegaphoneRunner {
 
     private func run(sellerID: Int) async {
         do {
-            let products = try await loadAllProducts(sellerID: sellerID)
-            guard !products.isEmpty else {
-                finish(.finished)
-                return
+            if items.isEmpty {
+                let products = try await loadAllProducts(sellerID: sellerID)
+                guard !products.isEmpty else {
+                    finish(.finished)
+                    return
+                }
+                phase = .checkingExposure(checked: 0, total: products.count)
+                let exposures = try await loadExposures(productIDs: products.map(\.id))
+                items = products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) }
             }
-            phase = .checkingExposure(checked: 0, total: products.count)
-            let exposures = try await loadExposures(productIDs: products.map(\.id))
-            items = products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) }
 
             var token = try await client.csrfToken()
             var currentRound = 1
