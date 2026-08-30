@@ -14,6 +14,7 @@ struct AccountDetailView: View {
     @AppStorage private var storedSpeed: Int
 
     @State private var filter: ProductFilter = .all
+    @State private var searchText = ""
 
     private var runner: MegaphoneRunner { account.runner }
     private var keepAlive: MegaphoneKeepAlive { account.keepAlive }
@@ -33,28 +34,37 @@ struct AccountDetailView: View {
     private var speed: MegaphoneSpeed { MegaphoneSpeed(milliseconds: storedSpeed) }
 
     var body: some View {
-        VStack(spacing: 16) {
-            UserHeaderView(user: account.user) {
-                runner.cancel()
-                Task {
-                    await accountsStore.logout(accountID: account.id)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 16) {
+                    UserHeaderView(user: account.user)
+
+                    HStack(spacing: 16) {
+                        roundsMenu
+                            .frame(maxWidth: .infinity)
+                        speedMenu
+                            .frame(maxWidth: .infinity)
+                    }
+
+                    MegaphoneProgressView(runner: runner)
+
+                    actionButtons
+
+                    HStack(spacing: 12) {
+                        searchField
+                        filterPicker
+                    }
+
+                    productList
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 16)
             }
-
-            roundsMenu
-
-            speedMenu
-
-            MegaphoneProgressView(runner: runner)
-
-            actionButtons
-
-            filterPicker
-
-            productList
+            .onChange(of: runner.currentItemID) { _, newValue in
+                guard let newValue else { return }
+                withAnimation { proxy.scrollTo(newValue, anchor: .center) }
+            }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
         // Enquanto roda, o app segura a tela acesa e um áudio silencioso para não ser congelado
         // ao você trocar de app.
         .onChange(of: runner.isRunning) { _, isRunning in
@@ -80,6 +90,16 @@ struct AccountDetailView: View {
                     Label("recarregar produtos", systemImage: "arrow.clockwise")
                 }
                 .disabled(runner.isRunning)
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button(role: .destructive) {
+                    runner.cancel()
+                    Task {
+                        await accountsStore.logout(accountID: account.id)
+                    }
+                } label: {
+                    Label("sair", systemImage: "rectangle.portrait.and.arrow.right")
+                }
             }
         }
         // Ao entrar na conta pela primeira vez, já busca os produtos sozinho — sem começar a
@@ -107,8 +127,6 @@ struct AccountDetailView: View {
             .pickerStyle(.inline)
         } label: {
             HStack {
-                Text("repetir a lista")
-                Spacer()
                 Text(rounds.label)
                     .foregroundStyle(.secondary)
                 Image(systemName: "chevron.up.chevron.down")
@@ -130,8 +148,6 @@ struct AccountDetailView: View {
             .pickerStyle(.inline)
         } label: {
             HStack {
-                Text("intervalo entre megafones")
-                Spacer()
                 Text(speed.label)
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -201,6 +217,31 @@ struct AccountDetailView: View {
     }
 
     @ViewBuilder
+    private var searchField: some View {
+        if !runner.items.isEmpty {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("buscar por nome", text: $searchText)
+                    .textFieldStyle(.plain)
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.quaternary, in: .rect(cornerRadius: 10))
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    @ViewBuilder
     private var filterPicker: some View {
         if !runner.items.isEmpty {
             Menu {
@@ -211,8 +252,6 @@ struct AccountDetailView: View {
                 .pickerStyle(.inline)
             } label: {
                 HStack {
-                    Text("mostrar")
-                    Spacer()
                     Text(filterLabel)
                         .foregroundStyle(.secondary)
                     Image(systemName: "chevron.up.chevron.down")
@@ -232,16 +271,20 @@ struct AccountDetailView: View {
     }
 
     private var filteredItems: [MegaphoneItem] {
+        let items: [MegaphoneItem]
         switch filter {
         case .all:
-            runner.items
+            items = runner.items
         case .discountOnly:
             // Crescente pelo desconto que o megafone está sugerindo (o valor em laranja na row) —
             // quem precisa de um corte menor pra alcançar exposição máxima aparece primeiro.
-            runner.items
+            items = runner.items
                 .filter { $0.exposure?.kind.requiresDiscountDecision == true }
                 .sorted { ($0.computedDiscountPercent ?? 0) < ($1.computedDiscountPercent ?? 0) }
         }
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedSearch.isEmpty else { return items }
+        return items.filter { $0.product.title.localizedCaseInsensitiveContains(trimmedSearch) }
     }
 
     @ViewBuilder
@@ -252,24 +295,27 @@ struct AccountDetailView: View {
                 systemImage: "shippingbox",
                 description: Text("toque em megafonar para buscar os produtos da sua loja.")
             )
-            .frame(maxHeight: .infinity)
+            .padding(.top, 40)
         } else if filteredItems.isEmpty {
-            ContentUnavailableView(
-                "nenhum produto pede desconto agora",
-                systemImage: "checkmark.circle",
-                description: Text("toque em \"todos\" pra ver a fila inteira.")
-            )
-            .frame(maxHeight: .infinity)
+            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                ContentUnavailableView.search(text: searchText)
+                    .padding(.top, 40)
+            } else {
+                ContentUnavailableView(
+                    "nenhum produto pede desconto agora",
+                    systemImage: "checkmark.circle",
+                    description: Text("toque em \"todos\" pra ver a fila inteira.")
+                )
+                .padding(.top, 40)
+            }
         } else {
-            ScrollViewReader { proxy in
-                List(filteredItems) { item in
+            LazyVStack(spacing: 0) {
+                ForEach(filteredItems) { item in
                     MegaphoneRowView(item: item, runner: runner)
                         .id(item.id)
-                }
-                .listStyle(.plain)
-                .onChange(of: runner.currentItemID) { _, newValue in
-                    guard let newValue else { return }
-                    withAnimation { proxy.scrollTo(newValue, anchor: .center) }
+                    if item.id != filteredItems.last?.id {
+                        Divider()
+                    }
                 }
             }
         }

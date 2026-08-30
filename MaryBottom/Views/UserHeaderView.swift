@@ -3,7 +3,6 @@ import SwiftUI
 /// Cabeçalho com a identificação de quem está logado.
 struct UserHeaderView: View {
     let user: EnjoeiUser
-    let onLogout: () -> Void
 
     var body: some View {
         HStack(spacing: 12) {
@@ -29,10 +28,6 @@ struct UserHeaderView: View {
             }
 
             Spacer()
-
-            Button("sair", role: .destructive, action: onLogout)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
         }
     }
 }
@@ -45,8 +40,7 @@ struct UserHeaderView: View {
             name: "antonia",
             avatarPublicID: nil,
             availableProductsCount: 1496
-        ),
-        onLogout: {}
+        )
     )
     .padding()
 }
