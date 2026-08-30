@@ -57,4 +57,46 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
         let payload = try JSONDecoder().decode(MegaphoneExposuresPayload.self, from: Data(response.body.utf8))
         return payload.products
     }
+
+    func productTemplate(productID: Int) async throws -> ProductTemplate {
+        let result = try await webSession.run(
+            EnjoeiJavaScript.productTemplate,
+            arguments: ["productID": productID]
+        )
+        let response = MegaphoneWebResponse(javaScriptResult: result)
+        if let error = response.failure { throw error }
+        return try JSONDecoder().decode(ProductTemplate.self, from: Data(response.body.utf8))
+    }
+
+    func createProduct(_ request: ProductCreateRequest, csrfToken: String) async throws -> ProductCreateResponse {
+        let bodyData = try JSONEncoder().encode(request)
+        guard let bodyString = String(data: bodyData, encoding: .utf8) else {
+            throw EnjoeiError.unexpectedResponse
+        }
+        let result = try await webSession.run(
+            EnjoeiJavaScript.createProduct,
+            arguments: ["requestBody": bodyString, "token": csrfToken]
+        )
+        let response = MegaphoneWebResponse(javaScriptResult: result)
+        if let error = response.failure { throw error }
+        // Formato da resposta não documentado no spec (só diz "logue a resposta pra extrair o
+        // ID/URL do novo anúncio") — logar aqui é o jeito de confirmar o formato real na primeira
+        // vez que um repost rodar de verdade, caso `ProductCreateResponse` ainda não ache o link.
+        #if DEBUG
+        print("[repost] resposta de POST /api/products/v2: \(response.body)")
+        #endif
+        // Sem conseguir decodificar nenhum formato conhecido, `path` fica nil — quem mostra o
+        // resultado não deve fingir que tem link nenhum nesse caso.
+        return (try? JSONDecoder().decode(ProductCreateResponse.self, from: Data(response.body.utf8)))
+            ?? ProductCreateResponse(path: nil)
+    }
+
+    func deleteProduct(productID: Int, csrfToken: String) async throws {
+        let result = try await webSession.run(
+            EnjoeiJavaScript.deleteProduct,
+            arguments: ["productID": productID, "token": csrfToken]
+        )
+        let response = MegaphoneWebResponse(javaScriptResult: result)
+        if let error = response.failure { throw error }
+    }
 }

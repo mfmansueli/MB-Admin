@@ -94,4 +94,51 @@ nonisolated enum EnjoeiJavaScript {
     });
     return { status: response.status, body: await response.text() };
     """
+
+    /// Lê o "template" de um produto — a mesma rota que o botão "duplicar" do site usa pra
+    /// pré-preencher o formulário, com todos os campos e as fotos já com `image_public_id`.
+    static let productTemplate = """
+    const response = await fetch(`/api/similars/products/${productID}/template`, {
+        credentials: "include",
+        headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
+    });
+    return { status: response.status, body: await response.text() };
+    """
+
+    /// Cria um anúncio novo a partir de um corpo já montado (ver `ProductCreateRequest`) — usado
+    /// pelo repost, depois de ler o template do produto original.
+    static let createProduct = """
+    const headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+    };
+    if (token) { headers["X-CSRF-Token"] = token; }
+
+    const response = await fetch("/api/products/v2", {
+        method: "POST",
+        credentials: "include",
+        headers: headers,
+        body: requestBody
+    });
+    return { status: response.status, body: await response.text() };
+    """
+
+    /// Apaga um produto de vez — ação destrutiva e provavelmente irreversível, sem corpo no
+    /// pedido; o id vai na própria URL.
+    static let deleteProduct = """
+    const headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+    };
+    if (token) { headers["X-CSRF-Token"] = token; }
+
+    const response = await fetch(`/produto/${productID}.json`, {
+        method: "DELETE",
+        credentials: "include",
+        headers: headers
+    });
+    return { status: response.status, body: await response.text() };
+    """
 }

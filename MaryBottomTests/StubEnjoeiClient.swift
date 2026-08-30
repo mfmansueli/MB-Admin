@@ -14,6 +14,16 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     var exposuresByProductID: [Int: MegaphoneExposure]
     /// Erro a lançar em qualquer chamada de `megaphoneExposures`.
     var exposuresError: EnjoeiError?
+    /// Template combinado por produto, devolvido por `productTemplate`.
+    var templatesByProductID: [Int: ProductTemplate]
+    /// Erro a lançar em qualquer chamada de `productTemplate`.
+    var templateError: EnjoeiError?
+    /// Erro a lançar em qualquer chamada de `createProduct`.
+    var createProductError: EnjoeiError?
+    /// Resposta combinada de `createProduct`, quando a chamada tem sucesso.
+    var createProductResponse: ProductCreateResponse
+    /// Erro a lançar em qualquer chamada de `deleteProduct`.
+    var deleteProductError: EnjoeiError?
 
     private(set) var megaphonedIDs: [Int] = []
     private(set) var requestedCursors: [String?] = []
@@ -23,6 +33,12 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     private(set) var appliedDiscounts: [Int: Double] = [:]
     /// Um item por chamada a `megaphoneExposures`, com os ids pedidos naquele lote.
     private(set) var requestedExposureBatches: [[Int]] = []
+    /// Um item por chamada a `productTemplate`, com o id pedido.
+    private(set) var requestedTemplateIDs: [Int] = []
+    /// Um item por chamada a `createProduct`, com o corpo e o token usados.
+    private(set) var createProductCalls: [(request: ProductCreateRequest, token: String)] = []
+    /// Um item por chamada a `deleteProduct`, com o id e o token usados.
+    private(set) var deleteProductCalls: [(productID: Int, token: String)] = []
 
     init(
         user: EnjoeiUser = .stub,
@@ -31,7 +47,12 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         failuresByProductID: [Int: EnjoeiError] = [:],
         csrfRejectionsRemaining: Int = 0,
         exposuresByProductID: [Int: MegaphoneExposure] = [:],
-        exposuresError: EnjoeiError? = nil
+        exposuresError: EnjoeiError? = nil,
+        templatesByProductID: [Int: ProductTemplate] = [:],
+        templateError: EnjoeiError? = nil,
+        createProductError: EnjoeiError? = nil,
+        createProductResponse: ProductCreateResponse = ProductCreateResponse(path: nil),
+        deleteProductError: EnjoeiError? = nil
     ) {
         self.user = user
         self.currentUserError = currentUserError
@@ -40,6 +61,11 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         self.csrfRejectionsRemaining = csrfRejectionsRemaining
         self.exposuresByProductID = exposuresByProductID
         self.exposuresError = exposuresError
+        self.templatesByProductID = templatesByProductID
+        self.templateError = templateError
+        self.createProductError = createProductError
+        self.createProductResponse = createProductResponse
+        self.deleteProductError = deleteProductError
     }
 
     private(set) var reloadingPageCalls: [Bool] = []
@@ -78,5 +104,31 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         requestedExposureBatches.append(productIDs)
         if let exposuresError { throw exposuresError }
         return productIDs.compactMap { exposuresByProductID[$0] }
+    }
+
+    func productTemplate(productID: Int) async throws -> ProductTemplate {
+        requestedTemplateIDs.append(productID)
+        if let templateError { throw templateError }
+        guard let template = templatesByProductID[productID] else { throw EnjoeiError.unexpectedResponse }
+        return template
+    }
+
+    func createProduct(_ request: ProductCreateRequest, csrfToken: String) async throws -> ProductCreateResponse {
+        createProductCalls.append((request, csrfToken))
+        if csrfRejectionsRemaining > 0 {
+            csrfRejectionsRemaining -= 1
+            throw EnjoeiError.invalidCSRFToken
+        }
+        if let createProductError { throw createProductError }
+        return createProductResponse
+    }
+
+    func deleteProduct(productID: Int, csrfToken: String) async throws {
+        deleteProductCalls.append((productID, csrfToken))
+        if csrfRejectionsRemaining > 0 {
+            csrfRejectionsRemaining -= 1
+            throw EnjoeiError.invalidCSRFToken
+        }
+        if let deleteProductError { throw deleteProductError }
     }
 }

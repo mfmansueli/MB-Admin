@@ -8,6 +8,14 @@ struct MegaphoneRowView: View {
     let runner: MegaphoneRunner
 
     @State private var isConfirmingApply = false
+    @State private var isConfirmingRepost = false
+    @State private var isShowingRepostStatus = false
+    @State private var isConfirmingDelete = false
+    @State private var isShowingDeleteStatus = false
+
+    private var repostStatus: MegaphoneStatus { runner.repostStatuses[item.id] ?? .pending }
+    private var deleteStatus: MegaphoneStatus { runner.deleteStatuses[item.id] ?? .pending }
+    private var isDeleted: Bool { deleteStatus == .succeeded }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -17,7 +25,11 @@ struct MegaphoneRowView: View {
                 Text(item.product.title)
                     .font(.headline)
                     .lineLimit(2)
-                if let message = item.status.failureMessage {
+                if isDeleted {
+                    Text("produto apagado")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                } else if let message = item.status.failureMessage {
                     Text(message)
                         .font(.subheadline)
                         .foregroundStyle(.red)
@@ -46,6 +58,43 @@ struct MegaphoneRowView: View {
                 Text("o preço vai de \(current) para \(suggested), e o produto é megafonado na hora.")
             }
         }
+        .confirmationDialog(
+            "repostar este produto?",
+            isPresented: $isConfirmingRepost,
+            titleVisibility: .visible
+        ) {
+            Button("repostar") {
+                isShowingRepostStatus = true
+                runner.repost(productID: item.id)
+            }
+            Button("cancelar", role: .cancel) {}
+        } message: {
+            Text("cria um anúncio novo idêntico a este, reaproveitando título, descrição, preço e fotos.")
+        }
+        .sheet(isPresented: $isShowingRepostStatus) {
+            RepostStatusSheet(
+                status: repostStatus,
+                productURL: runner.repostedProductURLs[item.id],
+                onDismiss: { isShowingRepostStatus = false }
+            )
+        }
+        .confirmationDialog(
+            "apagar este produto?",
+            isPresented: $isConfirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("apagar", role: .destructive) {
+                isShowingDeleteStatus = true
+                runner.deleteProduct(productID: item.id)
+            }
+            Button("cancelar", role: .cancel) {}
+        } message: {
+            Text("ação irreversível: o anúncio é apagado do enjoei de vez, sem chance de recuperar.")
+        }
+        .sheet(isPresented: $isShowingDeleteStatus) {
+            DeleteStatusSheet(status: deleteStatus, onDismiss: { isShowingDeleteStatus = false })
+        }
+        .opacity(isDeleted ? 0.4 : 1)
     }
 
     /// Preço já riscado quando a loja mostra o produto com desconto — independente de qualquer
@@ -79,7 +128,10 @@ struct MegaphoneRowView: View {
 
     @ViewBuilder
     private var trailingView: some View {
-        if item.status == .pending, let exposure = item.exposure, exposure.kind.requiresDiscountDecision {
+        if isDeleted {
+            Image(systemName: "trash.fill")
+                .foregroundStyle(.red)
+        } else if item.status == .pending, let exposure = item.exposure, exposure.kind.requiresDiscountDecision {
             Button {
                 isConfirmingApply = true
             } label: {
@@ -95,13 +147,60 @@ struct MegaphoneRowView: View {
 
     private var moreMenu: some View {
         Menu {
-            ShareLink(item: item.product.storePageURL) {
-                Label("compartilhar", systemImage: "square.and.arrow.up")
+            if isDeleted {
+                ShareLink(item: item.product.storePageURL) {
+                    Label("compartilhar", systemImage: "square.and.arrow.up")
+                }
+            } else {
+                ShareLink(item: item.product.storePageURL) {
+                    Label("compartilhar", systemImage: "square.and.arrow.up")
+                }
+                if let whatsAppShareURL {
+                    Link(destination: whatsAppShareURL) {
+                        Label("compartilhar no whatsapp", systemImage: "message")
+                    }
+                }
+                Button {
+                    isConfirmingRepost = true
+                } label: {
+                    if repostStatus == .megaphoning {
+                        Label("repostando…", systemImage: "arrow.triangle.2.circlepath")
+                    } else {
+                        Label("repostar produto", systemImage: "doc.on.doc")
+                    }
+                }
+                .disabled(repostStatus == .megaphoning)
+
+                Button(role: .destructive) {
+                    isConfirmingDelete = true
+                } label: {
+                    if deleteStatus == .megaphoning {
+                        Label("apagando…", systemImage: "trash")
+                    } else {
+                        Label("apagar produto", systemImage: "trash")
+                    }
+                }
+                .disabled(deleteStatus == .megaphoning)
             }
         } label: {
-            Image(systemName: "ellipsis.circle")
-                .foregroundStyle(.secondary)
+            // O menu fecha assim que o usuário confirma — sem isso, o "repostando…"/"apagando…" lá
+            // dentro some da vista e a row fica sem nenhum sinal de que a operação ainda está rolando.
+            if repostStatus == .megaphoning || deleteStatus == .megaphoning {
+                ProgressView()
+            } else {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    /// Abre o WhatsApp direto na tela de encaminhar, já com o link preenchido. Sem checar se o
+    /// WhatsApp está instalado — sem isso registrado no Info.plist, `canOpenURL` sempre devolve
+    /// falso; sem o app instalado, o toque simplesmente não faz nada.
+    private var whatsAppShareURL: URL? {
+        let text = "\(item.product.title)\n\(item.product.storePageURL.absoluteString)"
+        guard let encoded = text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else { return nil }
+        return URL(string: "whatsapp://send?text=\(encoded)")
     }
 
     @ViewBuilder

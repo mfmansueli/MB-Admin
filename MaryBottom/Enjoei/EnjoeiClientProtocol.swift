@@ -17,4 +17,10 @@ nonisolated protocol EnjoeiClientProtocol: Sendable {
     func megaphone(productID: Int, csrfToken: String, newPrice: Double?) async throws
     /// Como cada produto se encaixa no megafone: se pede desconto pra alcançar exposição máxima.
     func megaphoneExposures(productIDs: [Int]) async throws -> [MegaphoneExposure]
+    /// Lê todos os campos de um produto já publicado, pra repostar (duplicar) o anúncio.
+    func productTemplate(productID: Int) async throws -> ProductTemplate
+    /// Cria um anúncio novo a partir do corpo já montado (ver `ProductCreateRequest`).
+    func createProduct(_ request: ProductCreateRequest, csrfToken: String) async throws -> ProductCreateResponse
+    /// Apaga um produto de vez. Ação destrutiva e provavelmente irreversível.
+    func deleteProduct(productID: Int, csrfToken: String) async throws
 }

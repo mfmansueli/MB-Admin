@@ -18,6 +18,16 @@ final class MegaphoneRunner {
     /// Somatórios de todas as rodadas (os status em `items` valem só para a rodada atual).
     private(set) var totalSucceeded = 0
     private(set) var totalFailed = 0
+    /// Andamento de repostar cada produto, por id — separado de `items[].status` de propósito:
+    /// repostar não é megafonar, e reaproveitar o mesmo campo faria o laço automático pular um
+    /// produto só porque ele está sendo repostado (ou vice-versa).
+    private(set) var repostStatuses: [Int: MegaphoneStatus] = [:]
+    /// Link do anúncio novo criado por `repost`, quando a resposta trouxer um `path` reconhecível.
+    /// Sem entrada aqui, quem mostra o resultado não tem link nenhum pra oferecer.
+    private(set) var repostedProductURLs: [Int: URL] = [:]
+    /// Andamento de apagar cada produto, por id — mesmo raciocínio de `repostStatuses`: apagar não
+    /// é megafonar, e não pode reaproveitar `items[].status`.
+    private(set) var deleteStatuses: [Int: MegaphoneStatus] = [:]
 
     /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei.
     var delayBetweenProducts: Duration = .milliseconds(900)
@@ -247,9 +257,14 @@ final class MegaphoneRunner {
         var token = token
 
         for index in items.indices {
-            if items[index].status == .succeeded || items[index].status == .megaphoning { continue }
+            // A pausa vem antes das checagens de pular: uma decisão tomada enquanto o laço estava
+            // parado nesse mesmo item (aplicar desconto manualmente, repostar, apagar) só é vista
+            // se a gente reavaliar o item depois de acordar — checar antes de esperar deixaria a
+            // decisão passar batido quando ela chega durante a pausa.
             await waitWhilePaused()
             try Task.checkCancellation()
+            if items[index].status == .succeeded || items[index].status == .megaphoning { continue }
+            if deleteStatuses[items[index].id] == .succeeded { continue }
             items[index].status = .megaphoning
             currentItemID = items[index].id
 
@@ -294,6 +309,7 @@ final class MegaphoneRunner {
     /// `megaphoneAll` quando o laço chegar nele.
     func applyDiscount(for productID: Int) {
         guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
+        guard deleteStatuses[productID] != .succeeded else { return }
         // Pendente ou falhou antes (retry): tudo bem. Já rodando ou já feito: um segundo toque não
         // dispara outra chamada.
         guard items[index].status != .megaphoning, items[index].status != .succeeded else { return }
@@ -321,6 +337,75 @@ final class MegaphoneRunner {
     private func setStatus(_ status: MegaphoneStatus, for productID: Int) {
         guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
         items[index].status = status
+    }
+
+    /// Reposta (duplica) um produto: lê todos os campos do anúncio original — incluindo as fotos,
+    /// reaproveitadas sem reenviar — e cria um anúncio novo idêntico.
+    func repost(productID: Int) {
+        guard repostStatuses[productID] != .megaphoning, deleteStatuses[productID] != .succeeded else { return }
+        repostStatuses[productID] = .megaphoning
+        Task { [weak self] in
+            await self?.performRepost(productID: productID)
+        }
+    }
+
+    private func performRepost(productID: Int) async {
+        do {
+            let template = try await client.productTemplate(productID: productID)
+            let token = try await client.csrfToken()
+            let response = try await createProduct(ProductCreateRequest(template: template), token: token)
+            // O spec não documenta o formato da resposta — sem `path`, fica sem link nenhum pro
+            // anúncio novo (não é seguro supor que o produto original é o resultado do repost).
+            if let path = response.path {
+                repostedProductURLs[productID] = EnjoeiAPI.productURL(path: path)
+            }
+            repostStatuses[productID] = .succeeded
+        } catch {
+            repostStatuses[productID] = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Cria o anúncio, renovando o token CSRF e tentando de novo quando o servidor recusa o token —
+    /// mesmo laço do `megaphone`.
+    private func createProduct(_ request: ProductCreateRequest, token: String) async throws -> ProductCreateResponse {
+        do {
+            return try await client.createProduct(request, csrfToken: token)
+        } catch let error as EnjoeiError where error.isCSRFRejection {
+            let refreshed = try await client.csrfToken()
+            return try await client.createProduct(request, csrfToken: refreshed)
+        }
+    }
+
+    /// Apaga um produto de vez. Ação destrutiva e provavelmente irreversível — a confirmação fica
+    /// por conta de quem chama (a tela). O item continua na lista, só marcado como excluído: tirar
+    /// ele de `items` na hora derrubaria a linha (e o que estiver mostrando o resultado) da tela.
+    func deleteProduct(productID: Int) {
+        guard deleteStatuses[productID] != .megaphoning, deleteStatuses[productID] != .succeeded else { return }
+        deleteStatuses[productID] = .megaphoning
+        Task { [weak self] in
+            await self?.performDelete(productID: productID)
+        }
+    }
+
+    private func performDelete(productID: Int) async {
+        do {
+            let token = try await client.csrfToken()
+            try await deleteProduct(productID: productID, token: token)
+            deleteStatuses[productID] = .succeeded
+        } catch {
+            deleteStatuses[productID] = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Apaga o produto, renovando o token CSRF e tentando de novo quando o servidor recusa o token
+    /// — mesmo laço do `megaphone`.
+    private func deleteProduct(productID: Int, token: String) async throws {
+        do {
+            try await client.deleteProduct(productID: productID, csrfToken: token)
+        } catch let error as EnjoeiError where error.isCSRFRejection {
+            let refreshed = try await client.csrfToken()
+            try await client.deleteProduct(productID: productID, csrfToken: refreshed)
+        }
     }
 
     /// Segura o laço enquanto o app está em segundo plano.
