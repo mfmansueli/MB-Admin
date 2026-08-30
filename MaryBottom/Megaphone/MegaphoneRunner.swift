@@ -21,8 +21,6 @@ final class MegaphoneRunner {
 
     /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei.
     var delayBetweenProducts: Duration = .milliseconds(900)
-    /// Depois desta quantidade de falhas seguidas paramos: sinal de bloqueio ou cota estourada.
-    var maxConsecutiveFailures = 5
     /// Quantos ids pedir por chamada ao endpoint de exposição — o Enjoei aceita vários de uma vez,
     /// mas evitamos mandar a loja inteira numa URL só.
     var exposureBatchSize = 80
@@ -37,11 +35,6 @@ final class MegaphoneRunner {
     private let client: EnjoeiClientProtocol
     private var task: Task<Void, Never>?
     private var pauseGate: CheckedContinuation<Void, Never>?
-
-    /// Interrupção decidida pelo próprio runner, para o `run` saber que a rodada não terminou bem.
-    private enum Stop: Error {
-        case tooManyFailures(String)
-    }
 
     init(client: EnjoeiClientProtocol) {
         self.client = client
@@ -189,9 +182,6 @@ final class MegaphoneRunner {
         } catch is CancellationError {
             stopInFlight()
             finish(.cancelled)
-        } catch Stop.tooManyFailures(let message) {
-            stopInFlight()
-            finish(.failed(message))
         } catch {
             stopInFlight()
             if case EnjoeiError.notAuthenticated = error {
@@ -251,10 +241,10 @@ final class MegaphoneRunner {
     /// Megafona a fila inteira uma vez. Devolve o token em uso ao final — ele pode ter sido
     /// renovado no caminho. Pula produtos já concluídos ou em andamento por fora — um desconto
     /// aplicado na mão (`applyDiscount`) enquanto a rodada corria não pode ser megafonado de novo
-    /// por cima, ou os dois chamariam a rota ao mesmo tempo pro mesmo produto.
+    /// por cima, ou os dois chamariam a rota ao mesmo tempo pro mesmo produto. Erro num produto não
+    /// para os demais — só sessão caída (`notAuthenticated`) interrompe a rodada de verdade.
     private func megaphoneAll(token: String) async throws -> String {
         var token = token
-        var consecutiveFailures = 0
 
         for index in items.indices {
             if items[index].status == .succeeded || items[index].status == .megaphoning { continue }
@@ -267,7 +257,6 @@ final class MegaphoneRunner {
                 token = try await megaphone(productID: items[index].id, newPrice: nil, token: token)
                 items[index].status = .succeeded
                 totalSucceeded += 1
-                consecutiveFailures = 0
             } catch EnjoeiError.notAuthenticated {
                 items[index].status = .failed(EnjoeiError.notAuthenticated.localizedDescription)
                 totalFailed += 1
@@ -275,12 +264,6 @@ final class MegaphoneRunner {
             } catch {
                 items[index].status = .failed(error.localizedDescription)
                 totalFailed += 1
-                consecutiveFailures += 1
-                if consecutiveFailures >= maxConsecutiveFailures {
-                    throw Stop.tooManyFailures(
-                        "parei depois de \(consecutiveFailures) erros seguidos: \(error.localizedDescription)"
-                    )
-                }
             }
 
             // A pausa é entre um produto e o próximo; no fim da rodada não faz sentido esperar.

@@ -79,28 +79,24 @@ struct MegaphoneRunnerTests {
         #expect(runner.items[2].status == .pending)
     }
 
-    @Test("para depois de muitas falhas seguidas")
-    func paraDepoisDeFalhasSeguidas() async {
+    @Test("muitas falhas seguidas não param a rodada — segue pros próximos produtos")
+    func naoParaDepoisDeFalhasSeguidas() async {
         let ids = Array(1...6)
         let client = StubEnjoeiClient(
             pages: [EnjoeiFixtures.page(ids: ids, endCursor: nil)],
             failuresByProductID: Dictionary(
-                uniqueKeysWithValues: ids.map { ($0, EnjoeiError.http(status: 400, message: "não rolou")) }
+                uniqueKeysWithValues: ids.dropLast().map { ($0, EnjoeiError.http(status: 400, message: "não rolou")) }
             )
         )
         let runner = makeRunner(client: client)
-        runner.maxConsecutiveFailures = 3
 
         runner.start(sellerID: 1)
         await runner.waitUntilFinished()
 
-        #expect(runner.failedCount == 3)
-        #expect(runner.items[3].status == .pending)
-        if case .failed(let message) = runner.phase {
-            #expect(message.contains("3 erros seguidos"))
-        } else {
-            Issue.record("esperava a rodada ter parado sozinha, phase = \(runner.phase)")
-        }
+        #expect(runner.phase == .finished)
+        #expect(runner.failedCount == 5)
+        #expect(runner.succeededCount == 1)
+        #expect(runner.items.allSatisfy { $0.status.isFinished })
     }
 
     @Test("token CSRF recusado é renovado e o produto segue megafonado")

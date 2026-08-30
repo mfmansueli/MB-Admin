@@ -5,7 +5,6 @@ struct AccountDetailView: View {
     let account: AccountSession
 
     @Environment(AccountsStore.self) private var accountsStore
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
     /// Quantas vezes repetir a lista. Fica guardado entre execuções do app (0 = infinito). Por
     /// conta: com contas rodando em paralelo, uma preferência global faria trocar a velocidade de
@@ -39,7 +38,6 @@ struct AccountDetailView: View {
                 runner.cancel()
                 Task {
                     await accountsStore.logout(accountID: account.id)
-                    dismiss()
                 }
             }
 
@@ -238,7 +236,11 @@ struct AccountDetailView: View {
         case .all:
             runner.items
         case .discountOnly:
-            runner.items.filter { $0.exposure?.kind.requiresDiscountDecision == true }
+            // Crescente pelo desconto que o megafone está sugerindo (o valor em laranja na row) —
+            // quem precisa de um corte menor pra alcançar exposição máxima aparece primeiro.
+            runner.items
+                .filter { $0.exposure?.kind.requiresDiscountDecision == true }
+                .sorted { ($0.computedDiscountPercent ?? 0) < ($1.computedDiscountPercent ?? 0) }
         }
     }
 

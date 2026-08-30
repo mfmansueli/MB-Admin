@@ -35,6 +35,8 @@ struct EnjoeiAPITests {
             == "https://www.enjoei.com.br/api/v3/users/antonia-40d0aa.json")
         #expect(EnjoeiAPI.megaphonesURL.absoluteString == "https://www.enjoei.com.br/api/megaphones")
         #expect(EnjoeiAPI.loginURL.absoluteString == "https://www.enjoei.com.br/usuario/identifique-se")
+        #expect(EnjoeiAPI.productURL(path: "brinco-argola-estrela-145657034").absoluteString
+            == "https://www.enjoei.com.br/p/brinco-argola-estrela-145657034")
     }
 
 }

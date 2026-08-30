@@ -30,6 +30,8 @@ struct MegaphoneRowView: View {
             Spacer(minLength: 8)
 
             trailingView
+
+            moreMenu
         }
         .padding(.vertical, 2)
         .confirmationDialog(
@@ -88,6 +90,17 @@ struct MegaphoneRowView: View {
             .tint(.orange)
         } else {
             statusIcon
+        }
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            ShareLink(item: item.product.storePageURL) {
+                Label("compartilhar", systemImage: "square.and.arrow.up")
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .foregroundStyle(.secondary)
         }
     }
 

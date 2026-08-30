@@ -29,4 +29,9 @@ nonisolated struct EnjoeiProduct: Identifiable, Equatable, Sendable {
         guard let originalPrice else { return nil }
         return originalPrice.formatted(.currency(code: "BRL").presentation(.narrow))
     }
+
+    /// Link do produto no site do Enjoei, pra compartilhar.
+    var storePageURL: URL {
+        EnjoeiAPI.productURL(path: path)
+    }
 }
