@@ -8,6 +8,8 @@ struct InactiveProductsListView: View {
 
     @State private var isSelecting = false
     @State private var selectedIDs: Set<Int> = []
+    @State private var searchText = ""
+    @FocusState private var isSearchFocused: Bool
     @Environment(AccountsStore.self) private var accountsStore
 
     private var loader: InactiveProductsLoader { account.inactiveProductsLoader }
@@ -20,6 +22,7 @@ struct InactiveProductsListView: View {
             // ficava presa num spinner pra sempre nesse cenário (o `.task` abaixo, corretamente,
             // não chama `load()` de novo só porque já tem itens).
             case .idle where !loader.items.isEmpty:
+                searchField
                 selectionBar
                 list
             case .idle:
@@ -41,6 +44,7 @@ struct InactiveProductsListView: View {
                     )
                     .frame(maxHeight: .infinity)
                 } else {
+                    searchField
                     selectionBar
                     list
                 }
@@ -64,6 +68,37 @@ struct InactiveProductsListView: View {
         }
     }
 
+    private var searchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("buscar por título", text: $searchText)
+                .textFieldStyle(.plain)
+                .focused($isSearchFocused)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(.quaternary, in: .rect(cornerRadius: 10))
+        .padding(.horizontal, 20)
+        .contentShape(.rect)
+        .onTapGesture { isSearchFocused = true }
+    }
+
+    private var filteredItems: [InactiveProduct] {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return loader.items }
+        return loader.items.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+    }
+
     private var selectionBar: some View {
         HStack {
             Button(isSelecting ? "cancelar seleção" : "selecionar") {
@@ -85,16 +120,22 @@ struct InactiveProductsListView: View {
         .padding(.horizontal, 20)
     }
 
+    @ViewBuilder
     private var list: some View {
-        List(loader.items) { product in
-            InactiveProductRowView(
-                product: product,
-                isSelecting: isSelecting,
-                isSelected: selectedIDs.contains(product.id),
-                onToggleSelection: { toggleSelection(productID: product.id) }
-            )
+        if filteredItems.isEmpty {
+            ContentUnavailableView.search(text: searchText)
+                .frame(maxHeight: .infinity)
+        } else {
+            List(filteredItems) { product in
+                InactiveProductRowView(
+                    product: product,
+                    isSelecting: isSelecting,
+                    isSelected: selectedIDs.contains(product.id),
+                    onToggleSelection: { toggleSelection(productID: product.id) }
+                )
+            }
+            .listStyle(.plain)
         }
-        .listStyle(.plain)
     }
 
     private func toggleSelection(productID: Int) {
@@ -105,15 +146,15 @@ struct InactiveProductsListView: View {
         }
     }
 
-    /// A fila só usa `id` (pra ler o template de novo) e `title` (pra exibir) — o resto do
-    /// `EnjoeiProduct` não importa aqui, então fica com valores neutros.
+    /// A fila só usa `id` (pra ler o template de novo), `title` e `photoPublicID` (pra exibir) — o
+    /// resto do `EnjoeiProduct` não importa aqui, então fica com valores neutros.
     private func republicarSelecionados() {
         for product in loader.items where selectedIDs.contains(product.id) {
             let placeholder = EnjoeiProduct(
                 id: product.id,
                 title: product.title,
                 path: product.path,
-                photoPublicID: nil,
+                photoPublicID: product.photoPublicID,
                 currentPrice: product.price,
                 originalPrice: product.price
             )

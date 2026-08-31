@@ -53,7 +53,7 @@ struct AccountsListView: View {
                     .environment(\.editMode, $editMode)
                 }
             }
-            .navigationTitle("suas contas")
+            .navigationTitle("contas")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {

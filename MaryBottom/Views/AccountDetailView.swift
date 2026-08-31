@@ -43,7 +43,12 @@ struct AccountDetailView: View {
 
     var body: some View {
         VStack(spacing: 16) {
-            UserHeaderView(user: account.user)
+            UserHeaderView(
+                user: account.user,
+                megaphoneCount: runner.totalSucceeded,
+                errorCount: runner.totalFailed,
+                productsCount: runner.items.count
+            )
 
             Picker("", selection: $selectedTab) {
                 ForEach(DetailTab.allCases, id: \.self) { tab in
@@ -127,16 +132,13 @@ struct AccountDetailView: View {
 
     @ViewBuilder
     private var publishedContent: some View {
-        HStack(spacing: 16) {
+        HStack(spacing: 12) {
+            actionButtons
             roundsMenu
-                .frame(maxWidth: .infinity)
             speedMenu
-                .frame(maxWidth: .infinity)
         }
 
         MegaphoneProgressView(runner: runner)
-
-        actionButtons
 
         HStack(spacing: 12) {
             searchField
@@ -208,51 +210,43 @@ struct AccountDetailView: View {
         }
     }
 
+    /// Botão(ões) de ação: sozinho no lugar do "megafonar" quando parado, ou pausar+parar juntos no
+    /// mesmo lugar quando rodando — os três (isso e os dois menus de configuração) vivem na mesma
+    /// `HStack`, então cada botão fica com largura flexível pra dividir o espaço.
     @ViewBuilder
     private var actionButtons: some View {
         if isMegaphoning {
-            HStack(spacing: 12) {
-                Button {
-                    if runner.isPaused { runner.resume() } else { runner.pause() }
-                } label: {
-                    Label(
-                        runner.isPaused ? "continuar" : "pausar",
-                        systemImage: runner.isPaused ? "play.fill" : "pause.fill"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-
-                Button {
-                    runner.cancel()
-                } label: {
-                    Label("parar", systemImage: "stop.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(.red)
+            Button {
+                if runner.isPaused { runner.resume() } else { runner.pause() }
+            } label: {
+                Label(
+                    runner.isPaused ? "continuar" : "pausar",
+                    systemImage: runner.isPaused ? "play.fill" : "pause.fill"
+                )
+                .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.bordered)
+
+            Button {
+                runner.cancel()
+            } label: {
+                Label("parar", systemImage: "stop.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
         } else if runner.isRunning {
             EmptyView()
         } else {
             Button {
                 startLoading()
             } label: {
-                Label(buttonTitle, systemImage: "megaphone.fill")
+                // A quantidade de vezes já aparece ao lado, no menu de repetições — sem repetir
+                // aqui.
+                Label("megafonar", systemImage: "megaphone.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-        }
-    }
-
-    private var buttonTitle: String {
-        switch rounds.rawValue {
-        case ...0: "megafonar tudo sem parar"
-        case 1: "megafonar todos os produtos"
-        default: "megafonar tudo \(rounds.rawValue) vezes"
         }
     }
 

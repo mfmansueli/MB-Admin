@@ -17,23 +17,17 @@ struct MegaphoneProgressView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(statusText.headline)
-                .font(.headline.weight(.medium))
+            // Sem nada acontecendo ainda, o próprio botão "megafonar" já diz isso — a linha some,
+            // em vez de repetir com "pronto para megafonar.".
+            if runner.phase != .idle {
+                Text(statusText.headline)
+                    .font(.headline.weight(.medium))
+            }
 
             if let progress = statusText.progress {
                 ProgressView(value: progress)
             }
-
-            if !runner.items.isEmpty {
-                Text(totals)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private var totals: String {
-        "\(runner.totalSucceeded) megafones · \(runner.totalFailed) com erro · \(runner.items.count) produtos"
     }
 }
