@@ -18,15 +18,9 @@ final class MegaphoneRunner {
     /// Somatórios de todas as rodadas (os status em `items` valem só para a rodada atual).
     private(set) var totalSucceeded = 0
     private(set) var totalFailed = 0
-    /// Andamento de repostar cada produto, por id — separado de `items[].status` de propósito:
-    /// repostar não é megafonar, e reaproveitar o mesmo campo faria o laço automático pular um
-    /// produto só porque ele está sendo repostado (ou vice-versa).
-    private(set) var repostStatuses: [Int: MegaphoneStatus] = [:]
-    /// Link do anúncio novo criado por `repost`, quando a resposta trouxer um `path` reconhecível.
-    /// Sem entrada aqui, quem mostra o resultado não tem link nenhum pra oferecer.
-    private(set) var repostedProductURLs: [Int: URL] = [:]
-    /// Andamento de apagar cada produto, por id — mesmo raciocínio de `repostStatuses`: apagar não
-    /// é megafonar, e não pode reaproveitar `items[].status`.
+    /// Andamento de apagar cada produto, por id — separado de `items[].status` de propósito:
+    /// apagar não é megafonar, e reaproveitar o mesmo campo faria o laço automático pular um
+    /// produto só porque ele está sendo apagado.
     private(set) var deleteStatuses: [Int: MegaphoneStatus] = [:]
 
     /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei.
@@ -43,11 +37,23 @@ final class MegaphoneRunner {
     var onSessionExpired: (() -> Void)?
 
     private let client: EnjoeiClientProtocol
+    private let accountID: EnjoeiAccountID
+    private let itemsPersistence: MegaphoneItemsPersisting
     private var task: Task<Void, Never>?
     private var pauseGate: CheckedContinuation<Void, Never>?
 
-    init(client: EnjoeiClientProtocol) {
+    /// - Parameter itemsPersistence: em memória por padrão, pra um runner criado sem pensar em
+    ///   disco (testes, previews) nunca escrever em `UserDefaults` por acidente — a produção passa
+    ///   `UserDefaultsMegaphoneItemsPersistence` explicitamente.
+    init(
+        client: EnjoeiClientProtocol,
+        accountID: EnjoeiAccountID = UUID(),
+        itemsPersistence: MegaphoneItemsPersisting = InMemoryMegaphoneItemsPersistence()
+    ) {
         self.client = client
+        self.accountID = accountID
+        self.itemsPersistence = itemsPersistence
+        items = itemsPersistence.loadItems(accountID: accountID)
     }
 
     var isRunning: Bool { task != nil }
@@ -83,7 +89,17 @@ final class MegaphoneRunner {
     func reload(sellerID: Int, rounds: MegaphoneRounds = .once) {
         guard task == nil else { return }
         items = []
+        // Descartada aqui mesmo, sem esperar a busca nova: se o app fechar no meio do reload, a
+        // próxima abertura não deve voltar a mostrar a lista antiga como se nada tivesse pedido.
+        itemsPersistence.clearItems(accountID: accountID)
         start(sellerID: sellerID, rounds: rounds)
+    }
+
+    /// Guarda a lista recém-carregada (produtos + exposição) tanto na tela quanto em disco, pra
+    /// não precisar buscar a loja de novo na próxima abertura do app.
+    private func setLoadedItems(_ items: [MegaphoneItem]) {
+        self.items = items
+        itemsPersistence.saveItems(items, accountID: accountID)
     }
 
     /// Só carrega os produtos da loja e confere a exposição — não começa a megafonar. Serve pra
@@ -107,7 +123,7 @@ final class MegaphoneRunner {
             }
             phase = .checkingExposure(checked: 0, total: products.count)
             let exposures = try await loadExposures(productIDs: products.map(\.id))
-            items = products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) }
+            setLoadedItems(products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) })
             phase = .idle
         } catch {
             // Falha ou cancelamento na busca automática não vira alarme — o usuário ainda pode
@@ -176,7 +192,7 @@ final class MegaphoneRunner {
                 }
                 phase = .checkingExposure(checked: 0, total: products.count)
                 let exposures = try await loadExposures(productIDs: products.map(\.id))
-                items = products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) }
+                setLoadedItems(products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) })
             }
 
             var token = try await client.csrfToken()
@@ -337,43 +353,6 @@ final class MegaphoneRunner {
     private func setStatus(_ status: MegaphoneStatus, for productID: Int) {
         guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
         items[index].status = status
-    }
-
-    /// Reposta (duplica) um produto: lê todos os campos do anúncio original — incluindo as fotos,
-    /// reaproveitadas sem reenviar — e cria um anúncio novo idêntico.
-    func repost(productID: Int) {
-        guard repostStatuses[productID] != .megaphoning, deleteStatuses[productID] != .succeeded else { return }
-        repostStatuses[productID] = .megaphoning
-        Task { [weak self] in
-            await self?.performRepost(productID: productID)
-        }
-    }
-
-    private func performRepost(productID: Int) async {
-        do {
-            let template = try await client.productTemplate(productID: productID)
-            let token = try await client.csrfToken()
-            let response = try await createProduct(ProductCreateRequest(template: template), token: token)
-            // O spec não documenta o formato da resposta — sem `path`, fica sem link nenhum pro
-            // anúncio novo (não é seguro supor que o produto original é o resultado do repost).
-            if let path = response.path {
-                repostedProductURLs[productID] = EnjoeiAPI.productURL(path: path)
-            }
-            repostStatuses[productID] = .succeeded
-        } catch {
-            repostStatuses[productID] = .failed(error.localizedDescription)
-        }
-    }
-
-    /// Cria o anúncio, renovando o token CSRF e tentando de novo quando o servidor recusa o token —
-    /// mesmo laço do `megaphone`.
-    private func createProduct(_ request: ProductCreateRequest, token: String) async throws -> ProductCreateResponse {
-        do {
-            return try await client.createProduct(request, csrfToken: token)
-        } catch let error as EnjoeiError where error.isCSRFRejection {
-            let refreshed = try await client.csrfToken()
-            return try await client.createProduct(request, csrfToken: refreshed)
-        }
     }
 
     /// Apaga um produto de vez. Ação destrutiva e provavelmente irreversível — a confirmação fica

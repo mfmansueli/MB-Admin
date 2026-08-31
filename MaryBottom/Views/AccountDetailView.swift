@@ -4,7 +4,6 @@ import SwiftUI
 struct AccountDetailView: View {
     let account: AccountSession
 
-    @Environment(AccountsStore.self) private var accountsStore
     @Environment(\.scenePhase) private var scenePhase
     /// Quantas vezes repetir a lista. Fica guardado entre execuções do app (0 = infinito). Por
     /// conta: com contas rodando em paralelo, uma preferência global faria trocar a velocidade de
@@ -15,6 +14,10 @@ struct AccountDetailView: View {
 
     @State private var filter: ProductFilter = .all
     @State private var searchText = ""
+    @FocusState private var isSearchFocused: Bool
+    /// Quando ativo, a lista rola sozinha até o produto que está sendo megafonado no momento.
+    @State private var isFollowing = true
+    @State private var selectedTab: DetailTab = .published
 
     private var runner: MegaphoneRunner { account.runner }
     private var keepAlive: MegaphoneKeepAlive { account.keepAlive }
@@ -22,6 +25,11 @@ struct AccountDetailView: View {
     private enum ProductFilter {
         case all
         case discountOnly
+    }
+
+    private enum DetailTab: String, CaseIterable {
+        case published = "publicados"
+        case inactive = "inativos"
     }
 
     init(account: AccountSession) {
@@ -34,37 +42,25 @@ struct AccountDetailView: View {
     private var speed: MegaphoneSpeed { MegaphoneSpeed(milliseconds: storedSpeed) }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 16) {
-                    UserHeaderView(user: account.user)
+        VStack(spacing: 16) {
+            UserHeaderView(user: account.user)
 
-                    HStack(spacing: 16) {
-                        roundsMenu
-                            .frame(maxWidth: .infinity)
-                        speedMenu
-                            .frame(maxWidth: .infinity)
-                    }
-
-                    MegaphoneProgressView(runner: runner)
-
-                    actionButtons
-
-                    HStack(spacing: 12) {
-                        searchField
-                        filterPicker
-                    }
-
-                    productList
+            Picker("", selection: $selectedTab) {
+                ForEach(DetailTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 16)
             }
-            .onChange(of: runner.currentItemID) { _, newValue in
-                guard let newValue else { return }
-                withAnimation { proxy.scrollTo(newValue, anchor: .center) }
+            .pickerStyle(.segmented)
+
+            switch selectedTab {
+            case .published:
+                publishedContent
+            case .inactive:
+                inactiveContent
             }
         }
+        .padding(.horizontal, 20)
+        .padding(.top, 16)
         // Enquanto roda, o app segura a tela acesa e um áudio silencioso para não ser congelado
         // ao você trocar de app.
         .onChange(of: runner.isRunning) { _, isRunning in
@@ -81,24 +77,43 @@ struct AccountDetailView: View {
             @unknown default: break
             }
         }
+        .navigationTitle(account.user.name)
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
+                // Recarrega a aba que está na tela agora — publicados busca a loja de novo do
+                // zero, inativos refaz a raspagem das páginas de novo (é o único jeito de tentar
+                // de novo manualmente, além do botão "tentar de novo" que só aparece quando dá
+                // erro de verdade).
                 Button {
-                    runner.delayBetweenProducts = speed.duration
-                    runner.reload(sellerID: account.user.id, rounds: rounds)
+                    switch selectedTab {
+                    case .published:
+                        runner.delayBetweenProducts = speed.duration
+                        runner.reload(sellerID: account.user.id, rounds: rounds)
+                    case .inactive:
+                        account.inactiveProductsLoader.load()
+                    }
                 } label: {
                     Label("recarregar produtos", systemImage: "arrow.clockwise")
                 }
-                .disabled(runner.isRunning)
+                .disabled(selectedTab == .published && runner.isRunning)
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) {
-                    runner.cancel()
-                    Task {
-                        await accountsStore.logout(accountID: account.id)
+            ToolbarItem(placement: .bottomBar) {
+                Spacer()
+            }
+            // "Acompanhar" só faz sentido pro fluxo de megafonar (publicados) — na aba de
+            // inativos não tem nada acontecendo em segundo plano pra seguir o progresso.
+            if selectedTab == .published {
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        isFollowing.toggle()
+                    } label: {
+                        Label(
+                            "acompanhar",
+                            systemImage: isFollowing ? "location.fill" : "location"
+                        )
                     }
-                } label: {
-                    Label("sair", systemImage: "rectangle.portrait.and.arrow.right")
+                    .tint(isFollowing ? .accentColor : .secondary)
                 }
             }
         }
@@ -108,6 +123,31 @@ struct AccountDetailView: View {
             guard runner.items.isEmpty, !runner.isRunning else { return }
             runner.load(sellerID: account.user.id)
         }
+    }
+
+    @ViewBuilder
+    private var publishedContent: some View {
+        HStack(spacing: 16) {
+            roundsMenu
+                .frame(maxWidth: .infinity)
+            speedMenu
+                .frame(maxWidth: .infinity)
+        }
+
+        MegaphoneProgressView(runner: runner)
+
+        actionButtons
+
+        HStack(spacing: 12) {
+            searchField
+            filterPicker
+        }
+
+        productList
+    }
+
+    private var inactiveContent: some View {
+        InactiveProductsListView(account: account)
     }
 
     private func startLoading() {
@@ -224,6 +264,7 @@ struct AccountDetailView: View {
                     .foregroundStyle(.secondary)
                 TextField("buscar por nome", text: $searchText)
                     .textFieldStyle(.plain)
+                    .focused($isSearchFocused)
                 if !searchText.isEmpty {
                     Button {
                         searchText = ""
@@ -238,6 +279,8 @@ struct AccountDetailView: View {
             .padding(.vertical, 8)
             .background(.quaternary, in: .rect(cornerRadius: 10))
             .frame(maxWidth: .infinity)
+            .contentShape(.rect)
+            .onTapGesture { isSearchFocused = true }
         }
     }
 
@@ -295,27 +338,29 @@ struct AccountDetailView: View {
                 systemImage: "shippingbox",
                 description: Text("toque em megafonar para buscar os produtos da sua loja.")
             )
-            .padding(.top, 40)
+            .frame(maxHeight: .infinity)
         } else if filteredItems.isEmpty {
             if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 ContentUnavailableView.search(text: searchText)
-                    .padding(.top, 40)
+                    .frame(maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
                     "nenhum produto pede desconto agora",
                     systemImage: "checkmark.circle",
                     description: Text("toque em \"todos\" pra ver a fila inteira.")
                 )
-                .padding(.top, 40)
+                .frame(maxHeight: .infinity)
             }
         } else {
-            LazyVStack(spacing: 0) {
-                ForEach(filteredItems) { item in
-                    MegaphoneRowView(item: item, runner: runner)
+            ScrollViewReader { proxy in
+                List(filteredItems) { item in
+                    MegaphoneRowView(item: item, runner: runner, account: account)
                         .id(item.id)
-                    if item.id != filteredItems.last?.id {
-                        Divider()
-                    }
+                }
+                .listStyle(.plain)
+                .onChange(of: runner.currentItemID) { _, newValue in
+                    guard isFollowing, let newValue else { return }
+                    withAnimation { proxy.scrollTo(newValue, anchor: .center) }
                 }
             }
         }

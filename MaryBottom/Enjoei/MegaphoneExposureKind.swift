@@ -26,7 +26,7 @@ nonisolated enum MegaphoneExposureKind: Equatable, Sendable {
     }
 }
 
-nonisolated extension MegaphoneExposureKind: Decodable {
+nonisolated extension MegaphoneExposureKind: Codable {
     init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         switch raw {
@@ -36,6 +36,19 @@ nonisolated extension MegaphoneExposureKind: Decodable {
         case "reduced_for_free": self = .reducedForFree
         case "maximum_for_free_after_change_plan": self = .maximumForFreeAfterChangePlan
         default: self = .other(raw)
+        }
+    }
+
+    /// Só usado pra persistir a lista carregada em disco — o Enjoei nunca recebe isso de volta.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .maximumForFree: try container.encode("maximum_for_free")
+        case .maximumAfterDiscount: try container.encode("maximum_after_discount")
+        case .reducedForFreeOrMaximumAfterDiscount: try container.encode("reduced_for_free_or_maximum_after_discount")
+        case .reducedForFree: try container.encode("reduced_for_free")
+        case .maximumForFreeAfterChangePlan: try container.encode("maximum_for_free_after_change_plan")
+        case .other(let raw): try container.encode(raw)
         }
     }
 }

@@ -12,15 +12,30 @@ final class AccountsStore {
     var isPresentingLogin = false
     private(set) var pendingLoginAccountID: EnjoeiAccountID?
 
+    /// Compartilhado entre a tela de comparação (postagem avulsa) e a fila de publicação — as duas
+    /// precisam respeitar o mesmo bloqueio entre uma postagem e a próxima.
+    let poster = CrossAccountPoster()
+    let postQueue: PostQueue
+
     private let dependenciesFactory: AccountDependenciesFactory
     private let persistence: AccountsPersisting
+    private let megaphoneItemsPersistence: MegaphoneItemsPersisting
+    private let inactiveProductsPersistence: InactiveProductsPersisting
 
     init(
         dependenciesFactory: AccountDependenciesFactory? = nil,
-        persistence: AccountsPersisting? = nil
+        persistence: AccountsPersisting? = nil,
+        megaphoneItemsPersistence: MegaphoneItemsPersisting? = nil,
+        inactiveProductsPersistence: InactiveProductsPersisting? = nil
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
+        self.megaphoneItemsPersistence = megaphoneItemsPersistence ?? UserDefaultsMegaphoneItemsPersistence()
+        self.inactiveProductsPersistence = inactiveProductsPersistence ?? UserDefaultsInactiveProductsPersistence()
+        // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
+        // provider de verdade é ligado logo abaixo, já com `self` totalmente inicializado.
+        postQueue = PostQueue(poster: poster, accountsProvider: { [] })
+        postQueue.accountsProvider = { [weak self] in self?.accounts ?? [] }
     }
 
     /// Abertura do app: cada conta salva tem sua WebView de bastidores recriada e conferida contra
@@ -78,7 +93,20 @@ final class AccountsStore {
         account.runner.cancel()
         await account.clearSession()
         accounts.removeAll { $0.id == accountID }
+        clearLocalData(accountID: accountID)
         persist()
+    }
+
+    /// Sem isso, a lista de publicados, a de inativos e as preferências de rodada/intervalo da
+    /// conta ficam órfãs em `UserDefaults` pra sempre — o id nunca mais aparece em `accounts` pra
+    /// alguém vir apagar depois.
+    private func clearLocalData(accountID: EnjoeiAccountID) {
+        megaphoneItemsPersistence.clearItems(accountID: accountID)
+        inactiveProductsPersistence.clearItems(accountID: accountID)
+        // Mesmas chaves que `AccountDetailView` monta em `@AppStorage` — não tem como reusar a
+        // property wrapper daqui, só reconstruir a mesma string.
+        UserDefaults.standard.removeObject(forKey: "megaphone.rounds.\(accountID)")
+        UserDefaults.standard.removeObject(forKey: "megaphone.speed.\(accountID)")
     }
 
     /// Conta já existente (sessão vencida): reusa o client/webView dela — nunca cria uma segunda

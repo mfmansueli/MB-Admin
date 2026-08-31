@@ -52,7 +52,8 @@ nonisolated struct ProductCreateRequest: Equatable, Sendable, Encodable {
             weight = template.weight
             // `origin_plan_id` ausente ou 0 cai pro plano 1, igual ao pseudocódigo do spec.
             planID = String(template.originPlanID.flatMap { $0 > 0 ? $0 : nil } ?? 1)
-            smartPriceEnabled = template.smartPrice?.enabled ?? false
+            // Repost nunca herda o smart price do produto original — sempre nasce desativado.
+            smartPriceEnabled = false
         }
 
         private enum CodingKeys: String, CodingKey {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Um produto na fila do megafone, com o status que a tela mostra.
-nonisolated struct MegaphoneItem: Identifiable, Equatable, Sendable {
+nonisolated struct MegaphoneItem: Identifiable, Equatable, Sendable, Codable {
     let product: EnjoeiProduct
     var status: MegaphoneStatus = .pending
     /// Como esse produto se encaixa no megafone — `nil` até a exposição ser conferida, ou quando a

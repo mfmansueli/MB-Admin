@@ -17,6 +17,7 @@ final class AccountSession: Identifiable {
     let client: EnjoeiClientProtocol
     let runner: MegaphoneRunner
     let keepAlive: MegaphoneKeepAlive
+    let inactiveProductsLoader: InactiveProductsLoader
     let webView: WKWebView?
 
     private let sessionClearer: EnjoeiSessionClearing
@@ -34,9 +35,18 @@ final class AccountSession: Identifiable {
         sessionClearer = dependencies.sessionClearer
         webView = dependencies.webView
 
-        let runner = MegaphoneRunner(client: dependencies.client)
+        let runner = MegaphoneRunner(
+            client: dependencies.client,
+            accountID: id,
+            itemsPersistence: UserDefaultsMegaphoneItemsPersistence()
+        )
         self.runner = runner
         keepAlive = MegaphoneKeepAlive(runner: runner)
+        inactiveProductsLoader = InactiveProductsLoader(
+            client: dependencies.client,
+            accountID: id,
+            itemsPersistence: UserDefaultsInactiveProductsPersistence()
+        )
     }
 
     var record: AccountRecord {

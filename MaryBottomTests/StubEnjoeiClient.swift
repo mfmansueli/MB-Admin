@@ -24,6 +24,11 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     var createProductResponse: ProductCreateResponse
     /// Erro a lançar em qualquer chamada de `deleteProduct`.
     var deleteProductError: EnjoeiError?
+    /// Página combinada por número, devolvida por `inactiveProductsPage`. Página não configurada
+    /// devolve vazia com `maxPage: 1`, pra um teste que só configura a página 1 não travar.
+    var inactivePagesByNumber: [Int: InactiveProductsPage]
+    /// Erro a lançar em qualquer chamada de `inactiveProductsPage`.
+    var inactiveProductsError: EnjoeiError?
 
     private(set) var megaphonedIDs: [Int] = []
     private(set) var requestedCursors: [String?] = []
@@ -39,6 +44,8 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     private(set) var createProductCalls: [(request: ProductCreateRequest, token: String)] = []
     /// Um item por chamada a `deleteProduct`, com o id e o token usados.
     private(set) var deleteProductCalls: [(productID: Int, token: String)] = []
+    /// Um item por chamada a `inactiveProductsPage`, com o número da página pedida.
+    private(set) var requestedInactivePages: [Int] = []
 
     init(
         user: EnjoeiUser = .stub,
@@ -52,7 +59,9 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         templateError: EnjoeiError? = nil,
         createProductError: EnjoeiError? = nil,
         createProductResponse: ProductCreateResponse = ProductCreateResponse(path: nil),
-        deleteProductError: EnjoeiError? = nil
+        deleteProductError: EnjoeiError? = nil,
+        inactivePagesByNumber: [Int: InactiveProductsPage] = [:],
+        inactiveProductsError: EnjoeiError? = nil
     ) {
         self.user = user
         self.currentUserError = currentUserError
@@ -62,6 +71,8 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         self.exposuresByProductID = exposuresByProductID
         self.exposuresError = exposuresError
         self.templatesByProductID = templatesByProductID
+        self.inactivePagesByNumber = inactivePagesByNumber
+        self.inactiveProductsError = inactiveProductsError
         self.templateError = templateError
         self.createProductError = createProductError
         self.createProductResponse = createProductResponse
@@ -130,5 +141,11 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
             throw EnjoeiError.invalidCSRFToken
         }
         if let deleteProductError { throw deleteProductError }
+    }
+
+    func inactiveProductsPage(page: Int) async throws -> InactiveProductsPage {
+        requestedInactivePages.append(page)
+        if let inactiveProductsError { throw inactiveProductsError }
+        return inactivePagesByNumber[page] ?? InactiveProductsPage(products: [], maxPage: 1)
     }
 }

@@ -99,4 +99,17 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
         let response = MegaphoneWebResponse(javaScriptResult: result)
         if let error = response.failure { throw error }
     }
+
+    func inactiveProductsPage(page: Int) async throws -> InactiveProductsPage {
+        let result = try await webSession.run(
+            EnjoeiJavaScript.inactiveProductsPage,
+            arguments: ["page": page]
+        )
+        let response = MegaphoneWebResponse(javaScriptResult: result)
+        #if DEBUG
+        print("[inativos] página \(page) — status \(response.status), corpo: \(response.body)")
+        #endif
+        if let error = response.failure { throw error }
+        return try JSONDecoder().decode(InactiveProductsPage.self, from: Data(response.body.utf8))
+    }
 }

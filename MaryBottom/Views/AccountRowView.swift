@@ -5,6 +5,8 @@ import SwiftUI
 struct AccountRowView: View {
     let account: AccountSession
 
+    @Environment(AccountsStore.self) private var accountsStore
+
     var body: some View {
         HStack(spacing: 12) {
             AsyncImage(url: account.user.avatarURL) { image in
@@ -33,6 +35,19 @@ struct AccountRowView: View {
     private var statusLine: String {
         if account.status == .sessionExpired {
             return "sessão expirada — toque para entrar de novo"
+        }
+        // Postagem entre contas (avulsa ou pela fila) mexe com origem e destino ao mesmo tempo —
+        // mostra em qualquer uma das duas rows envolvidas, mesmo com a tela de comparação fechada.
+        if let currentItem = accountsStore.postQueue.currentItem {
+            if currentItem.sourceAccountID == currentItem.destinationAccountID, currentItem.sourceAccountID == account.id {
+                return "republicando \"\(currentItem.product.title)\"…"
+            }
+            if currentItem.sourceAccountID == account.id {
+                return "postando \"\(currentItem.product.title)\" para \(currentItem.destinationAccountName)…"
+            }
+            if currentItem.destinationAccountID == account.id {
+                return "recebendo \"\(currentItem.product.title)\" de \(currentItem.sourceAccountName)…"
+            }
         }
         if account.runner.phase.isActive {
             return MegaphoneStatusText(

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Um item da resposta de `GET /api/megaphones/v2` — só os campos que a aba de desconto usa.
-nonisolated struct MegaphoneExposure: Equatable, Sendable, Decodable {
+nonisolated struct MegaphoneExposure: Equatable, Sendable, Codable {
     let productID: Int
     let kind: MegaphoneExposureKind
     /// Preço sugerido (com desconto) pra alcançar exposição máxima, quando aplicável.

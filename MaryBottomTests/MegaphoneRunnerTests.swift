@@ -5,8 +5,12 @@ import Testing
 @Suite("rodada de megafone")
 struct MegaphoneRunnerTests {
     /// Sem espera entre produtos, os testes não ficam presos ao ritmo real do app.
-    private func makeRunner(client: StubEnjoeiClient) -> MegaphoneRunner {
-        let runner = MegaphoneRunner(client: client)
+    private func makeRunner(
+        client: StubEnjoeiClient,
+        accountID: EnjoeiAccountID = UUID(),
+        itemsPersistence: MegaphoneItemsPersisting = InMemoryMegaphoneItemsPersistence()
+    ) -> MegaphoneRunner {
+        let runner = MegaphoneRunner(client: client, accountID: accountID, itemsPersistence: itemsPersistence)
         runner.delayBetweenProducts = .zero
         return runner
     }
@@ -554,6 +558,51 @@ struct MegaphoneRunnerTests {
         #expect(await client.requestedCursors.count == 2)
     }
 
+    @Test("load bem sucedido guarda a lista carregada na persistência")
+    func loadGuardaListaNaPersistencia() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
+        let accountID = EnjoeiAccountID()
+        let persistence = InMemoryMegaphoneItemsPersistence()
+        let runner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1, 2])
+    }
+
+    @Test("um runner novo com a mesma persistência recupera a lista sem buscar a loja de novo")
+    func runnerNovoRecuperaListaPersistida() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
+        let accountID = EnjoeiAccountID()
+        let persistence = InMemoryMegaphoneItemsPersistence()
+        let firstRunner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+        firstRunner.load(sellerID: 1)
+        await firstRunner.waitUntilFinished()
+
+        // Simula reabrir o app: um runner novo, mesma conta, mesma persistência.
+        let secondRunner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+
+        #expect(secondRunner.items.map(\.id) == [1, 2])
+        #expect(await client.requestedCursors.count == 1)
+    }
+
+    @Test("reload descarta a lista persistida na hora, antes mesmo da busca nova terminar")
+    func reloadDescartaListaPersistidaNaHora() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
+        let accountID = EnjoeiAccountID()
+        let persistence = InMemoryMegaphoneItemsPersistence()
+        let runner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        #expect(persistence.loadItems(accountID: accountID).isEmpty == false)
+
+        runner.reload(sellerID: 1)
+
+        #expect(persistence.loadItems(accountID: accountID).isEmpty)
+        await runner.waitUntilFinished()
+    }
+
     @Test("start soma aos totais o que a lista carregada já tinha de sucesso")
     func startSomaSucessosJaAplicados() async {
         let client = StubEnjoeiClient(
@@ -575,112 +624,6 @@ struct MegaphoneRunnerTests {
 
         #expect(runner.totalSucceeded == 2)
         #expect(await client.megaphonedIDs == [1, 2])
-    }
-
-    private func makeTemplate(productID: Int) -> ProductTemplate {
-        ProductTemplate(
-            title: "produto \(productID)",
-            description: "descrição",
-            brand: "marca",
-            used: false,
-            price: 29900,
-            originalPrice: 29900,
-            weight: "0.3",
-            quantity: 1,
-            category: .init(id: 327),
-            size: nil,
-            shipping: .init(type: "charge_by_weight", hasInsurance: true),
-            photos: [.init(imagePublicID: "foto-\(productID)", position: 0)],
-            originPlanID: 1,
-            smartPrice: .init(enabled: true)
-        )
-    }
-
-    @Test("repostar lê o template do produto e cria o anúncio novo")
-    func repostarComSucesso() async {
-        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
-        let runner = makeRunner(client: client)
-
-        runner.repost(productID: 1)
-        await waitUntil { runner.repostStatuses[1] != .megaphoning && runner.repostStatuses[1] != nil }
-
-        #expect(runner.repostStatuses[1] == .succeeded)
-        #expect(await client.requestedTemplateIDs == [1])
-        let call = await client.createProductCalls.first
-        #expect(call?.request.product.title == "produto 1")
-        #expect(call?.request.product.price == 299)
-        #expect(call?.request.product.photosAttributes.first?.imagePublicID == "foto-1")
-        // Sem `path` na resposta (não configurado no stub), cai sem entrada — quem mostra o
-        // resultado usa o produto original.
-        #expect(runner.repostedProductURLs[1] == nil)
-    }
-
-    @Test("repostar com sucesso guarda o link do anúncio novo quando a resposta traz path")
-    func repostarGuardaLinkDoAnuncioNovo() async {
-        let client = StubEnjoeiClient(
-            templatesByProductID: [1: makeTemplate(productID: 1)],
-            createProductResponse: ProductCreateResponse(path: "colar-curto-149812846")
-        )
-        let runner = makeRunner(client: client)
-
-        runner.repost(productID: 1)
-        await waitUntil { runner.repostStatuses[1] != .megaphoning && runner.repostStatuses[1] != nil }
-
-        #expect(runner.repostedProductURLs[1]?.absoluteString == "https://www.enjoei.com.br/p/colar-curto-149812846")
-    }
-
-    @Test("erro ao ler o template vira falha, sem tentar criar o anúncio")
-    func repostarFalhaAoLerTemplate() async {
-        let client = StubEnjoeiClient(templateError: .http(status: 500, message: "o enjoei caiu"))
-        let runner = makeRunner(client: client)
-
-        runner.repost(productID: 1)
-        await waitUntil { runner.repostStatuses[1] != .megaphoning && runner.repostStatuses[1] != nil }
-
-        #expect(runner.repostStatuses[1] == .failed("o enjoei caiu"))
-        #expect(await client.createProductCalls.isEmpty)
-    }
-
-    @Test("erro ao criar o anúncio vira falha")
-    func repostarFalhaAoCriar() async {
-        let client = StubEnjoeiClient(
-            templatesByProductID: [1: makeTemplate(productID: 1)],
-            createProductError: .http(status: 422, message: "preço mínimo não atingido")
-        )
-        let runner = makeRunner(client: client)
-
-        runner.repost(productID: 1)
-        await waitUntil { runner.repostStatuses[1] != .megaphoning && runner.repostStatuses[1] != nil }
-
-        #expect(runner.repostStatuses[1] == .failed("preço mínimo não atingido"))
-    }
-
-    @Test("token CSRF recusado ao criar o anúncio é renovado e a criação sai do mesmo jeito")
-    func repostarRenovaTokenRecusado() async {
-        let client = StubEnjoeiClient(
-            csrfRejectionsRemaining: 1,
-            templatesByProductID: [1: makeTemplate(productID: 1)]
-        )
-        let runner = makeRunner(client: client)
-
-        runner.repost(productID: 1)
-        await waitUntil { runner.repostStatuses[1] != .megaphoning && runner.repostStatuses[1] != nil }
-
-        #expect(runner.repostStatuses[1] == .succeeded)
-        let tokens = await client.createProductCalls.map(\.token)
-        #expect(tokens == ["token-1", "token-2"])
-    }
-
-    @Test("um segundo toque enquanto já está repostando não dispara outra chamada")
-    func repostarDuploToqueNaoDuplica() async {
-        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
-        let runner = makeRunner(client: client)
-
-        runner.repost(productID: 1)
-        runner.repost(productID: 1)
-        await waitUntil { runner.repostStatuses[1] != .megaphoning && runner.repostStatuses[1] != nil }
-
-        #expect(await client.requestedTemplateIDs.count == 1)
     }
 
     @Test("apagar produto com sucesso marca deleteStatuses como succeeded")
@@ -748,20 +691,6 @@ struct MegaphoneRunnerTests {
 
         #expect(await client.megaphonedIDs == [2])
         #expect(runner.items.first { $0.id == 1 }?.status != .succeeded)
-    }
-
-    @Test("produto já apagado não pode ser repostado")
-    func repostarNaoAgeSobreProdutoApagado() async {
-        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
-        let runner = makeRunner(client: client)
-
-        runner.deleteProduct(productID: 1)
-        await waitUntil { runner.deleteStatuses[1] == .succeeded }
-
-        runner.repost(productID: 1)
-
-        #expect(runner.repostStatuses[1] == nil)
-        #expect(await client.requestedTemplateIDs.isEmpty)
     }
 
     @Test("produto já apagado não pode receber desconto aplicado")

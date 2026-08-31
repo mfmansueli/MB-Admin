@@ -1,7 +1,7 @@
 import Foundation
 
 /// Produto à venda numa loja do Enjoei.
-nonisolated struct EnjoeiProduct: Identifiable, Equatable, Sendable {
+nonisolated struct EnjoeiProduct: Identifiable, Equatable, Sendable, Codable {
     let id: Int
     let title: String
     let path: String

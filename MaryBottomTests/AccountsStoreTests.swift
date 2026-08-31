@@ -15,7 +15,9 @@ struct AccountsStoreTests {
     private func makeStore(
         clientsByID: [EnjoeiAccountID: StubEnjoeiClient] = [:],
         clearersByID: [EnjoeiAccountID: FakeSessionClearer] = [:],
-        persistence: InMemoryAccountsPersistence? = nil
+        persistence: InMemoryAccountsPersistence? = nil,
+        megaphoneItemsPersistence: MegaphoneItemsPersisting? = nil,
+        inactiveProductsPersistence: InactiveProductsPersisting? = nil
     ) -> AccountsStore {
         let persistence = persistence ?? InMemoryAccountsPersistence()
         return AccountsStore(
@@ -26,7 +28,9 @@ struct AccountsStoreTests {
                     webView: nil
                 )
             },
-            persistence: persistence
+            persistence: persistence,
+            megaphoneItemsPersistence: megaphoneItemsPersistence ?? InMemoryMegaphoneItemsPersistence(),
+            inactiveProductsPersistence: inactiveProductsPersistence ?? InMemoryInactiveProductsPersistence()
         )
     }
 
@@ -183,6 +187,54 @@ struct AccountsStoreTests {
         #expect(clearerA.clearCallCount == 1)
         #expect(clearerB.clearCallCount == 0)
         #expect(persistence.stored.map(\.id) == [idB])
+    }
+
+    @Test("logout limpa produtos do megafone e inativos persistidos da conta")
+    func logoutLimpaDadosLocaisDaConta() async {
+        let idA = EnjoeiAccountID()
+        let idB = EnjoeiAccountID()
+        let megaphoneItemsPersistence = InMemoryMegaphoneItemsPersistence()
+        let inactiveProductsPersistence = InMemoryInactiveProductsPersistence()
+        let productA = EnjoeiProduct(
+            id: 1, title: "produto a", path: "produto-a", photoPublicID: "foto-a",
+            currentPrice: 100, originalPrice: 150
+        )
+        let productB = EnjoeiProduct(
+            id: 2, title: "produto b", path: "produto-b", photoPublicID: "foto-b",
+            currentPrice: 100, originalPrice: 150
+        )
+        megaphoneItemsPersistence.saveItems([MegaphoneItem(product: productA)], accountID: idA)
+        megaphoneItemsPersistence.saveItems([MegaphoneItem(product: productB)], accountID: idB)
+        let inactiveA = InactiveProduct(
+            id: 1, path: "produto-a", title: "produto a", price: nil, photoPublicID: nil, inactiveSince: nil
+        )
+        let inactiveB = InactiveProduct(
+            id: 2, path: "produto-b", title: "produto b", price: nil, photoPublicID: nil, inactiveSince: nil
+        )
+        inactiveProductsPersistence.saveItems([inactiveA], accountID: idA)
+        inactiveProductsPersistence.saveItems([inactiveB], accountID: idB)
+        UserDefaults.standard.set(3, forKey: "megaphone.rounds.\(idA)")
+        UserDefaults.standard.set(1.5, forKey: "megaphone.speed.\(idA)")
+        let persistence = InMemoryAccountsPersistence(stored: [
+            AccountRecord(id: idA, user: .stub, lastRoundSummary: nil),
+            AccountRecord(id: idB, user: otherUser, lastRoundSummary: nil)
+        ])
+        let store = makeStore(
+            clientsByID: [idA: StubEnjoeiClient(user: .stub), idB: StubEnjoeiClient(user: otherUser)],
+            persistence: persistence,
+            megaphoneItemsPersistence: megaphoneItemsPersistence,
+            inactiveProductsPersistence: inactiveProductsPersistence
+        )
+        await store.restoreAccounts()
+
+        await store.logout(accountID: idA)
+
+        #expect(megaphoneItemsPersistence.loadItems(accountID: idA).isEmpty)
+        #expect(megaphoneItemsPersistence.loadItems(accountID: idB).map(\.id) == [2])
+        #expect(inactiveProductsPersistence.loadItems(accountID: idA).isEmpty)
+        #expect(inactiveProductsPersistence.loadItems(accountID: idB).map(\.id) == [2])
+        #expect(UserDefaults.standard.object(forKey: "megaphone.rounds.\(idA)") == nil)
+        #expect(UserDefaults.standard.object(forKey: "megaphone.speed.\(idA)") == nil)
     }
 
     @Test("fim de rodada do megafone preenche e persiste o resumo da conta")

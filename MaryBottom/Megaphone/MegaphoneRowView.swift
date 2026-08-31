@@ -6,14 +6,17 @@ import SwiftUI
 struct MegaphoneRowView: View {
     let item: MegaphoneItem
     let runner: MegaphoneRunner
+    let account: AccountSession
 
     @State private var isConfirmingApply = false
     @State private var isConfirmingRepost = false
-    @State private var isShowingRepostStatus = false
     @State private var isConfirmingDelete = false
     @State private var isShowingDeleteStatus = false
+    @Environment(AccountsStore.self) private var accountsStore
 
-    private var repostStatus: MegaphoneStatus { runner.repostStatuses[item.id] ?? .pending }
+    /// Reposta pela fila de publicação compartilhada — mesmo `poster` que a comparação entre
+    /// contas e os inativos usam, com origem e destino sendo essa própria conta.
+    private var repostStatus: MegaphoneStatus { accountsStore.poster.statuses[item.id] ?? .pending }
     private var deleteStatus: MegaphoneStatus { runner.deleteStatuses[item.id] ?? .pending }
     private var isDeleted: Bool { deleteStatus == .succeeded }
 
@@ -64,19 +67,11 @@ struct MegaphoneRowView: View {
             titleVisibility: .visible
         ) {
             Button("repostar") {
-                isShowingRepostStatus = true
-                runner.repost(productID: item.id)
+                accountsStore.postQueue.enqueue(product: item.product, source: account, destination: account)
             }
             Button("cancelar", role: .cancel) {}
         } message: {
-            Text("cria um anúncio novo idêntico a este, reaproveitando título, descrição, preço e fotos.")
-        }
-        .sheet(isPresented: $isShowingRepostStatus) {
-            RepostStatusSheet(
-                status: repostStatus,
-                productURL: runner.repostedProductURLs[item.id],
-                onDismiss: { isShowingRepostStatus = false }
-            )
+            Text("entra na fila de publicação, reaproveitando título, descrição, preço e fotos — acompanhe o andamento por lá.")
         }
         .confirmationDialog(
             "apagar este produto?",
@@ -244,20 +239,31 @@ struct MegaphoneRowView: View {
         priceToIncreaseExposure: 351,
         discountLabel: "- 56%"
     )
-    let runner = MegaphoneRunner(
-        client: WebViewEnjoeiClient(webSession: EnjoeiWebSession(dataStoreIdentifier: UUID()))
+    let webSession = EnjoeiWebSession(dataStoreIdentifier: UUID())
+    let runner = MegaphoneRunner(client: WebViewEnjoeiClient(webSession: webSession))
+    let account = AccountSession(
+        id: UUID(),
+        user: EnjoeiUser(id: 1, nickname: "antonia", name: "antonia", avatarPublicID: nil, availableProductsCount: nil),
+        dependencies: AccountDependencies(
+            client: WebViewEnjoeiClient(webSession: webSession),
+            sessionClearer: webSession,
+            webView: nil
+        )
     )
     return List {
-        MegaphoneRowView(item: MegaphoneItem(product: product, status: .pending), runner: runner)
-        MegaphoneRowView(item: MegaphoneItem(product: product, status: .megaphoning), runner: runner)
-        MegaphoneRowView(item: MegaphoneItem(product: product, status: .succeeded), runner: runner)
+        MegaphoneRowView(item: MegaphoneItem(product: product, status: .pending), runner: runner, account: account)
+        MegaphoneRowView(item: MegaphoneItem(product: product, status: .megaphoning), runner: runner, account: account)
+        MegaphoneRowView(item: MegaphoneItem(product: product, status: .succeeded), runner: runner, account: account)
         MegaphoneRowView(
             item: MegaphoneItem(product: product, status: .failed("limite diário atingido")),
-            runner: runner
+            runner: runner,
+            account: account
         )
         MegaphoneRowView(
             item: MegaphoneItem(product: discountedProduct, status: .pending, exposure: exposure),
-            runner: runner
+            runner: runner,
+            account: account
         )
     }
+    .environment(AccountsStore())
 }

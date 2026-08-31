@@ -98,9 +98,9 @@ struct ProductCreateRequestTests {
         #expect(ProductCreateRequest(template: makeTemplate(originPlanID: 0)).product.planID == "1")
     }
 
-    @Test("smart_price_enabled vem do template, e cai pra falso quando ausente")
+    @Test("smart_price_enabled sempre nasce desativado no repost, mesmo quando o produto original tinha")
     func smartPriceEnabled() {
-        #expect(ProductCreateRequest(template: makeTemplate(smartPriceEnabled: true)).product.smartPriceEnabled)
+        #expect(ProductCreateRequest(template: makeTemplate(smartPriceEnabled: true)).product.smartPriceEnabled == false)
         #expect(ProductCreateRequest(template: makeTemplate(smartPriceEnabled: nil)).product.smartPriceEnabled == false)
     }
 
@@ -154,7 +154,7 @@ struct ProductCreateRequestTests {
         #expect(product?["shipping_type"] as? String == "charge_by_weight")
         #expect(product?["product_size_id"] == nil || product?["product_size_id"] is NSNull)
         #expect(product?["plan_id"] as? String == "1")
-        #expect(product?["smart_price_enabled"] as? Bool == true)
+        #expect(product?["smart_price_enabled"] as? Bool == false)
         let photosAttributes = product?["photos_attributes"] as? [[String: Any]]
         #expect(photosAttributes?.first?["image_public_id"] as? String == "czM6Ly9waG90b3M")
     }

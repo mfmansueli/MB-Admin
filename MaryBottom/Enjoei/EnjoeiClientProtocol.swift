@@ -23,4 +23,7 @@ nonisolated protocol EnjoeiClientProtocol: Sendable {
     func createProduct(_ request: ProductCreateRequest, csrfToken: String) async throws -> ProductCreateResponse
     /// Apaga um produto de vez. Ação destrutiva e provavelmente irreversível.
     func deleteProduct(productID: Int, csrfToken: String) async throws
+    /// Uma página da listagem de produtos inativos da própria loja (extraída do HTML — não existe
+    /// API JSON pra isso). `page` começa em 1.
+    func inactiveProductsPage(page: Int) async throws -> InactiveProductsPage
 }
