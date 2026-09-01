@@ -5,7 +5,6 @@ struct UserHeaderView: View {
     let user: EnjoeiUser
     let megaphoneCount: Int
     let errorCount: Int
-    let productsCount: Int
 
     var body: some View {
         HStack(spacing: 12) {
@@ -23,7 +22,7 @@ struct UserHeaderView: View {
                 Text("@\(user.nickname)")
                     .font(.headline)
                     .foregroundStyle(.secondary)
-                Text("\(megaphoneCount) megafones · \(errorCount) com erro · \(productsCount) produtos")
+                Text("\(megaphoneCount) megafones · \(errorCount) com erro")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -43,8 +42,7 @@ struct UserHeaderView: View {
             availableProductsCount: 1496
         ),
         megaphoneCount: 42,
-        errorCount: 3,
-        productsCount: 1496
+        errorCount: 3
     )
     .padding()
 }

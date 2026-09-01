@@ -72,7 +72,7 @@ struct AccountsListView: View {
                         isShowingQueue = true
                     } label: {
                         if accountsStore.postQueue.isRunning {
-                            ProgressView()
+                            PublishingQueueIcon()
                         } else {
                             Label("fila de publicação", systemImage: "list.bullet.rectangle")
                         }
@@ -81,12 +81,15 @@ struct AccountsListView: View {
                 ToolbarItem(placement: .bottomBar) {
                     // `EditButton()` fica com o texto preto sobre fundo preto nessa toolbar no Mac
                     // Catalyst (bug de contraste da view do sistema) — um botão próprio evita o
-                    // problema.
+                    // problema. `.fixedSize()` evita o texto truncar ("ed...") — sem isso, o botão
+                    // no Mac (idiom otimizado) encolhe pro tamanho de uma "pill" fixa em vez de
+                    // acompanhar o texto.
                     Button(editMode.isEditing ? "concluir" : "editar") {
                         withAnimation {
                             editMode = editMode.isEditing ? .inactive : .active
                         }
                     }
+                    .fixedSize()
                 }
                 ToolbarItem(placement: .bottomBar) {
                     Spacer()
@@ -98,12 +101,14 @@ struct AccountsListView: View {
                         // No iPad, um `Label` nessa toolbar (dentro da coluna lateral do
                         // `NavigationSplitView`) vira ícone-only automaticamente, ignorando
                         // `.labelStyle(.titleAndIcon)` — uma `HStack` manual de ícone+texto escapa
-                        // desse colapso.
+                        // desse colapso. `.fixedSize()` faz o mesmo papel no Mac (idiom otimizado),
+                        // onde sem ele o texto "comparar" some por completo, sobrando só o ícone.
                         HStack(spacing: 4) {
                             Image(systemName: "rectangle.on.rectangle")
                             Text("comparar")
                         }
                     }
+                    .fixedSize()
                     .disabled(accountsStore.accounts.count < 2)
                 }
             }

@@ -28,14 +28,16 @@ struct ProductMatchRowView: View {
     @ViewBuilder
     private func side(for product: EnjoeiProduct) -> some View {
         VStack(spacing: 4) {
-            ProductPhotoView(product: product, size: 56)
+            // Mesmo tamanho de foto, título e preço das outras listas de produto (publicados,
+            // inativos) — mesmo com duas colunas lado a lado aqui, o tamanho tem que bater.
+            ProductPhotoView(product: product)
             Text(product.title)
-                .font(.caption)
+                .productTitleFont()
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
             if let price = product.formattedPrice {
                 Text(price)
-                    .font(.caption2)
+                    .productPriceFont()
                     .foregroundStyle(.secondary)
             }
             ShareLink(item: product.storePageURL) {

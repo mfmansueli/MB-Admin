@@ -23,6 +23,12 @@ nonisolated struct InactiveProduct: Identifiable, Equatable, Sendable, Codable {
         return EnjoeiPhoto.url(publicID: photoPublicID, size: .thumbnail)
     }
 
+    /// Versão maior da foto, pra quando o usuário toca na miniatura pra ver melhor.
+    var largePhotoURL: URL? {
+        guard let photoPublicID else { return nil }
+        return EnjoeiPhoto.url(publicID: photoPublicID, size: .card)
+    }
+
     private enum CodingKeys: String, CodingKey {
         case id, path, title, price
         case photoPublicID = "photo_public_id"

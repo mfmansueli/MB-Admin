@@ -45,14 +45,18 @@ struct AccountComparisonView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // `.fixedSize()` evita o texto truncar ("fe...") no Mac (idiom otimizado) —
+                    // sem isso, o botão encolhe pro tamanho de uma "pill" fixa em vez de acompanhar
+                    // o texto.
                     Button("fechar") { dismiss() }
+                        .fixedSize()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isShowingQueue = true
                     } label: {
                         if accountsStore.postQueue.isRunning {
-                            ProgressView()
+                            PublishingQueueIcon()
                         } else {
                             Label("fila de publicação", systemImage: "list.bullet.rectangle")
                         }

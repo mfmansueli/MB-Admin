@@ -15,7 +15,7 @@ struct MegaphoneRoundSummaryTests {
 
         let text = summary.summaryText(now: now)
 
-        #expect(text.hasPrefix("última rodada: 78 sucesso, 2 falha, "))
+        #expect(text.hasPrefix("78 sucesso, 2 falha, "))
     }
 
     @Test("é igual quando os três campos são iguais")

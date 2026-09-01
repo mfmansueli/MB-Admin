@@ -30,13 +30,17 @@ struct LoginSheetView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // `.fixedSize()` evita o texto truncar no Mac (idiom otimizado) — sem isso, o
+                    // botão encolhe pro tamanho de uma "pill" fixa em vez de acompanhar o texto.
                     Button("fechar") { dismiss() }
+                        .fixedSize()
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if isCheckingSession {
                         ProgressView()
                     } else {
                         Button("já entrei") { checkSession(triggeredByUser: true) }
+                            .fixedSize()
                     }
                 }
             }

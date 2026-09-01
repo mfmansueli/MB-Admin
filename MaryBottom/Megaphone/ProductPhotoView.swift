@@ -1,14 +1,18 @@
 import SwiftUI
 
-/// Miniatura de um produto que, ao ser tocada, mostra a foto num tamanho maior.
+/// Miniatura de um produto que, ao ser tocada, mostra a foto num tamanho maior. Recebe as URLs
+/// prontas em vez de um `EnjoeiProduct` pra também servir a `InactiveProduct`, que tem seu próprio
+/// tipo de foto.
 struct ProductPhotoView: View {
-    let product: EnjoeiProduct
+    let photoURL: URL?
+    let largePhotoURL: URL?
+    let title: String
     var size: CGFloat = 64
 
     @State private var isShowingFullSize = false
 
     var body: some View {
-        AsyncImage(url: product.photoURL) { image in
+        AsyncImage(url: photoURL) { image in
             image.resizable().scaledToFill()
         } placeholder: {
             RoundedRectangle(cornerRadius: 10).fill(.quaternary)
@@ -18,8 +22,18 @@ struct ProductPhotoView: View {
         .contentShape(.rect)
         .onTapGesture { isShowingFullSize = true }
         .sheet(isPresented: $isShowingFullSize) {
-            ProductPhotoFullSizeView(product: product)
+            ProductPhotoFullSizeView(photoURL: largePhotoURL ?? photoURL, title: title)
         }
+    }
+}
+
+extension ProductPhotoView {
+    init(product: EnjoeiProduct, size: CGFloat = 64) {
+        self.init(photoURL: product.photoURL, largePhotoURL: product.largePhotoURL, title: product.title, size: size)
+    }
+
+    init(product: InactiveProduct, size: CGFloat = 64) {
+        self.init(photoURL: product.thumbnailURL, largePhotoURL: product.largePhotoURL, title: product.title, size: size)
     }
 }
 

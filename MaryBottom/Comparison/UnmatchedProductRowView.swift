@@ -25,14 +25,17 @@ struct UnmatchedProductRowView: View {
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .font(.title3)
             }
-            ProductPhotoView(product: product, size: 48)
+            // Mesmo tamanho de foto de "publicados" e "inativos" — todas as listas de produto
+            // usam o padrão de 64pt do `ProductPhotoView`.
+            ProductPhotoView(product: product)
             VStack(alignment: .leading, spacing: 2) {
+                // Mesmo tamanho de fonte da row de "publicados" (`MegaphoneRowView`).
                 Text(product.title)
-                    .font(.subheadline)
+                    .productTitleFont()
                     .lineLimit(2)
                 if let price = product.formattedPrice {
                     Text(price)
-                        .font(.footnote)
+                        .productPriceFont()
                         .foregroundStyle(.secondary)
                 }
             }

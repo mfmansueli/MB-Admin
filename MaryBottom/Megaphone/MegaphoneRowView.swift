@@ -26,7 +26,7 @@ struct MegaphoneRowView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.product.title)
-                    .font(.headline)
+                    .productTitleFont()
                     .lineLimit(2)
                 if isDeleted {
                     Text("produto apagado")
@@ -99,13 +99,13 @@ struct MegaphoneRowView: View {
         HStack(spacing: 6) {
             if let original = item.product.formattedOriginalPrice, item.product.originalPrice != item.product.currentPrice {
                 Text(original)
-                    .font(.subheadline)
+                    .productPriceFont()
                     .foregroundStyle(.secondary)
                     .strikethrough()
             }
             if let current = item.product.formattedPrice {
                 Text(current)
-                    .font(.subheadline.weight(.semibold))
+                    .productPriceFont(weight: .semibold)
                     .foregroundStyle(.green)
             }
             if let percent = item.computedDiscountPercent {

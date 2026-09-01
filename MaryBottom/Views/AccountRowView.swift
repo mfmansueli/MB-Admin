@@ -23,31 +23,70 @@ struct AccountRowView: View {
                 Text("@\(account.user.nickname)")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text(statusLine)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    // O ícone marca visualmente que essa linha é sobre o megafone — sem ele
+                    // (e com o "última rodada:" que existia antes), a origem do resumo não ficava
+                    // clara à primeira vista.
+                    if showsMegaphoneIcon {
+                        // Pulsa só enquanto o megafone está de fato rodando (não enquanto pausado)
+                        // — é o único sinal, nessa lista compacta, de que uma conta está ativa sem
+                        // precisar entrar nela.
+                        // `.primary`/`.secondary`, não `.accentColor` — numa row selecionada (fundo
+                        // azul da seleção) um ícone azul fixo desaparecia por cima do próprio
+                        // destaque; as cores semânticas se invertem certo em cima da seleção.
+                        Image(systemName: "megaphone.fill")
+                            .font(.caption)
+                            .foregroundStyle(isMegaphoneRunning ? Color.primary : Color.secondary)
+                            .symbolEffect(.pulse, options: .repeating, isActive: isMegaphoneRunning)
+                    }
+                    Text(statusLine)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Mesma condição do primeiro `if` de `statusLine` — sessão expirada não é sobre o megafone,
+    /// então não leva o ícone.
+    private var showsMegaphoneIcon: Bool {
+        account.status != .sessionExpired && crossAccountPostLine == nil
+    }
+
+    /// Diferente de `MegaphonePhase.isActive`: pausado (pelo usuário ou em segundo plano) não conta
+    /// como "rodando" pra esse pulso — a intenção é sinalizar trabalho acontecendo agora, não só
+    /// uma rodada em aberto.
+    private var isMegaphoneRunning: Bool {
+        switch account.runner.phase {
+        case .loadingProducts, .checkingExposure, .megaphoning: true
+        case .idle, .paused, .finished, .cancelled, .failed: false
+        }
+    }
+
+    /// Postagem entre contas (avulsa ou pela fila) mexe com origem e destino ao mesmo tempo —
+    /// mostra em qualquer uma das duas rows envolvidas, mesmo com a tela de comparação fechada.
+    private var crossAccountPostLine: String? {
+        guard let currentItem = accountsStore.postQueue.currentItem else { return nil }
+        if currentItem.sourceAccountID == currentItem.destinationAccountID, currentItem.sourceAccountID == account.id {
+            return "republicando \"\(currentItem.product.title)\"…"
+        }
+        if currentItem.sourceAccountID == account.id {
+            return "postando \"\(currentItem.product.title)\" para \(currentItem.destinationAccountName)…"
+        }
+        if currentItem.destinationAccountID == account.id {
+            return "recebendo \"\(currentItem.product.title)\" de \(currentItem.sourceAccountName)…"
+        }
+        return nil
     }
 
     private var statusLine: String {
         if account.status == .sessionExpired {
             return "sessão expirada — toque para entrar de novo"
         }
-        // Postagem entre contas (avulsa ou pela fila) mexe com origem e destino ao mesmo tempo —
-        // mostra em qualquer uma das duas rows envolvidas, mesmo com a tela de comparação fechada.
-        if let currentItem = accountsStore.postQueue.currentItem {
-            if currentItem.sourceAccountID == currentItem.destinationAccountID, currentItem.sourceAccountID == account.id {
-                return "republicando \"\(currentItem.product.title)\"…"
-            }
-            if currentItem.sourceAccountID == account.id {
-                return "postando \"\(currentItem.product.title)\" para \(currentItem.destinationAccountName)…"
-            }
-            if currentItem.destinationAccountID == account.id {
-                return "recebendo \"\(currentItem.product.title)\" de \(currentItem.sourceAccountName)…"
-            }
+        if let crossAccountPostLine {
+            return crossAccountPostLine
         }
         if account.runner.phase.isActive {
             return MegaphoneStatusText(

@@ -42,7 +42,11 @@ struct PostQueueView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
+                    // `.fixedSize()` evita o texto truncar ("fe...") no Mac (idiom otimizado) —
+                    // sem isso, o botão encolhe pro tamanho de uma "pill" fixa em vez de acompanhar
+                    // o texto.
                     Button("fechar") { dismiss() }
+                        .fixedSize()
                 }
             }
         }

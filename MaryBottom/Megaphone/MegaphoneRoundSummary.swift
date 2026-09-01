@@ -13,6 +13,6 @@ nonisolated struct MegaphoneRoundSummary: Equatable, Sendable, Codable {
         formatter.locale = Locale(identifier: "pt_BR")
         formatter.unitsStyle = .short
         let relative = formatter.localizedString(for: finishedAt, relativeTo: now)
-        return "última rodada: \(succeeded) sucesso, \(failed) falha, \(relative)"
+        return "\(succeeded) sucesso, \(failed) falha, \(relative)"
     }
 }

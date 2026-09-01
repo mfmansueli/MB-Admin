@@ -15,21 +15,16 @@ struct InactiveProductRowView: View {
                     .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
                     .font(.title3)
             }
-            AsyncImage(url: product.thumbnailURL) { image in
-                image.resizable().scaledToFill()
-            } placeholder: {
-                RoundedRectangle(cornerRadius: 10).fill(.quaternary)
-            }
-            .frame(width: 48, height: 48)
-            .clipShape(.rect(cornerRadius: 10))
+            ProductPhotoView(product: product)
 
             VStack(alignment: .leading, spacing: 2) {
+                // Mesmo tamanho de fonte da row de "publicados" (`MegaphoneRowView`).
                 Text(product.title)
-                    .font(.subheadline)
+                    .productTitleFont()
                     .lineLimit(2)
                 if let price = product.formattedPrice {
                     Text(price)
-                        .font(.footnote)
+                        .productPriceFont()
                         .foregroundStyle(.secondary)
                 }
                 if let inactiveSince = product.inactiveSince {

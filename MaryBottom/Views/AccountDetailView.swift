@@ -46,13 +46,12 @@ struct AccountDetailView: View {
             UserHeaderView(
                 user: account.user,
                 megaphoneCount: runner.totalSucceeded,
-                errorCount: runner.totalFailed,
-                productsCount: runner.items.count
+                errorCount: runner.totalFailed
             )
 
             Picker("", selection: $selectedTab) {
                 ForEach(DetailTab.allCases, id: \.self) { tab in
-                    Text(tab.rawValue).tag(tab)
+                    Text(tabLabel(tab)).tag(tab)
                 }
             }
             .pickerStyle(.segmented)
@@ -99,8 +98,16 @@ struct AccountDetailView: View {
                         account.inactiveProductsLoader.load()
                     }
                 } label: {
+                    // Círculo com tamanho fixo (em vez do bezel padrão de toolbar, que no Mac
+                    // idiom otimizado saía pequeno e num "squircle" em vez de redondo) — largura e
+                    // altura iguais garantem o círculo perfeito independente da fonte do sistema.
                     Label("recarregar produtos", systemImage: "arrow.clockwise")
+                        .labelStyle(.iconOnly)
+                        .font(.body.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                        .background(.quaternary, in: .circle)
                 }
+                .buttonStyle(.plain)
                 .disabled(selectedTab == .published && runner.isRunning)
             }
             ToolbarItem(placement: .bottomBar) {
@@ -150,6 +157,20 @@ struct AccountDetailView: View {
 
     private var inactiveContent: some View {
         InactiveProductsListView(account: account)
+    }
+
+    /// Só mostra a quantidade depois de já ter dado carregado (produtos publicados ou inativos) —
+    /// antes disso, o rótulo fica sem número, sem sugerir uma contagem de "0" que ainda não é real.
+    private func tabLabel(_ tab: DetailTab) -> String {
+        switch tab {
+        case .published:
+            guard !runner.items.isEmpty else { return tab.rawValue }
+            return "\(tab.rawValue) (\(runner.items.count.formatted()))"
+        case .inactive:
+            let loader = account.inactiveProductsLoader
+            guard !loader.items.isEmpty || loader.phase == .finished else { return tab.rawValue }
+            return "\(tab.rawValue) (\(loader.items.count.formatted()))"
+        }
     }
 
     private func startLoading() {

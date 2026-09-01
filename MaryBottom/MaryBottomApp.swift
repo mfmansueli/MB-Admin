@@ -12,6 +12,12 @@ struct MaryBottomApp: App {
                 // isso escala todo o texto de uma vez, sem mexer view por view. `.xxxLarge` é o
                 // maior tamanho antes das categorias de acessibilidade (que exigiriam revisar
                 // layouts mais apertados, tipo o segmented picker e os badges de desconto).
+                //
+                // No Mac (idiom otimizado) esse modificador não tem efeito nenhum — testado com
+                // `.xSmall`, `.accessibility1` e `.accessibility5` e o texto saiu bit-a-bit igual
+                // nas três vezes. O Mac idiom do Catalyst simplesmente ignora Dynamic Type; não é
+                // bug daqui, é limitação da plataforma quando "Optimize Interface for Mac" está
+                // ligado.
                 .dynamicTypeSize(.xxxLarge)
         }
     }
