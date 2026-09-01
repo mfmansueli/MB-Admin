@@ -64,7 +64,10 @@ struct AccountsListView: View {
                     }
                 }
                 // Sem isso, o "liquid glass" (iOS 26) funde os dois botões trailing numa cápsula só.
-                ToolbarSpacer(.fixed, placement: .primaryAction)
+                // Versões anteriores não têm liquid glass, então não precisam do spacer.
+                if #available(iOS 26.0, macCatalyst 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     // A fila roda em segundo plano mesmo com a tela de comparação fechada — esse
                     // botão é o único jeito de conferir o andamento dela sem reabrir aquela tela.
