@@ -95,8 +95,14 @@ struct AccountsListView: View {
                     Button {
                         isPresentingComparison = true
                     } label: {
-                        Label("comparar", systemImage: "rectangle.on.rectangle")
-                            .labelStyle(.titleAndIcon)
+                        // No iPad, um `Label` nessa toolbar (dentro da coluna lateral do
+                        // `NavigationSplitView`) vira ícone-only automaticamente, ignorando
+                        // `.labelStyle(.titleAndIcon)` — uma `HStack` manual de ícone+texto escapa
+                        // desse colapso.
+                        HStack(spacing: 4) {
+                            Image(systemName: "rectangle.on.rectangle")
+                            Text("comparar")
+                        }
                     }
                     .disabled(accountsStore.accounts.count < 2)
                 }
