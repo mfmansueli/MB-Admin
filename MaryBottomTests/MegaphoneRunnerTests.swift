@@ -361,10 +361,51 @@ struct MegaphoneRunnerTests {
         #expect(sessionExpiredCount == 0)
     }
 
-    @Test("cada item carregado vem com a exposição correspondente, quando a API devolve uma")
+    @Test("checkExposuresIfNeeded traz a exposição correspondente pra cada item, quando a API devolve uma")
     func itensVemComExposicao() async {
         let client = StubEnjoeiClient(
             pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            exposuresByProductID: [
+                1: MegaphoneExposure(
+                    productID: 1, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        // Carregar sozinho não confere exposição nenhuma — ver `naoConfereExposicaoAoCarregar`.
+        #expect(runner.items.allSatisfy { $0.exposure == nil })
+
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+
+        #expect(runner.items.first { $0.id == 1 }?.exposure?.kind == .maximumAfterDiscount)
+        #expect(runner.items.first { $0.id == 2 }?.exposure == nil)
+        #expect(runner.hasCheckedExposures)
+    }
+
+    @Test("pede exposição em lotes do tamanho configurado")
+    func pedeExposicaoEmLotes() async {
+        let ids = Array(1...5)
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: ids, endCursor: nil)])
+        let runner = makeRunner(client: client)
+        runner.exposureBatchSize = 2
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+
+        let batches = await client.requestedExposureBatches
+        #expect(batches.count == 3)
+        #expect(batches.flatMap { $0 } == ids)
+    }
+
+    @Test("carregar a loja não confere exposição — isso só acontece sob demanda, via checkExposuresIfNeeded")
+    func naoConfereExposicaoAoCarregar() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)],
             exposuresByProductID: [
                 1: MegaphoneExposure(
                     productID: 1, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
@@ -376,23 +417,64 @@ struct MegaphoneRunnerTests {
         runner.start(sellerID: 1)
         await runner.waitUntilFinished()
 
-        #expect(runner.items.first { $0.id == 1 }?.exposure?.kind == .maximumAfterDiscount)
-        #expect(runner.items.first { $0.id == 2 }?.exposure == nil)
+        #expect(runner.items.allSatisfy { $0.exposure == nil })
+        #expect(await client.requestedExposureBatches.isEmpty)
+        #expect(runner.hasCheckedExposures == false)
     }
 
-    @Test("pede exposição em lotes do tamanho configurado")
-    func pedeExposicaoEmLotes() async {
-        let ids = Array(1...5)
-        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: ids, endCursor: nil)])
+    @Test("checkExposuresIfNeeded não faz nada com a lista vazia")
+    func checkExposuresIgnoradoComListaVazia() async {
+        let client = StubEnjoeiClient()
         let runner = makeRunner(client: client)
-        runner.exposureBatchSize = 2
 
-        runner.start(sellerID: 1)
+        runner.checkExposuresIfNeeded()
         await runner.waitUntilFinished()
 
-        let batches = await client.requestedExposureBatches
-        #expect(batches.count == 3)
-        #expect(batches.flatMap { $0 } == ids)
+        #expect(await client.requestedExposureBatches.isEmpty)
+        #expect(runner.hasCheckedExposures == false)
+    }
+
+    @Test("checkExposuresIfNeeded não busca de novo depois de já ter conferido")
+    func checkExposuresNaoRepeteDepoisDeConferido() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
+        let runner = makeRunner(client: client)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+        #expect(await client.requestedExposureBatches.count == 1)
+
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+
+        #expect(await client.requestedExposureBatches.count == 1)
+    }
+
+    @Test("uma lista nova (reload) libera conferir a exposição de novo")
+    func reloadLiberaConferirExposicaoDeNovo() async {
+        let client = StubEnjoeiClient(pages: [
+            EnjoeiFixtures.page(ids: [1, 2], endCursor: nil),
+            EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)
+        ])
+        let runner = makeRunner(client: client)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+        #expect(runner.hasCheckedExposures)
+
+        runner.reload(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.hasCheckedExposures == false)
+        #expect(runner.items.allSatisfy { $0.exposure == nil })
+
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+
+        #expect(await client.requestedExposureBatches.count == 2)
+        #expect(runner.hasCheckedExposures)
     }
 
     @Test("aplicar desconto num item ainda não alcançado pelo laço megafona com o preço sugerido")
@@ -406,9 +488,15 @@ struct MegaphoneRunnerTests {
             ]
         )
         let runner = makeRunner(client: client)
+        // O botão de aplicar desconto só existe pra um item com exposição já conferida — precisa
+        // vir antes de `start`, igual à tela faz ao abrir o filtro "pede desconto".
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+
         runner.start(sellerID: 1)
         runner.pause()
-        await waitUntil { !runner.items.isEmpty }
 
         runner.applyDiscount(for: 2)
         await waitUntil { runner.items.first { $0.id == 2 }?.status != .megaphoning }
@@ -432,16 +520,20 @@ struct MegaphoneRunnerTests {
             ]
         )
         let runner = makeRunner(client: client)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+
         runner.start(sellerID: 1)
         runner.pause()
-        await waitUntil { !runner.items.isEmpty }
 
         runner.applyDiscount(for: 2)
         await waitUntil { runner.items.first { $0.id == 2 }?.status != .megaphoning }
 
         #expect(runner.items.first { $0.id == 2 }?.status == .succeeded)
         // "token-1" já saiu antes da pausa valer: `run` busca um token pra fila logo depois de
-        // carregar os itens, antes do laço checar `pauseReason`.
+        // reaproveitar os itens já carregados, antes do laço checar `pauseReason`.
         #expect(await client.usedTokens == ["token-2", "token-3"])
 
         runner.cancel()
@@ -459,9 +551,13 @@ struct MegaphoneRunnerTests {
             ]
         )
         let runner = makeRunner(client: client)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        runner.checkExposuresIfNeeded()
+        await runner.waitUntilFinished()
+
         runner.start(sellerID: 1)
         runner.pause()
-        await waitUntil { !runner.items.isEmpty }
 
         runner.applyDiscount(for: 1)
         await waitUntil { runner.items.first { $0.id == 1 }?.status != .megaphoning }
@@ -475,23 +571,15 @@ struct MegaphoneRunnerTests {
         #expect(runner.phase == .finished)
     }
 
-    @Test("load só carrega e confere exposição, sem megafonar nada")
+    @Test("load só carrega os produtos, sem megafonar nada")
     func loadSoCarrega() async {
-        let client = StubEnjoeiClient(
-            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
-            exposuresByProductID: [
-                1: MegaphoneExposure(
-                    productID: 1, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
-                )
-            ]
-        )
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
         let runner = makeRunner(client: client)
 
         runner.load(sellerID: 1)
         await runner.waitUntilFinished()
 
         #expect(runner.items.map(\.id) == [1, 2])
-        #expect(runner.items.first { $0.id == 1 }?.exposure?.kind == .maximumAfterDiscount)
         #expect(await client.megaphonedIDs.isEmpty)
         #expect(runner.phase == .idle)
         #expect(runner.isRunning == false)
@@ -615,6 +703,8 @@ struct MegaphoneRunnerTests {
         )
         let runner = makeRunner(client: client)
         runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+        runner.checkExposuresIfNeeded()
         await runner.waitUntilFinished()
         runner.applyDiscount(for: 1)
         await waitUntil { runner.items.first { $0.id == 1 }?.status != .megaphoning }

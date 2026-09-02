@@ -26,6 +26,23 @@ nonisolated enum ProductSimilarity {
         let words = folded
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }
-        return Set(words)
+        return Set(words.map(singularized))
+    }
+
+    /// Reduz plural pro singular (regras comuns do português) pra "colar"/"colares" ou
+    /// "brinco"/"brincos" virarem o mesmo token — sem isso, uma conta anunciando no plural e outra
+    /// no singular derruba o score e o par cai em "divergente" mesmo sendo o mesmo produto.
+    /// Heurística, não gramática completa: só cobre os casos mais comuns em título de produto.
+    private static func singularized(_ word: String) -> String {
+        if word.count > 4, word.hasSuffix("es") {
+            let stem = String(word.dropLast(2))
+            if let last = stem.last, "rzn".contains(last) {
+                return stem
+            }
+        }
+        if word.count > 3, word.hasSuffix("s") {
+            return String(word.dropLast())
+        }
+        return word
     }
 }

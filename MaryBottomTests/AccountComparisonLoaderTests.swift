@@ -12,48 +12,59 @@ struct AccountComparisonLoaderTests {
         )
     }
 
-    @Test("com as duas contas já carregadas, compara direto sem buscar de novo")
-    func naoBuscaDeNovoQuandoJaCarregado() async {
-        // Páginas manuais, com títulos controlados, pra confirmar que o casamento saiu certo.
+    @Test("mesmo com o runner já carregado, comparar busca de novo — não reaproveita a lista, que pode estar desatualizada")
+    func buscaDeNovoMesmoJaCarregado() async {
+        let title = "colar curto prata 925 zircônia branca"
         let clientA = StubEnjoeiClient(pages: [
-            StoreProductsPage(
-                products: [EnjoeiFixtures.product(id: 1, title: "colar curto prata 925 zircônia branca")],
-                total: 1,
-                endCursor: nil
-            )
+            // Primeira página: consumida pelo carregamento manual do runner abaixo, simulando um
+            // estado velho na conta (produto id 1).
+            StoreProductsPage(products: [EnjoeiFixtures.product(id: 1, title: title)], total: 1, endCursor: nil),
+            // Segunda página: o que o servidor devolve agora, com um produto novo (id 99) — como se
+            // tivesse sido ativado/editado depois do carregamento manual.
+            StoreProductsPage(products: [EnjoeiFixtures.product(id: 99, title: title)], total: 1, endCursor: nil)
         ])
         let accountA = makeAccount(client: clientA)
         accountA.runner.load(sellerID: 1)
         await accountA.runner.waitUntilFinished()
+        #expect(accountA.runner.items.map(\.id) == [1])
 
         let clientB = StubEnjoeiClient(pages: [
-            StoreProductsPage(
-                products: [EnjoeiFixtures.product(id: 2, title: "colar curto prata 925 zircônia")],
-                total: 1,
-                endCursor: nil
-            )
+            StoreProductsPage(products: [EnjoeiFixtures.product(id: 2, title: title)], total: 1, endCursor: nil)
         ])
         let accountB = makeAccount(client: clientB)
-        accountB.runner.load(sellerID: 2)
-        await accountB.runner.waitUntilFinished()
-
-        #expect(await clientA.requestedCursors.count == 1)
-        #expect(await clientB.requestedCursors.count == 1)
 
         let loader = AccountComparisonLoader()
         loader.compare(accountA: accountA, accountB: accountB)
         await loader.waitUntilFinished()
 
-        // As duas já tinham produto carregado — comparar não deve ter disparado outra busca.
-        #expect(await clientA.requestedCursors.count == 1)
-        #expect(await clientB.requestedCursors.count == 1)
+        // "comparar" é um pedido explícito de estado atual — precisa buscar de novo, não reaproveitar
+        // `runner.items`, senão um produto ativado/editado depois do carregamento anterior nunca
+        // apareceria na comparação.
+        #expect(await clientA.requestedCursors.count == 2)
 
         guard case .finished(let result) = loader.phase else {
             Issue.record("esperava .finished, veio \(loader.phase)")
             return
         }
-        #expect(result.matches.map(\.productA.id) == [1])
+        // Casou com o produto 99 (buscado agora pela comparação), não o 1 (que ficou só na lista
+        // velha do runner).
+        #expect(result.matches.map(\.productA.id) == [99])
         #expect(result.matches.map(\.productB.id) == [2])
+    }
+
+    @Test("comparar não consulta exposição — isso é coisa do megafone e deixaria a comparação lenta à toa")
+    func naoConsultaExposicao() async {
+        let clientA = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)])
+        let accountA = makeAccount(client: clientA)
+        let clientB = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)])
+        let accountB = makeAccount(client: clientB)
+
+        let loader = AccountComparisonLoader()
+        loader.compare(accountA: accountA, accountB: accountB)
+        await loader.waitUntilFinished()
+
+        #expect(await clientA.requestedExposureBatches.isEmpty)
+        #expect(await clientB.requestedExposureBatches.isEmpty)
     }
 
     @Test("conta sem produtos carregados busca sozinha antes de comparar")
@@ -93,7 +104,7 @@ struct AccountComparisonLoaderTests {
         loader.compare(accountA: accountA, accountB: accountB)
 
         // O phase muda pra loadingProducts na hora, antes de qualquer await — sincronamente.
-        #expect(loader.phase == .loadingProducts)
+        #expect(loader.phase == .loadingProducts(loaded: 0, total: 0))
 
         await loader.waitUntilFinished()
 

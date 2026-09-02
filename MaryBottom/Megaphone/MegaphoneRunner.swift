@@ -22,6 +22,9 @@ final class MegaphoneRunner {
     /// apagar não é megafonar, e reaproveitar o mesmo campo faria o laço automático pular um
     /// produto só porque ele está sendo apagado.
     private(set) var deleteStatuses: [Int: MegaphoneStatus] = [:]
+    /// Já conferiu a exposição da lista atual — sem isso, reabrir o filtro "pede desconto" chamaria
+    /// a rota de novo a cada toque.
+    private(set) var hasCheckedExposures = false
 
     /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei.
     var delayBetweenProducts: Duration = .milliseconds(900)
@@ -95,14 +98,16 @@ final class MegaphoneRunner {
         start(sellerID: sellerID, rounds: rounds)
     }
 
-    /// Guarda a lista recém-carregada (produtos + exposição) tanto na tela quanto em disco, pra
-    /// não precisar buscar a loja de novo na próxima abertura do app.
+    /// Guarda a lista recém-carregada (só produtos — exposição vem depois, sob demanda) tanto na
+    /// tela quanto em disco, pra não precisar buscar a loja de novo na próxima abertura do app.
     private func setLoadedItems(_ items: [MegaphoneItem]) {
         self.items = items
+        // Lista nova: qualquer exposição conferida antes era pra outros produtos.
+        hasCheckedExposures = false
         itemsPersistence.saveItems(items, accountID: accountID)
     }
 
-    /// Só carrega os produtos da loja e confere a exposição — não começa a megafonar. Serve pra
+    /// Só carrega os produtos da loja — não confere exposição nem começa a megafonar. Serve pra
     /// popular a lista sozinho ao abrir a tela, sem disparar boost nenhum sem o usuário pedir
     /// (isso continua exigindo o toque em "megafonar", que sempre busca tudo de novo).
     func load(sellerID: Int) {
@@ -121,15 +126,40 @@ final class MegaphoneRunner {
                 phase = .idle
                 return
             }
-            phase = .checkingExposure(checked: 0, total: products.count)
-            let exposures = try await loadExposures(productIDs: products.map(\.id))
-            setLoadedItems(products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) })
+            setLoadedItems(products.map { MegaphoneItem(product: $0) })
             phase = .idle
         } catch {
             // Falha ou cancelamento na busca automática não vira alarme — o usuário ainda pode
             // tocar em "megafonar" pra tentar de propósito e ver o erro de verdade.
             phase = .idle
         }
+    }
+
+    /// Confere quais produtos já carregados pedem decisão de desconto — só quando o filtro "pede
+    /// desconto" é aberto pela primeira vez. Antes disso, carregar a lista não passa por essa rota
+    /// (WebView, em lotes) — ela é bem mais lenta que a busca dos produtos em si, e a maior parte
+    /// das aberturas de tela nem chega a usar o filtro.
+    func checkExposuresIfNeeded() {
+        guard !items.isEmpty, !hasCheckedExposures, task == nil else { return }
+        task = Task { [weak self] in
+            await self?.checkExposures()
+            self?.task = nil
+        }
+    }
+
+    private func checkExposures() async {
+        phase = .checkingExposure(checked: 0, total: items.count)
+        do {
+            let exposures = try await loadExposures(productIDs: items.map(\.id))
+            for index in items.indices {
+                items[index].exposure = exposures[items[index].id]
+            }
+            hasCheckedExposures = true
+            itemsPersistence.saveItems(items, accountID: accountID)
+        } catch {
+            // Falha aqui não é fatal — o filtro fica vazio e o usuário pode tentar de novo.
+        }
+        phase = .idle
     }
 
     func cancel() {
@@ -190,9 +220,7 @@ final class MegaphoneRunner {
                     finish(.finished)
                     return
                 }
-                phase = .checkingExposure(checked: 0, total: products.count)
-                let exposures = try await loadExposures(productIDs: products.map(\.id))
-                setLoadedItems(products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) })
+                setLoadedItems(products.map { MegaphoneItem(product: $0) })
             }
 
             var token = try await client.csrfToken()

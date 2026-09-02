@@ -95,7 +95,7 @@ struct AccountComparisonView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(accountA == nil || accountB == nil || loader.phase == .loadingProducts)
+                .disabled(accountA == nil || accountB == nil || isLoadingProducts)
             }
             .padding(.horizontal, 20)
             .padding(.top, 12)
@@ -118,6 +118,11 @@ struct AccountComparisonView: View {
         }
     }
 
+    private var isLoadingProducts: Bool {
+        if case .loadingProducts = loader.phase { return true }
+        return false
+    }
+
     @ViewBuilder
     private var resultView: some View {
         switch loader.phase {
@@ -128,9 +133,19 @@ struct AccountComparisonView: View {
                 description: Text("escolha as duas contas acima e toque em \"comparar\".")
             )
             .frame(maxHeight: .infinity)
-        case .loadingProducts:
+        case .loadingProducts(let loaded, let total):
             Spacer()
-            ProgressView("carregando produtos…")
+            if total > 0 {
+                VStack(spacing: 8) {
+                    ProgressView(value: Double(loaded), total: Double(total))
+                        .frame(maxWidth: 220)
+                    Text("carregando produtos… \(loaded) de \(total)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ProgressView("carregando produtos…")
+            }
             Spacer()
         case .finished(let result):
             if let accountA, let accountB {

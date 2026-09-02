@@ -39,8 +39,11 @@ struct UnmatchedProductRowView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            // Sempre presente, mesmo selecionando (sem os botões à direita) — sem isso, a `HStack`
+            // encolhe pro tamanho do conteúdo em vez de ocupar a largura da row, e o divisor da
+            // lista (que segue essa largura) fica curto em vez de ir de ponta a ponta.
+            Spacer(minLength: 8)
             if !isSelecting {
-                Spacer(minLength: 8)
                 ShareLink(item: product.storePageURL) {
                     Image(systemName: "square.and.arrow.up")
                         .foregroundStyle(.secondary)

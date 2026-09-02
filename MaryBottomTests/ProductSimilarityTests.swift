@@ -40,4 +40,10 @@ struct ProductSimilarityTests {
         #expect(ProductSimilarity.score("", "colar curto prata") == 0)
         #expect(ProductSimilarity.score("", "") == 0)
     }
+
+    @Test("plural vs singular (só a letra 's' de diferença) não derruba o score")
+    func pluralVersusSingular() {
+        #expect(ProductSimilarity.score("colar curto prata", "colares curto prata") == 1)
+        #expect(ProductSimilarity.score("brinco argola ouro", "brincos argola ouro") == 1)
+    }
 }

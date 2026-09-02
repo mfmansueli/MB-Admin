@@ -75,6 +75,18 @@ struct AccountProductMatcherTests {
         #expect(resultBothEmpty.onlyInB.isEmpty)
     }
 
+    @Test("título divergindo só no plural (letra 's') ainda vira par, não fica como divergente")
+    func pluralNaoViraDivergente() {
+        let a = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925 zircônia")
+        let b = EnjoeiFixtures.product(id: 2, title: "colares curto prata 925 zircônia")
+
+        let result = AccountProductMatcher.compare(productsA: [a], productsB: [b])
+
+        #expect(result.matches.count == 1)
+        #expect(result.onlyInA.isEmpty)
+        #expect(result.onlyInB.isEmpty)
+    }
+
     @Test("threshold customizado muda o resultado")
     func thresholdCustomizado() {
         let a = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925 zircônia branca clássico")

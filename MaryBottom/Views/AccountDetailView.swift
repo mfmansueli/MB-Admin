@@ -145,7 +145,12 @@ struct AccountDetailView: View {
             speedMenu
         }
 
-        MegaphoneProgressView(runner: runner)
+        // "conferindo quais pedem desconto" e "buscando seus produtos" já aparecem embutidos no
+        // lugar da lista (ver `exposureCheckingView` e `productsLoadingView`) — repetir aqui em
+        // cima seria a mesma informação duas vezes. Essa barra fica só pro andamento do megafone.
+        if !isCheckingExposure, !isLoadingProducts {
+            MegaphoneProgressView(runner: runner)
+        }
 
         HStack(spacing: 12) {
             searchField
@@ -153,6 +158,16 @@ struct AccountDetailView: View {
         }
 
         productList
+    }
+
+    private var isCheckingExposure: Bool {
+        if case .checkingExposure = runner.phase { return true }
+        return false
+    }
+
+    private var isLoadingProducts: Bool {
+        if case .loadingProducts = runner.phase { return true }
+        return false
     }
 
     private var inactiveContent: some View {
@@ -345,17 +360,68 @@ struct AccountDetailView: View {
         return items.filter { $0.product.title.localizedCaseInsensitiveContains(trimmedSearch) }
     }
 
+    /// Progresso de `checkExposuresIfNeeded` — igual à barra que `MegaphoneProgressView` já mostra
+    /// pro resto do megafone, só que aqui embutida no lugar da lista, que é onde o usuário está
+    /// olhando quando abre o filtro "pede desconto".
+    @ViewBuilder
+    private var exposureCheckingView: some View {
+        if case .checkingExposure(let checked, let total) = runner.phase, total > 0 {
+            VStack(spacing: 8) {
+                ProgressView(value: Double(checked), total: Double(total))
+                    .frame(maxWidth: 220)
+                Text("conferindo quais pedem desconto… \(checked) de \(total)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            ProgressView("conferindo quais pedem desconto…")
+        }
+    }
+
+    /// Mesma ideia de `exposureCheckingView`, pro carregamento inicial da lista — embutido no
+    /// lugar do "nenhum produto na fila" enquanto a busca ainda está em andamento, pra a barra de
+    /// cima (`MegaphoneProgressView`) ficar livre só pro andamento do megafone em si.
+    @ViewBuilder
+    private var productsLoadingView: some View {
+        if case .loadingProducts(let loaded, let total) = runner.phase, total > 0 {
+            VStack(spacing: 8) {
+                ProgressView(value: Double(loaded), total: Double(total))
+                    .frame(maxWidth: 220)
+                Text("buscando seus produtos… \(loaded) de \(total)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            ProgressView("buscando seus produtos…")
+        }
+    }
+
     @ViewBuilder
     private var productList: some View {
         if runner.items.isEmpty {
-            ContentUnavailableView(
-                "nenhum produto na fila",
-                systemImage: "shippingbox",
-                description: Text("toque em megafonar para buscar os produtos da sua loja.")
-            )
-            .frame(maxHeight: .infinity)
+            if isLoadingProducts {
+                productsLoadingView
+                    .frame(maxHeight: .infinity)
+            } else {
+                ContentUnavailableView(
+                    "nenhum produto na fila",
+                    systemImage: "shippingbox",
+                    description: Text("toque em megafonar para buscar os produtos da sua loja.")
+                )
+                .frame(maxHeight: .infinity)
+            }
         } else if filteredItems.isEmpty {
-            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if filter == .discountOnly, !runner.hasCheckedExposures {
+                // Filtro aberto antes de qualquer conferência (ou depois de um recarregar, que
+                // descarta a exposição junto com a lista antiga) — dispara a checagem só agora, e
+                // mostra isso em vez de "nenhum produto pede desconto agora", que seria enganoso
+                // enquanto a resposta de verdade ainda não chegou.
+                exposureCheckingView
+                    .frame(maxHeight: .infinity)
+                    .task(id: runner.items.count) {
+                        runner.checkExposuresIfNeeded()
+                    }
+            } else if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 ContentUnavailableView.search(text: searchText)
                     .frame(maxHeight: .infinity)
             } else {
