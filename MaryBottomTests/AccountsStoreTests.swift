@@ -78,6 +78,65 @@ struct AccountsStoreTests {
         #expect(store.accounts.count == 2)
     }
 
+    @Test("erro que não é sessão vencida vira checkFailed, sem tirar a conta da lista")
+    func erroTransitorioViraCheckFailed() async {
+        let id = EnjoeiAccountID()
+        let persistence = InMemoryAccountsPersistence(
+            stored: [AccountRecord(id: id, user: .stub, lastRoundSummary: nil)]
+        )
+        let store = makeStore(
+            clientsByID: [id: StubEnjoeiClient(currentUserError: .http(status: 503, message: "fora do ar"))],
+            persistence: persistence
+        )
+
+        await store.restoreAccounts()
+
+        #expect(store.accounts.count == 1)
+        #expect(store.accounts.first?.status == .checkFailed)
+    }
+
+    @Test("retryCheckingSession confere de novo só a conta pedida, sem mexer nas outras")
+    func retryCheckingSessionConfereDeNovo() async {
+        let id = EnjoeiAccountID()
+        let otherID = EnjoeiAccountID()
+        let persistence = InMemoryAccountsPersistence(stored: [
+            AccountRecord(id: id, user: .stub, lastRoundSummary: nil),
+            AccountRecord(id: otherID, user: otherUser, lastRoundSummary: nil)
+        ])
+        let client = StubEnjoeiClient(currentUserError: .http(status: 503, message: "fora do ar"))
+        let store = makeStore(
+            clientsByID: [id: client, otherID: StubEnjoeiClient(user: otherUser)],
+            persistence: persistence
+        )
+        await store.restoreAccounts()
+        #expect(store.accounts.first { $0.id == id }?.status == .checkFailed)
+
+        await client.setCurrentUserError(nil)
+        store.retryCheckingSession(for: id)
+        await waitUntil { store.accounts.first { $0.id == id }?.status == .active }
+
+        #expect(store.accounts.first { $0.id == id }?.status == .active)
+        #expect(store.accounts.first { $0.id == otherID }?.status == .active)
+    }
+
+    @Test("retryCheckingSession que ainda falha com sessão vencida marca sessionExpired de verdade")
+    func retryCheckingSessionComSessaoVencidaDeVerdade() async {
+        let id = EnjoeiAccountID()
+        let persistence = InMemoryAccountsPersistence(
+            stored: [AccountRecord(id: id, user: .stub, lastRoundSummary: nil)]
+        )
+        let client = StubEnjoeiClient(currentUserError: .http(status: 503, message: "fora do ar"))
+        let store = makeStore(clientsByID: [id: client], persistence: persistence)
+        await store.restoreAccounts()
+        #expect(store.accounts.first?.status == .checkFailed)
+
+        await client.setCurrentUserError(.notAuthenticated)
+        store.retryCheckingSession(for: id)
+        await waitUntil { store.accounts.first?.status == .sessionExpired }
+
+        #expect(store.accounts.first?.status == .sessionExpired)
+    }
+
     @Test("login de conta nova, sem duplicata, entra na lista e persiste")
     func loginContaNovaEntraNaLista() async {
         let id = EnjoeiAccountID()
@@ -256,5 +315,13 @@ struct AccountsStoreTests {
         #expect(account.lastRoundSummary?.succeeded == 2)
         #expect(account.lastRoundSummary?.failed == 0)
         #expect(persistence.stored.first?.lastRoundSummary?.succeeded == 2)
+    }
+
+    /// Espera uma condição sem prender o teste pra sempre se algo der errado — `retryCheckingSession`
+    /// dispara a checagem numa `Task` solta, sem devolver algo pra esperar direto.
+    private func waitUntil(_ condition: () -> Bool) async {
+        for _ in 0..<10_000 where !condition() {
+            await Task.yield()
+        }
     }
 }

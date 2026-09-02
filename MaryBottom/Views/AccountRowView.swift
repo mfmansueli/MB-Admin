@@ -49,10 +49,10 @@ struct AccountRowView: View {
         .padding(.vertical, 4)
     }
 
-    /// Mesma condição do primeiro `if` de `statusLine` — sessão expirada não é sobre o megafone,
-    /// então não leva o ícone.
+    /// Mesma condição dos primeiros `if`s de `statusLine` — sessão expirada ou não conferida ainda
+    /// não são sobre o megafone, então não levam o ícone.
     private var showsMegaphoneIcon: Bool {
-        account.status != .sessionExpired && crossAccountPostLine == nil
+        account.status == .active && crossAccountPostLine == nil
     }
 
     /// Diferente de `MegaphonePhase.isActive`: pausado (pelo usuário ou em segundo plano) não conta
@@ -65,10 +65,23 @@ struct AccountRowView: View {
         }
     }
 
-    /// Postagem entre contas (avulsa ou pela fila) mexe com origem e destino ao mesmo tempo —
-    /// mostra em qualquer uma das duas rows envolvidas, mesmo com a tela de comparação fechada.
+    /// Postagem (ou exclusão) entre contas mexe com origem e destino ao mesmo tempo — mostra em
+    /// qualquer uma das duas rows envolvidas, mesmo com a tela de comparação fechada.
     private var crossAccountPostLine: String? {
         guard let currentItem = accountsStore.postQueue.currentItem else { return nil }
+        switch currentItem.kind {
+        case .delete:
+            guard currentItem.sourceAccountID == account.id else { return nil }
+            return "apagando \"\(currentItem.product.title)\"…"
+        case .inactivate:
+            guard currentItem.sourceAccountID == account.id else { return nil }
+            return "inativando \"\(currentItem.product.title)\"…"
+        case .activate:
+            guard currentItem.sourceAccountID == account.id else { return nil }
+            return "ativando \"\(currentItem.product.title)\"…"
+        case .post:
+            break
+        }
         if currentItem.sourceAccountID == currentItem.destinationAccountID, currentItem.sourceAccountID == account.id {
             return "republicando \"\(currentItem.product.title)\"…"
         }
@@ -84,6 +97,9 @@ struct AccountRowView: View {
     private var statusLine: String {
         if account.status == .sessionExpired {
             return "sessão expirada — toque para entrar de novo"
+        }
+        if account.status == .checkFailed {
+            return "não deu pra conferir a sessão — toque para tentar de novo"
         }
         if let crossAccountPostLine {
             return crossAccountPostLine

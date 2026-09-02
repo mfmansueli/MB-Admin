@@ -5,6 +5,7 @@ struct AccountDetailView: View {
     let account: AccountSession
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(AccountsStore.self) private var accountsStore
     /// Quantas vezes repetir a lista. Fica guardado entre execuções do app (0 = infinito). Por
     /// conta: com contas rodando em paralelo, uma preferência global faria trocar a velocidade de
     /// uma afetar silenciosamente as outras já em andamento.
@@ -18,6 +19,16 @@ struct AccountDetailView: View {
     /// Quando ativo, a lista rola sozinha até o produto que está sendo megafonado no momento.
     @State private var isFollowing = true
     @State private var selectedTab: DetailTab = .published
+    /// Seleção múltipla, disponível nos dois filtros — a ação em massa muda conforme o filtro
+    /// atual: aplicar desconto em "pede desconto" (única ação possível ali), ou
+    /// repostar/inativar/apagar (escolhido pelo usuário) em "todos os anúncios".
+    @State private var isSelecting = false
+    @State private var selectedIDs: Set<Int> = []
+    @State private var bulkAction: BulkAction = .repost
+    @State private var isConfirmingBulkApply = false
+    @State private var isConfirmingBulkRepost = false
+    @State private var isConfirmingBulkDelete = false
+    @State private var isConfirmingBulkInactivate = false
 
     private var runner: MegaphoneRunner { account.runner }
     private var keepAlive: MegaphoneKeepAlive { account.keepAlive }
@@ -25,6 +36,40 @@ struct AccountDetailView: View {
     private enum ProductFilter {
         case all
         case discountOnly
+    }
+
+    /// Ação escolhida pro botão de confirmar da seleção múltipla, no filtro "todos os anúncios" —
+    /// "pede desconto" não usa isso, só tem uma ação possível ali (aplicar desconto).
+    private enum BulkAction: CaseIterable {
+        case repost
+        case inactivate
+        case delete
+
+        var label: String {
+            switch self {
+            case .repost: "repostar"
+            case .inactivate: "inativar"
+            case .delete: "apagar"
+            }
+        }
+
+        /// Mesmos ícones do menu "..." de cada linha, pro botão de confirmar em massa reconhecer
+        /// de longe (junto com a cor) qual ação está selecionada.
+        var systemImage: String {
+            switch self {
+            case .repost: "doc.on.doc.fill"
+            case .inactivate: "archivebox.fill"
+            case .delete: "trash.fill"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .repost: .accentColor
+            case .inactivate: .secondary
+            case .delete: .red
+            }
+        }
     }
 
     private enum DetailTab: String, CaseIterable {
@@ -81,22 +126,25 @@ struct AccountDetailView: View {
             @unknown default: break
             }
         }
+        // A seleção só faz sentido dentro do filtro "pede desconto" — trocar de filtro (ou sair
+        // dele) com itens marcados deixaria a seleção "invisível" mas ainda contando pro botão de
+        // aplicar em massa.
+        .onChange(of: filter) { _, _ in
+            isSelecting = false
+            selectedIDs.removeAll()
+            bulkAction = .repost
+        }
         .navigationTitle(account.user.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                // Recarrega a aba que está na tela agora — publicados busca a loja de novo do
-                // zero, inativos refaz a raspagem das páginas de novo (é o único jeito de tentar
-                // de novo manualmente, além do botão "tentar de novo" que só aparece quando dá
-                // erro de verdade).
+                // Recarrega as duas abas de uma vez, não só a que está na tela agora — publicados
+                // busca a loja de novo do zero, inativos refaz a raspagem das páginas de novo (é
+                // o único jeito de tentar de novo manualmente, além do botão "tentar de novo" que
+                // só aparece quando dá erro de verdade).
                 Button {
-                    switch selectedTab {
-                    case .published:
-                        runner.delayBetweenProducts = speed.duration
-                        runner.reload(sellerID: account.user.id, rounds: rounds)
-                    case .inactive:
-                        account.inactiveProductsLoader.load()
-                    }
+                    runner.reload(sellerID: account.user.id)
+                    account.inactiveProductsLoader.load()
                 } label: {
                     // Círculo com tamanho fixo (em vez do bezel padrão de toolbar, que no Mac
                     // idiom otimizado saía pequeno e num "squircle" em vez de redondo) — largura e
@@ -108,7 +156,9 @@ struct AccountDetailView: View {
                         .background(.quaternary, in: .circle)
                 }
                 .buttonStyle(.plain)
-                .disabled(selectedTab == .published && runner.isRunning)
+                // Sempre mexe nos publicados agora, mesmo vendo "inativos" — desabilita em
+                // qualquer aba enquanto o megafone está rodando, não só na de publicados.
+                .disabled(runner.isRunning)
             }
             ToolbarItem(placement: .bottomBar) {
                 Spacer()
@@ -129,11 +179,17 @@ struct AccountDetailView: View {
                 }
             }
         }
-        // Ao entrar na conta pela primeira vez, já busca os produtos sozinho — sem começar a
-        // megafonar por conta própria (isso continua exigindo o toque explícito no botão).
+        // Ao entrar na conta pela primeira vez, já busca sozinho os produtos publicados (com a
+        // exposição de cada um, pro filtro "pede desconto" já vir pronto) e os inativos, em
+        // paralelo — sem começar a megafonar por conta própria (isso continua exigindo o toque
+        // explícito no botão "megafonar", em nenhuma hipótese disparado sozinho por aqui).
         .task {
-            guard runner.items.isEmpty, !runner.isRunning else { return }
-            runner.load(sellerID: account.user.id)
+            if runner.items.isEmpty, !runner.isRunning {
+                runner.load(sellerID: account.user.id)
+            }
+            if account.inactiveProductsLoader.items.isEmpty, account.inactiveProductsLoader.phase == .idle {
+                account.inactiveProductsLoader.load()
+            }
         }
     }
 
@@ -145,29 +201,201 @@ struct AccountDetailView: View {
             speedMenu
         }
 
-        // "conferindo quais pedem desconto" e "buscando seus produtos" já aparecem embutidos no
-        // lugar da lista (ver `exposureCheckingView` e `productsLoadingView`) — repetir aqui em
-        // cima seria a mesma informação duas vezes. Essa barra fica só pro andamento do megafone.
-        if !isCheckingExposure, !isLoadingProducts {
-            MegaphoneProgressView(runner: runner)
-        }
+        MegaphoneProgressView(runner: runner)
 
         HStack(spacing: 12) {
             searchField
             filterPicker
         }
 
+        selectionBar
+
         productList
     }
 
-    private var isCheckingExposure: Bool {
-        if case .checkingExposure = runner.phase { return true }
-        return false
+    /// Seleção múltipla da lista de publicados — a ação em massa muda conforme o filtro atual:
+    /// aplicar o desconto sugerido em "pede desconto" (só esses itens têm o que aplicar), ou
+    /// repostar em "todos os anúncios" (mesma ação do menu "..." de cada linha, em lote).
+    @ViewBuilder
+    private var selectionBar: some View {
+        if !filteredItems.isEmpty {
+            HStack {
+                Button(isSelecting ? "cancelar seleção" : "selecionar") {
+                    isSelecting.toggle()
+                    if !isSelecting {
+                        selectedIDs.removeAll()
+                        bulkAction = .repost
+                    }
+                }
+                .buttonStyle(.bordered)
+
+                if isSelecting {
+                    Button(isAllFilteredSelected ? "desmarcar todos" : "selecionar todos") {
+                        toggleSelectAllFiltered()
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Spacer()
+
+                if isSelecting, !selectedIDs.isEmpty {
+                    bulkActionButton
+                }
+            }
+            .confirmationDialog(
+                "aplicar desconto e megafonar \(selectedIDs.count) produtos?",
+                isPresented: $isConfirmingBulkApply,
+                titleVisibility: .visible
+            ) {
+                Button("aplicar desconto") { applyDiscountToSelected() }
+                Button("cancelar", role: .cancel) {}
+            } message: {
+                Text("cada produto vai pro preço com desconto sugerido pelo megafone, e é megafonado na hora.")
+            }
+            .confirmationDialog(
+                "repostar \(selectedIDs.count) produtos?",
+                isPresented: $isConfirmingBulkRepost,
+                titleVisibility: .visible
+            ) {
+                Button("repostar") { repostSelected() }
+                Button("cancelar", role: .cancel) {}
+            } message: {
+                Text("entra na fila de ações, reaproveitando título, descrição, preço e fotos de cada um — acompanhe o andamento por lá.")
+            }
+            .confirmationDialog(
+                "apagar \(selectedIDs.count) produtos?",
+                isPresented: $isConfirmingBulkDelete,
+                titleVisibility: .visible
+            ) {
+                Button("apagar", role: .destructive) { deleteSelected() }
+                Button("cancelar", role: .cancel) {}
+            } message: {
+                Text("ação irreversível: cada anúncio selecionado entra na fila de ações e é apagado do enjoei de vez, sem chance de recuperar.")
+            }
+            .confirmationDialog(
+                "inativar \(selectedIDs.count) produtos?",
+                isPresented: $isConfirmingBulkInactivate,
+                titleVisibility: .visible
+            ) {
+                Button("inativar") { inactivateSelected() }
+                Button("cancelar", role: .cancel) {}
+            } message: {
+                Text("cada anúncio selecionado entra na fila de ações e sai da vitrine de publicados — dá pra reativar depois direto no enjoei.")
+            }
+        }
     }
 
-    private var isLoadingProducts: Bool {
-        if case .loadingProducts = runner.phase { return true }
-        return false
+    @ViewBuilder
+    private var bulkActionButton: some View {
+        switch filter {
+        case .discountOnly:
+            Button("aplicar desconto em \(selectedIDs.count)") {
+                isConfirmingBulkApply = true
+            }
+            .font(.footnote.weight(.semibold))
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .controlSize(.small)
+        case .all:
+            bulkActionSelector
+        }
+    }
+
+    /// Seletor repostar/inativar/apagar + botão de confirmar, pro filtro "todos os anúncios" —
+    /// cada ação tem sua própria confirmação antes de entrar na fila (`isConfirmingBulkRepost`/
+    /// `isConfirmingBulkInactivate`/`isConfirmingBulkDelete`, todas na `selectionBar`).
+    private var bulkActionSelector: some View {
+        HStack(spacing: 6) {
+            Menu {
+                Picker("ação", selection: $bulkAction) {
+                    ForEach(BulkAction.allCases, id: \.self) { action in
+                        Text(action.label).tag(action)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(bulkAction.label)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(.rect)
+            }
+
+            Button {
+                switch bulkAction {
+                case .repost: isConfirmingBulkRepost = true
+                case .inactivate: isConfirmingBulkInactivate = true
+                case .delete: isConfirmingBulkDelete = true
+                }
+            } label: {
+                Image(systemName: bulkAction.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(bulkAction.tint, in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(bulkAction.label) \(selectedIDs.count) produtos")
+        }
+    }
+
+    private var isAllFilteredSelected: Bool {
+        !filteredItems.isEmpty && filteredItems.allSatisfy { selectedIDs.contains($0.id) }
+    }
+
+    private func toggleSelectAllFiltered() {
+        let ids = filteredItems.map(\.id)
+        if isAllFilteredSelected {
+            selectedIDs.subtract(ids)
+        } else {
+            selectedIDs.formUnion(ids)
+        }
+    }
+
+    private func applyDiscountToSelected() {
+        for id in selectedIDs {
+            runner.applyDiscount(for: id)
+        }
+        selectedIDs.removeAll()
+        isSelecting = false
+    }
+
+    /// Mesma fila de ações usada pelo "repostar produto" de cada linha — origem e destino são
+    /// a própria conta.
+    private func repostSelected() {
+        for item in filteredItems where selectedIDs.contains(item.id) {
+            accountsStore.postQueue.enqueue(product: item.product, source: account, destination: account)
+        }
+        selectedIDs.removeAll()
+        isSelecting = false
+    }
+
+    /// Mesma fila de ações usada pelo "apagar produto" de cada linha.
+    private func deleteSelected() {
+        for item in filteredItems where selectedIDs.contains(item.id) {
+            accountsStore.postQueue.enqueueDelete(product: item.product, account: account)
+        }
+        selectedIDs.removeAll()
+        isSelecting = false
+    }
+
+    /// Mesma fila de ações usada pelo "inativar produto" de cada linha.
+    private func inactivateSelected() {
+        for item in filteredItems where selectedIDs.contains(item.id) {
+            accountsStore.postQueue.enqueueInactivate(product: item.product, account: account)
+        }
+        selectedIDs.removeAll()
+        isSelecting = false
+    }
+
+    private func toggleSelection(itemID: Int) {
+        if selectedIDs.contains(itemID) {
+            selectedIDs.remove(itemID)
+        } else {
+            selectedIDs.insert(itemID)
+        }
     }
 
     private var inactiveContent: some View {
@@ -319,8 +547,8 @@ struct AccountDetailView: View {
         if !runner.items.isEmpty {
             Menu {
                 Picker("filtro", selection: $filter) {
-                    Text("todos").tag(ProductFilter.all)
-                    Text("pede desconto").tag(ProductFilter.discountOnly)
+                    Text("todos os anúncios").tag(ProductFilter.all)
+                    Text("anúncios que pedem desconto").tag(ProductFilter.discountOnly)
                 }
                 .pickerStyle(.inline)
             } label: {
@@ -338,8 +566,8 @@ struct AccountDetailView: View {
 
     private var filterLabel: String {
         switch filter {
-        case .all: "todos"
-        case .discountOnly: "pede desconto"
+        case .all: "todos os anúncios"
+        case .discountOnly: "anúncios que pedem desconto"
         }
     }
 
@@ -360,83 +588,39 @@ struct AccountDetailView: View {
         return items.filter { $0.product.title.localizedCaseInsensitiveContains(trimmedSearch) }
     }
 
-    /// Progresso de `checkExposuresIfNeeded` — igual à barra que `MegaphoneProgressView` já mostra
-    /// pro resto do megafone, só que aqui embutida no lugar da lista, que é onde o usuário está
-    /// olhando quando abre o filtro "pede desconto".
-    @ViewBuilder
-    private var exposureCheckingView: some View {
-        if case .checkingExposure(let checked, let total) = runner.phase, total > 0 {
-            VStack(spacing: 8) {
-                ProgressView(value: Double(checked), total: Double(total))
-                    .frame(maxWidth: 220)
-                Text("conferindo quais pedem desconto… \(checked) de \(total)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            ProgressView("conferindo quais pedem desconto…")
-        }
-    }
-
-    /// Mesma ideia de `exposureCheckingView`, pro carregamento inicial da lista — embutido no
-    /// lugar do "nenhum produto na fila" enquanto a busca ainda está em andamento, pra a barra de
-    /// cima (`MegaphoneProgressView`) ficar livre só pro andamento do megafone em si.
-    @ViewBuilder
-    private var productsLoadingView: some View {
-        if case .loadingProducts(let loaded, let total) = runner.phase, total > 0 {
-            VStack(spacing: 8) {
-                ProgressView(value: Double(loaded), total: Double(total))
-                    .frame(maxWidth: 220)
-                Text("buscando seus produtos… \(loaded) de \(total)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        } else {
-            ProgressView("buscando seus produtos…")
-        }
-    }
-
     @ViewBuilder
     private var productList: some View {
         if runner.items.isEmpty {
-            if isLoadingProducts {
-                productsLoadingView
-                    .frame(maxHeight: .infinity)
-            } else {
-                ContentUnavailableView(
-                    "nenhum produto na fila",
-                    systemImage: "shippingbox",
-                    description: Text("toque em megafonar para buscar os produtos da sua loja.")
-                )
-                .frame(maxHeight: .infinity)
-            }
+            ContentUnavailableView(
+                "nenhum produto na fila",
+                systemImage: "shippingbox",
+                description: Text("toque em megafonar para buscar os produtos da sua loja.")
+            )
+            .frame(maxHeight: .infinity)
         } else if filteredItems.isEmpty {
-            if filter == .discountOnly, !runner.hasCheckedExposures {
-                // Filtro aberto antes de qualquer conferência (ou depois de um recarregar, que
-                // descarta a exposição junto com a lista antiga) — dispara a checagem só agora, e
-                // mostra isso em vez de "nenhum produto pede desconto agora", que seria enganoso
-                // enquanto a resposta de verdade ainda não chegou.
-                exposureCheckingView
-                    .frame(maxHeight: .infinity)
-                    .task(id: runner.items.count) {
-                        runner.checkExposuresIfNeeded()
-                    }
-            } else if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 ContentUnavailableView.search(text: searchText)
                     .frame(maxHeight: .infinity)
             } else {
                 ContentUnavailableView(
                     "nenhum produto pede desconto agora",
                     systemImage: "checkmark.circle",
-                    description: Text("toque em \"todos\" pra ver a fila inteira.")
+                    description: Text("toque em \"todos os anúncios\" pra ver a fila inteira.")
                 )
                 .frame(maxHeight: .infinity)
             }
         } else {
             ScrollViewReader { proxy in
                 List(filteredItems) { item in
-                    MegaphoneRowView(item: item, runner: runner, account: account)
-                        .id(item.id)
+                    MegaphoneRowView(
+                        item: item,
+                        runner: runner,
+                        account: account,
+                        isSelecting: isSelecting,
+                        isSelected: selectedIDs.contains(item.id),
+                        onToggleSelection: { toggleSelection(itemID: item.id) }
+                    )
+                    .id(item.id)
                 }
                 .listStyle(.plain)
                 .onChange(of: runner.currentItemID) { _, newValue in

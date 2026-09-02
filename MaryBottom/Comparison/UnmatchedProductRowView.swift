@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Uma linha nas seções "só nessa conta" — produto sem par na outra. Deixa compartilhar o link, ou
 /// postar o mesmo produto direto na conta que ainda não tem ele — em modo de seleção, vira uma
-/// linha marcável pra entrar na fila de publicação junto com outras.
+/// linha marcável pra entrar na fila de ações junto com outras.
 struct UnmatchedProductRowView: View {
     let product: EnjoeiProduct
     let sourceAccount: AccountSession

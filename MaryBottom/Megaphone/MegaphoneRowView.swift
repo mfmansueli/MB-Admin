@@ -7,21 +7,33 @@ struct MegaphoneRowView: View {
     let item: MegaphoneItem
     let runner: MegaphoneRunner
     let account: AccountSession
+    var isSelecting = false
+    var isSelected = false
+    var onToggleSelection: () -> Void = {}
 
     @State private var isConfirmingApply = false
     @State private var isConfirmingRepost = false
     @State private var isConfirmingDelete = false
-    @State private var isShowingDeleteStatus = false
+    @State private var isConfirmingInactivate = false
+    @State private var isShowingErrorDetail = false
     @Environment(AccountsStore.self) private var accountsStore
 
-    /// Reposta pela fila de publicação compartilhada — mesmo `poster` que a comparação entre
-    /// contas e os inativos usam, com origem e destino sendo essa própria conta.
+    /// Reposta pela fila de ações compartilhada — mesmo `poster` que a comparação entre contas e
+    /// os inativos usam, com origem e destino sendo essa própria conta.
     private var repostStatus: MegaphoneStatus { accountsStore.poster.statuses[item.id] ?? .pending }
     private var deleteStatus: MegaphoneStatus { runner.deleteStatuses[item.id] ?? .pending }
+    private var inactivateStatus: MegaphoneStatus { runner.inactivateStatuses[item.id] ?? .pending }
     private var isDeleted: Bool { deleteStatus == .succeeded }
+    private var isInactivated: Bool { inactivateStatus == .succeeded }
 
     var body: some View {
         HStack(spacing: 12) {
+            if isSelecting {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                    .font(.title3)
+            }
+
             ProductPhotoView(product: item.product)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -32,11 +44,21 @@ struct MegaphoneRowView: View {
                     Text("produto apagado")
                         .font(.subheadline)
                         .foregroundStyle(.red)
-                } else if let message = item.status.failureMessage {
-                    Text(message)
+                } else if isInactivated {
+                    Text("produto inativado")
                         .font(.subheadline)
-                        .foregroundStyle(.red)
-                        .lineLimit(2)
+                        .foregroundStyle(.secondary)
+                } else if let message = item.status.failureMessage {
+                    Button {
+                        isShowingErrorDetail = true
+                    } label: {
+                        Text(message)
+                            .font(.subheadline)
+                            .foregroundStyle(.red)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                    }
+                    .buttonStyle(.plain)
                 } else {
                     priceLine
                 }
@@ -44,11 +66,17 @@ struct MegaphoneRowView: View {
 
             Spacer(minLength: 8)
 
-            trailingView
+            if !isSelecting {
+                trailingView
 
-            moreMenu
+                moreMenu
+            }
         }
         .padding(.vertical, 2)
+        .contentShape(.rect)
+        .onTapGesture {
+            if isSelecting { onToggleSelection() }
+        }
         .confirmationDialog(
             "aplicar \(item.exposure?.discountLabel ?? "desconto") e megafonar?",
             isPresented: $isConfirmingApply,
@@ -71,7 +99,7 @@ struct MegaphoneRowView: View {
             }
             Button("cancelar", role: .cancel) {}
         } message: {
-            Text("entra na fila de publicação, reaproveitando título, descrição, preço e fotos — acompanhe o andamento por lá.")
+            Text("entra na fila de ações, reaproveitando título, descrição, preço e fotos — acompanhe o andamento por lá.")
         }
         .confirmationDialog(
             "apagar este produto?",
@@ -79,17 +107,30 @@ struct MegaphoneRowView: View {
             titleVisibility: .visible
         ) {
             Button("apagar", role: .destructive) {
-                isShowingDeleteStatus = true
-                runner.deleteProduct(productID: item.id)
+                accountsStore.postQueue.enqueueDelete(product: item.product, account: account)
             }
             Button("cancelar", role: .cancel) {}
         } message: {
-            Text("ação irreversível: o anúncio é apagado do enjoei de vez, sem chance de recuperar.")
+            Text("ação irreversível: entra na fila de ações e o anúncio é apagado do enjoei de vez, sem chance de recuperar.")
         }
-        .sheet(isPresented: $isShowingDeleteStatus) {
-            DeleteStatusSheet(status: deleteStatus, onDismiss: { isShowingDeleteStatus = false })
+        .confirmationDialog(
+            "inativar este produto?",
+            isPresented: $isConfirmingInactivate,
+            titleVisibility: .visible
+        ) {
+            Button("inativar") {
+                accountsStore.postQueue.enqueueInactivate(product: item.product, account: account)
+            }
+            Button("cancelar", role: .cancel) {}
+        } message: {
+            Text("entra na fila de ações e sai da vitrine de publicados — dá pra reativar depois direto no enjoei.")
         }
-        .opacity(isDeleted ? 0.4 : 1)
+        .sheet(isPresented: $isShowingErrorDetail) {
+            if let message = item.status.failureMessage {
+                MegaphoneErrorDetailSheet(product: item.product, message: message)
+            }
+        }
+        .opacity(isDeleted || isInactivated ? 0.4 : 1)
     }
 
     /// Preço já riscado quando a loja mostra o produto com desconto — independente de qualquer
@@ -126,6 +167,9 @@ struct MegaphoneRowView: View {
         if isDeleted {
             Image(systemName: "trash.fill")
                 .foregroundStyle(.red)
+        } else if isInactivated {
+            Image(systemName: "archivebox.fill")
+                .foregroundStyle(.secondary)
         } else if item.status == .pending, let exposure = item.exposure, exposure.kind.requiresDiscountDecision {
             Button {
                 isConfirmingApply = true
@@ -142,7 +186,7 @@ struct MegaphoneRowView: View {
 
     private var moreMenu: some View {
         Menu {
-            if isDeleted {
+            if isDeleted || isInactivated {
                 ShareLink(item: item.product.storePageURL) {
                     Label("compartilhar", systemImage: "square.and.arrow.up")
                 }
@@ -166,6 +210,17 @@ struct MegaphoneRowView: View {
                 }
                 .disabled(repostStatus == .megaphoning)
 
+                Button {
+                    isConfirmingInactivate = true
+                } label: {
+                    if inactivateStatus == .megaphoning {
+                        Label("inativando…", systemImage: "arrow.triangle.2.circlepath")
+                    } else {
+                        Label("inativar produto", systemImage: "archivebox")
+                    }
+                }
+                .disabled(inactivateStatus == .megaphoning)
+
                 Button(role: .destructive) {
                     isConfirmingDelete = true
                 } label: {
@@ -178,9 +233,10 @@ struct MegaphoneRowView: View {
                 .disabled(deleteStatus == .megaphoning)
             }
         } label: {
-            // O menu fecha assim que o usuário confirma — sem isso, o "repostando…"/"apagando…" lá
-            // dentro some da vista e a row fica sem nenhum sinal de que a operação ainda está rolando.
-            if repostStatus == .megaphoning || deleteStatus == .megaphoning {
+            // O menu fecha assim que o usuário confirma — sem isso, o "repostando…"/"apagando…"/
+            // "inativando…" lá dentro some da vista e a row fica sem nenhum sinal de que a
+            // operação ainda está rolando.
+            if repostStatus == .megaphoning || deleteStatus == .megaphoning || inactivateStatus == .megaphoning {
                 ProgressView()
             } else {
                 Image(systemName: "ellipsis.circle")
@@ -210,8 +266,13 @@ struct MegaphoneRowView: View {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(.green)
         case .failed:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+            Button {
+                isShowingErrorDetail = true
+            } label: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+            .buttonStyle(.plain)
         }
     }
 }

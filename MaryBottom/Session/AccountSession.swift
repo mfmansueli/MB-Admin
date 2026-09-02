@@ -62,6 +62,10 @@ final class AccountSession: Identifiable {
         status = .sessionExpired
     }
 
+    func markCheckFailed() {
+        status = .checkFailed
+    }
+
     func applyRoundFinished(_ summary: MegaphoneRoundSummary) {
         lastRoundSummary = summary
     }

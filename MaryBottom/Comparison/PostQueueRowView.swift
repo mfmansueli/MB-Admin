@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Uma linha da fila de publicação: produto, de qual conta pra qual, o status, e um botão pra
+/// Uma linha da fila de ações: produto, de qual conta pra qual, o status, e um botão pra
 /// tirar da fila.
 struct PostQueueRowView: View {
     let item: PostQueueItem
@@ -9,6 +9,7 @@ struct PostQueueRowView: View {
     let productURL: URL?
     let onRemove: () -> Void
 
+    @State private var isShowingErrorDetail = false
     @Environment(\.openURL) private var openURL
 
     var body: some View {
@@ -41,15 +42,40 @@ struct PostQueueRowView: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 2)
+        .sheet(isPresented: $isShowingErrorDetail) {
+            if case .failed(let message) = status {
+                MegaphoneErrorDetailSheet(product: item.product, message: message)
+            }
+        }
     }
 
     /// Republicar na mesma conta (origem == destino) fica "republicando X" — "de X para X" é
-    /// tecnicamente certo, mas confuso de ler.
+    /// tecnicamente certo, mas confuso de ler. Apagar/inativar/ativar só têm uma conta envolvida,
+    /// então nem entram nessa comparação.
     private var originDestinationLine: String {
-        if item.sourceAccountID == item.destinationAccountID {
-            "republicando em \(item.sourceAccountName)"
-        } else {
-            "de \(item.sourceAccountName) para \(item.destinationAccountName)"
+        switch item.kind {
+        case .delete:
+            return "apagando de \(item.sourceAccountName)"
+        case .inactivate:
+            return "inativando de \(item.sourceAccountName)"
+        case .activate:
+            return "ativando de \(item.sourceAccountName)"
+        case .post:
+            if item.sourceAccountID == item.destinationAccountID {
+                return "republicando em \(item.sourceAccountName)"
+            }
+            return "de \(item.sourceAccountName) para \(item.destinationAccountName)"
+        }
+    }
+
+    /// Verbo no gerúndio/particípio pro `statusText` — só muda a palavra, o resto do layout (cor,
+    /// ícone) é igual pros quatro tipos de ação.
+    private var actionVerb: (inProgress: String, done: String) {
+        switch item.kind {
+        case .post: ("postando…", "postado")
+        case .delete: ("apagando…", "apagado")
+        case .inactivate: ("inativando…", "inativado")
+        case .activate: ("ativando…", "ativado")
         }
     }
 
@@ -61,18 +87,24 @@ struct PostQueueRowView: View {
                 .font(.caption)
                 .foregroundStyle(.tertiary)
         case .megaphoning:
-            Label("postando…", systemImage: "arrow.triangle.2.circlepath")
+            Label(actionVerb.inProgress, systemImage: "arrow.triangle.2.circlepath")
                 .font(.caption)
                 .foregroundStyle(.blue)
         case .succeeded:
-            Label("postado", systemImage: "checkmark.circle.fill")
+            Label(actionVerb.done, systemImage: "checkmark.circle.fill")
                 .font(.caption)
                 .foregroundStyle(.green)
         case .failed(let message):
-            Label(message, systemImage: "exclamationmark.triangle.fill")
-                .font(.caption)
-                .foregroundStyle(.red)
-                .lineLimit(2)
+            Button {
+                isShowingErrorDetail = true
+            } label: {
+                Label(message, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+            }
+            .buttonStyle(.plain)
         }
     }
 }

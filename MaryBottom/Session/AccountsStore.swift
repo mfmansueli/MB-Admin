@@ -12,7 +12,7 @@ final class AccountsStore {
     var isPresentingLogin = false
     private(set) var pendingLoginAccountID: EnjoeiAccountID?
 
-    /// Compartilhado entre a tela de comparação (postagem avulsa) e a fila de publicação — as duas
+    /// Compartilhado entre a tela de comparação (postagem avulsa) e a fila de ações — as duas
     /// precisam respeitar o mesmo bloqueio entre uma postagem e a próxima.
     let poster = CrossAccountPoster()
     let postQueue: PostQueue
@@ -39,27 +39,66 @@ final class AccountsStore {
     }
 
     /// Abertura do app: cada conta salva tem sua WebView de bastidores recriada e conferida contra
-    /// os cookies guardados em disco. Uma conta com sessão vencida fica marcada, sem derrubar as
-    /// outras — a WebView guarda os cookies em disco, então basta perguntar à página quem é.
+    /// os cookies guardados em disco — em paralelo entre as contas (cada uma tem sua própria
+    /// WebView, sem estado compartilhado com as outras), pra abrir o app com várias contas salvas
+    /// não demorar a soma de todas, só a mais lenta delas.
     func restoreAccounts() async {
-        var restored: [AccountSession] = []
-        for record in persistence.loadAccounts() {
-            let dependencies = dependenciesFactory(record.id)
-            let account = makeAccount(
-                id: record.id,
-                user: record.user,
-                lastRoundSummary: record.lastRoundSummary,
-                dependencies: dependencies
-            )
-            do {
-                account.refreshUser(try await dependencies.client.currentUser(reloadingPage: false))
-            } catch {
-                account.markSessionExpired()
+        let records = persistence.loadAccounts()
+        let restored = await withTaskGroup(of: (Int, AccountSession?).self) { group in
+            for (index, record) in records.enumerated() {
+                group.addTask { [weak self] in
+                    (index, await self?.restoreAccount(record: record))
+                }
             }
-            restored.append(account)
+            var results: [(Int, AccountSession?)] = []
+            for await result in group {
+                results.append(result)
+            }
+            return results
         }
-        accounts = restored
+        // A ordem de conclusão de cada conta não segue a ordem persistida (a mais rápida termina
+        // primeiro) — reordena pelo índice original antes de publicar, senão a lista pula de
+        // posição a cada abertura do app.
+        accounts = restored.sorted { $0.0 < $1.0 }.compactMap(\.1)
         isRestoring = false
+    }
+
+    /// Confere uma conta salva contra o cookie guardado em disco. Sessão realmente vencida
+    /// (`notAuthenticated`) marca como tal; qualquer outro erro (rede instável, Enjoei fora do ar
+    /// no momento) vira `checkFailed` em vez de pedir login de novo à toa por uma falha passageira
+    /// bem na abertura do app.
+    private func restoreAccount(record: AccountRecord) async -> AccountSession {
+        let dependencies = dependenciesFactory(record.id)
+        let account = makeAccount(
+            id: record.id,
+            user: record.user,
+            lastRoundSummary: record.lastRoundSummary,
+            dependencies: dependencies
+        )
+        do {
+            account.refreshUser(try await dependencies.client.currentUser(reloadingPage: false))
+        } catch EnjoeiError.notAuthenticated {
+            account.markSessionExpired()
+        } catch {
+            account.markCheckFailed()
+        }
+        return account
+    }
+
+    /// Tenta de novo a confirmação de uma conta que ficou `checkFailed` no restore — sem refazer a
+    /// lista inteira, e sem mexer nas outras contas.
+    func retryCheckingSession(for accountID: EnjoeiAccountID) {
+        guard let account = accounts.first(where: { $0.id == accountID }) else { return }
+        Task { [weak account] in
+            guard let account else { return }
+            do {
+                account.refreshUser(try await account.client.currentUser(reloadingPage: false))
+            } catch EnjoeiError.notAuthenticated {
+                account.markSessionExpired()
+            } catch {
+                account.markCheckFailed()
+            }
+        }
     }
 
     /// Começa o fluxo de adicionar uma conta nova: gera o id que vai virar o `WKWebsiteDataStore`

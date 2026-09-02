@@ -24,6 +24,8 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     var createProductResponse: ProductCreateResponse
     /// Erro a lançar em qualquer chamada de `deleteProduct`.
     var deleteProductError: EnjoeiError?
+    /// Erro a lançar em qualquer chamada de `updateProductState`.
+    var updateProductStateError: EnjoeiError?
     /// Página combinada por número, devolvida por `inactiveProductsPage`. Página não configurada
     /// devolve vazia com `maxPage: 1`, pra um teste que só configura a página 1 não travar.
     var inactivePagesByNumber: [Int: InactiveProductsPage]
@@ -44,6 +46,8 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     private(set) var createProductCalls: [(request: ProductCreateRequest, token: String)] = []
     /// Um item por chamada a `deleteProduct`, com o id e o token usados.
     private(set) var deleteProductCalls: [(productID: Int, token: String)] = []
+    /// Um item por chamada a `updateProductState` (inativar ou ativar), com o id, o corpo e o token usados.
+    private(set) var updateProductStateCalls: [(productID: Int, request: ProductStateUpdateRequest, token: String)] = []
     /// Um item por chamada a `inactiveProductsPage`, com o número da página pedida.
     private(set) var requestedInactivePages: [Int] = []
 
@@ -60,6 +64,7 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         createProductError: EnjoeiError? = nil,
         createProductResponse: ProductCreateResponse = ProductCreateResponse(path: nil),
         deleteProductError: EnjoeiError? = nil,
+        updateProductStateError: EnjoeiError? = nil,
         inactivePagesByNumber: [Int: InactiveProductsPage] = [:],
         inactiveProductsError: EnjoeiError? = nil
     ) {
@@ -77,9 +82,16 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         self.createProductError = createProductError
         self.createProductResponse = createProductResponse
         self.deleteProductError = deleteProductError
+        self.updateProductStateError = updateProductStateError
     }
 
     private(set) var reloadingPageCalls: [Bool] = []
+
+    /// Pra testes trocarem o erro entre uma chamada e outra (ex.: `retryCheckingSession`), sem
+    /// precisar criar um client novo.
+    func setCurrentUserError(_ error: EnjoeiError?) {
+        currentUserError = error
+    }
 
     func currentUser(reloadingPage: Bool) async throws -> EnjoeiUser {
         reloadingPageCalls.append(reloadingPage)
@@ -141,6 +153,15 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
             throw EnjoeiError.invalidCSRFToken
         }
         if let deleteProductError { throw deleteProductError }
+    }
+
+    func updateProductState(_ request: ProductStateUpdateRequest, productID: Int, csrfToken: String) async throws {
+        updateProductStateCalls.append((productID, request, csrfToken))
+        if csrfRejectionsRemaining > 0 {
+            csrfRejectionsRemaining -= 1
+            throw EnjoeiError.invalidCSRFToken
+        }
+        if let updateProductStateError { throw updateProductStateError }
     }
 
     func inactiveProductsPage(page: Int) async throws -> InactiveProductsPage {

@@ -90,6 +90,88 @@ struct PostQueueTests {
         #expect(await sourceClient.requestedTemplateIDs == [1])
     }
 
+    @Test("limpar a fila tira todos os itens de uma vez, sem postar o que ainda estava pendente")
+    func limparFilaRemoveTudo() async {
+        let sourceClient = StubEnjoeiClient(
+            templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)]
+        )
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster()
+        // Intervalo bem maior que a duração do teste — dá tempo de limpar a fila antes do segundo
+        // item sair da espera.
+        let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: 60)
+
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
+
+        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        queue.removeAll()
+
+        #expect(queue.items.isEmpty)
+        #expect(await sourceClient.requestedTemplateIDs == [1])
+    }
+
+    @Test("pausar antes de qualquer item começar trava o laço até continuar")
+    func pausarTravaOLacoAteContinuar() async {
+        let sourceClient = StubEnjoeiClient(
+            templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)]
+        )
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: .zero)
+
+        // Pausa antes de enfileirar — a `Task` do laço só ganha a vez depois que este trecho
+        // síncrono termina, então ela já nasce vendo `isPaused == true`.
+        queue.pause()
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
+
+        // Várias chances do laço rodar — nada é postado enquanto pausado.
+        for _ in 0..<200 { await Task.yield() }
+        #expect(poster.statuses[1] == nil)
+        #expect(queue.isPaused)
+        #expect(queue.isRunning)
+
+        queue.resume()
+        await waitUntil { poster.statuses[1] != nil && poster.statuses[1] != .megaphoning }
+        await waitUntil { poster.statuses[2] != nil && poster.statuses[2] != .megaphoning }
+
+        #expect(queue.items.allSatisfy { queue.status(for: $0) == .succeeded })
+        #expect(queue.isPaused == false)
+    }
+
+    @Test("apagar pela fila delega pro runner da conta e aparece como succeeded")
+    func apagarPelaFilaDelegaProRunner() async {
+        let client = StubEnjoeiClient()
+        let account = makeAccount(name: "conta", client: client)
+        let poster = CrossAccountPoster()
+        let queue = PostQueue(poster: poster, accountsProvider: { [account] }, interval: .zero)
+
+        queue.enqueueDelete(product: EnjoeiFixtures.product(id: 1), account: account)
+        await waitUntil { !queue.isRunning }
+
+        #expect(account.runner.deleteStatuses[1] == .succeeded)
+        #expect(queue.status(for: queue.items[0]) == .succeeded)
+        #expect(await client.deleteProductCalls.map(\.productID) == [1])
+    }
+
+    @Test("inativar pela fila delega pro runner da conta e aparece como succeeded")
+    func inativarPelaFilaDelegaProRunner() async {
+        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let account = makeAccount(name: "conta", client: client)
+        let poster = CrossAccountPoster()
+        let queue = PostQueue(poster: poster, accountsProvider: { [account] }, interval: .zero)
+
+        queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 1), account: account)
+        await waitUntil { !queue.isRunning }
+
+        #expect(account.runner.inactivateStatuses[1] == .succeeded)
+        #expect(queue.status(for: queue.items[0]) == .succeeded)
+        #expect(await client.updateProductStateCalls.map(\.productID) == [1])
+    }
+
     @Test("conta que não existe mais no accountsProvider vira falha, sem travar o resto da fila")
     func contaDeslogada() async {
         let vanishingSource = makeAccount(name: "origem que some", client: StubEnjoeiClient())

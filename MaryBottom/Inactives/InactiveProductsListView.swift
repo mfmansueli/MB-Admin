@@ -1,18 +1,43 @@
 import SwiftUI
 
 /// Conteúdo da aba "inativos" da tela de detalhe da conta: lista os produtos inativos da própria
-/// loja e deixa selecionar vários pra republicar de uma vez, entrando na mesma fila de publicação
-/// usada pela comparação entre contas — aqui origem e destino são sempre a própria conta.
+/// loja e deixa selecionar vários pra repostar (cria de novo) ou ativar (volta o mesmo anúncio)
+/// de uma vez, entrando na mesma fila de ações usada pela comparação entre contas — aqui origem e
+/// destino são sempre a própria conta.
 struct InactiveProductsListView: View {
     let account: AccountSession
 
     @State private var isSelecting = false
     @State private var selectedIDs: Set<Int> = []
+    @State private var bulkAction: BulkAction = .repost
+    @State private var isConfirmingBulkRepost = false
+    @State private var isConfirmingBulkActivate = false
     @State private var searchText = ""
     @FocusState private var isSearchFocused: Bool
     @Environment(AccountsStore.self) private var accountsStore
 
     private var loader: InactiveProductsLoader { account.inactiveProductsLoader }
+
+    /// Ação escolhida pro botão de confirmar da seleção múltipla — repostar (cria de novo, sem
+    /// mexer no status de inativo) ou ativar (volta o mesmo anúncio pra vitrine de publicados).
+    private enum BulkAction: CaseIterable {
+        case repost
+        case activate
+
+        var label: String {
+            switch self {
+            case .repost: "repostar"
+            case .activate: "ativar"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .repost: "doc.on.doc.fill"
+            case .activate: "tray.and.arrow.up.fill"
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 12) {
@@ -100,24 +125,103 @@ struct InactiveProductsListView: View {
     }
 
     private var selectionBar: some View {
-        HStack {
+        HStack(spacing: 6) {
             Button(isSelecting ? "cancelar seleção" : "selecionar") {
                 isSelecting.toggle()
-                if !isSelecting { selectedIDs.removeAll() }
+                if !isSelecting {
+                    selectedIDs.removeAll()
+                    bulkAction = .repost
+                }
             }
             .buttonStyle(.bordered)
+
+            if isSelecting, !filteredItems.isEmpty {
+                Button(isAllFilteredSelected ? "desmarcar todos" : "selecionar todos") {
+                    toggleSelectAll()
+                }
+                .buttonStyle(.bordered)
+            }
 
             Spacer()
 
             if isSelecting, !selectedIDs.isEmpty {
-                Button("republicar \(selectedIDs.count) produtos") {
-                    republicarSelecionados()
-                }
-                .fontWeight(.semibold)
-                .buttonStyle(.borderedProminent)
+                bulkActionSelector
             }
         }
         .padding(.horizontal, 20)
+        .confirmationDialog(
+            "repostar \(selectedIDs.count) produtos?",
+            isPresented: $isConfirmingBulkRepost,
+            titleVisibility: .visible
+        ) {
+            Button("repostar") { repostarSelecionados() }
+            Button("cancelar", role: .cancel) {}
+        } message: {
+            Text("entra na fila de ações, reaproveitando título, descrição, preço e fotos de cada um — acompanhe o andamento por lá.")
+        }
+        .confirmationDialog(
+            "ativar \(selectedIDs.count) produtos de novo?",
+            isPresented: $isConfirmingBulkActivate,
+            titleVisibility: .visible
+        ) {
+            Button("ativar") { ativarSelecionados() }
+            Button("cancelar", role: .cancel) {}
+        } message: {
+            Text("cada anúncio selecionado entra na fila de ações e volta pra vitrine de publicados.")
+        }
+    }
+
+    /// Seletor repostar/ativar + botão de confirmar — mesmo padrão da seleção múltipla em
+    /// "publicados" (`AccountDetailView.bulkActionSelector`).
+    private var bulkActionSelector: some View {
+        HStack(spacing: 6) {
+            Menu {
+                Picker("ação", selection: $bulkAction) {
+                    ForEach(BulkAction.allCases, id: \.self) { action in
+                        Text(action.label).tag(action)
+                    }
+                }
+                .pickerStyle(.inline)
+            } label: {
+                HStack(spacing: 4) {
+                    Text(bulkAction.label)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption2)
+                }
+                .foregroundStyle(.secondary)
+                .contentShape(.rect)
+            }
+
+            Button {
+                switch bulkAction {
+                case .repost: isConfirmingBulkRepost = true
+                case .activate: isConfirmingBulkActivate = true
+                }
+            } label: {
+                Image(systemName: bulkAction.systemImage)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(Color.accentColor, in: .circle)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(bulkAction.label) \(selectedIDs.count) produtos")
+        }
+    }
+
+    /// Considera só os itens que a busca deixa passar — "selecionar todos" com um texto digitado
+    /// pega só o que está visível na lista, não a loja inteira por trás do filtro.
+    private var isAllFilteredSelected: Bool {
+        !filteredItems.isEmpty && filteredItems.allSatisfy { selectedIDs.contains($0.id) }
+    }
+
+    private func toggleSelectAll() {
+        let filteredIDs = filteredItems.map(\.id)
+        if isAllFilteredSelected {
+            selectedIDs.subtract(filteredIDs)
+        } else {
+            selectedIDs.formUnion(filteredIDs)
+        }
     }
 
     @ViewBuilder
@@ -129,6 +233,7 @@ struct InactiveProductsListView: View {
             List(filteredItems) { product in
                 InactiveProductRowView(
                     product: product,
+                    account: account,
                     isSelecting: isSelecting,
                     isSelected: selectedIDs.contains(product.id),
                     onToggleSelection: { toggleSelection(productID: product.id) }
@@ -146,21 +251,32 @@ struct InactiveProductsListView: View {
         }
     }
 
-    /// A fila só usa `id` (pra ler o template de novo), `title` e `photoPublicID` (pra exibir) — o
-    /// resto do `EnjoeiProduct` não importa aqui, então fica com valores neutros.
-    private func republicarSelecionados() {
+    private func repostarSelecionados() {
         for product in loader.items where selectedIDs.contains(product.id) {
-            let placeholder = EnjoeiProduct(
-                id: product.id,
-                title: product.title,
-                path: product.path,
-                photoPublicID: product.photoPublicID,
-                currentPrice: product.price,
-                originalPrice: product.price
-            )
-            accountsStore.postQueue.enqueue(product: placeholder, source: account, destination: account)
+            accountsStore.postQueue.enqueue(product: placeholder(for: product), source: account, destination: account)
         }
         selectedIDs.removeAll()
         isSelecting = false
+    }
+
+    private func ativarSelecionados() {
+        for product in loader.items where selectedIDs.contains(product.id) {
+            accountsStore.postQueue.enqueueActivate(product: placeholder(for: product), account: account)
+        }
+        selectedIDs.removeAll()
+        isSelecting = false
+    }
+
+    /// A fila só usa `id` (pra ler o template de novo), `title` e `photoPublicID` (pra exibir) — o
+    /// resto do `EnjoeiProduct` não importa aqui, então fica com valores neutros.
+    private func placeholder(for product: InactiveProduct) -> EnjoeiProduct {
+        EnjoeiProduct(
+            id: product.id,
+            title: product.title,
+            path: product.path,
+            photoPublicID: product.photoPublicID,
+            currentPrice: product.price,
+            originalPrice: product.price
+        )
     }
 }

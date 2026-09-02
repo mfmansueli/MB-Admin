@@ -22,9 +22,13 @@ final class MegaphoneRunner {
     /// apagar não é megafonar, e reaproveitar o mesmo campo faria o laço automático pular um
     /// produto só porque ele está sendo apagado.
     private(set) var deleteStatuses: [Int: MegaphoneStatus] = [:]
-    /// Já conferiu a exposição da lista atual — sem isso, reabrir o filtro "pede desconto" chamaria
-    /// a rota de novo a cada toque.
-    private(set) var hasCheckedExposures = false
+    /// Andamento de inativar cada produto, por id — mesmo raciocínio de `deleteStatuses`: inativar
+    /// não é megafonar, e reaproveitar `items[].status` faria o laço automático pular o produto só
+    /// por causa disso.
+    private(set) var inactivateStatuses: [Int: MegaphoneStatus] = [:]
+    /// Andamento de ativar cada produto, por id — separado de `inactivateStatuses` porque essa
+    /// ação parte da aba "inativos" (produtos fora de `items`), não da lista de publicados.
+    private(set) var activateStatuses: [Int: MegaphoneStatus] = [:]
 
     /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei.
     var delayBetweenProducts: Duration = .milliseconds(900)
@@ -87,27 +91,27 @@ final class MegaphoneRunner {
         }
     }
 
-    /// Descarta a lista carregada e busca a loja de novo do zero antes de megafonar — pro botão de
-    /// recarregar, quando o usuário quer garantir que está vendo o catálogo atual.
-    func reload(sellerID: Int, rounds: MegaphoneRounds = .once) {
+    /// Descarta a lista carregada e busca a loja de novo do zero — pro botão de recarregar, quando
+    /// o usuário quer garantir que está vendo o catálogo atual. Só carrega (igual a `load`), nunca
+    /// começa a megafonar sozinho: em nenhuma hipótese o app dispara isso sem o toque explícito no
+    /// botão "megafonar".
+    func reload(sellerID: Int) {
         guard task == nil else { return }
         items = []
         // Descartada aqui mesmo, sem esperar a busca nova: se o app fechar no meio do reload, a
         // próxima abertura não deve voltar a mostrar a lista antiga como se nada tivesse pedido.
         itemsPersistence.clearItems(accountID: accountID)
-        start(sellerID: sellerID, rounds: rounds)
+        load(sellerID: sellerID)
     }
 
-    /// Guarda a lista recém-carregada (só produtos — exposição vem depois, sob demanda) tanto na
-    /// tela quanto em disco, pra não precisar buscar a loja de novo na próxima abertura do app.
+    /// Guarda a lista recém-carregada (produtos + exposição) tanto na tela quanto em disco, pra
+    /// não precisar buscar a loja de novo na próxima abertura do app.
     private func setLoadedItems(_ items: [MegaphoneItem]) {
         self.items = items
-        // Lista nova: qualquer exposição conferida antes era pra outros produtos.
-        hasCheckedExposures = false
         itemsPersistence.saveItems(items, accountID: accountID)
     }
 
-    /// Só carrega os produtos da loja — não confere exposição nem começa a megafonar. Serve pra
+    /// Só carrega os produtos da loja e confere a exposição — não começa a megafonar. Serve pra
     /// popular a lista sozinho ao abrir a tela, sem disparar boost nenhum sem o usuário pedir
     /// (isso continua exigindo o toque em "megafonar", que sempre busca tudo de novo).
     func load(sellerID: Int) {
@@ -121,12 +125,12 @@ final class MegaphoneRunner {
     private func loadOnly(sellerID: Int) async {
         phase = .loadingProducts(loaded: 0, total: 0)
         do {
-            let products = try await loadAllProducts(sellerID: sellerID)
-            guard !products.isEmpty else {
+            let items = try await loadProductsWithExposure(sellerID: sellerID)
+            guard !items.isEmpty else {
                 phase = .idle
                 return
             }
-            setLoadedItems(products.map { MegaphoneItem(product: $0) })
+            setLoadedItems(items)
             phase = .idle
         } catch {
             // Falha ou cancelamento na busca automática não vira alarme — o usuário ainda pode
@@ -135,31 +139,15 @@ final class MegaphoneRunner {
         }
     }
 
-    /// Confere quais produtos já carregados pedem decisão de desconto — só quando o filtro "pede
-    /// desconto" é aberto pela primeira vez. Antes disso, carregar a lista não passa por essa rota
-    /// (WebView, em lotes) — ela é bem mais lenta que a busca dos produtos em si, e a maior parte
-    /// das aberturas de tela nem chega a usar o filtro.
-    func checkExposuresIfNeeded() {
-        guard !items.isEmpty, !hasCheckedExposures, task == nil else { return }
-        task = Task { [weak self] in
-            await self?.checkExposures()
-            self?.task = nil
-        }
-    }
-
-    private func checkExposures() async {
-        phase = .checkingExposure(checked: 0, total: items.count)
-        do {
-            let exposures = try await loadExposures(productIDs: items.map(\.id))
-            for index in items.indices {
-                items[index].exposure = exposures[items[index].id]
-            }
-            hasCheckedExposures = true
-            itemsPersistence.saveItems(items, accountID: accountID)
-        } catch {
-            // Falha aqui não é fatal — o filtro fica vazio e o usuário pode tentar de novo.
-        }
-        phase = .idle
+    /// Busca a loja inteira e, na sequência, a exposição de cada produto — usado tanto pelo
+    /// carregamento sozinho (`loadOnly`) quanto pela primeira busca de uma rodada (`run`), pra não
+    /// duplicar os dois passos nos dois lugares.
+    private func loadProductsWithExposure(sellerID: Int) async throws -> [MegaphoneItem] {
+        let products = try await loadAllProducts(sellerID: sellerID)
+        guard !products.isEmpty else { return [] }
+        phase = .checkingExposure(checked: 0, total: products.count)
+        let exposures = try await loadExposures(productIDs: products.map(\.id))
+        return products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) }
     }
 
     func cancel() {
@@ -215,12 +203,12 @@ final class MegaphoneRunner {
     private func run(sellerID: Int) async {
         do {
             if items.isEmpty {
-                let products = try await loadAllProducts(sellerID: sellerID)
-                guard !products.isEmpty else {
+                let loadedItems = try await loadProductsWithExposure(sellerID: sellerID)
+                guard !loadedItems.isEmpty else {
                     finish(.finished)
                     return
                 }
-                setLoadedItems(products.map { MegaphoneItem(product: $0) })
+                setLoadedItems(loadedItems)
             }
 
             var token = try await client.csrfToken()
@@ -309,6 +297,7 @@ final class MegaphoneRunner {
             try Task.checkCancellation()
             if items[index].status == .succeeded || items[index].status == .megaphoning { continue }
             if deleteStatuses[items[index].id] == .succeeded { continue }
+            if inactivateStatuses[items[index].id] == .succeeded { continue }
             items[index].status = .megaphoning
             currentItemID = items[index].id
 
@@ -354,6 +343,7 @@ final class MegaphoneRunner {
     func applyDiscount(for productID: Int) {
         guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
         guard deleteStatuses[productID] != .succeeded else { return }
+        guard inactivateStatuses[productID] != .succeeded else { return }
         // Pendente ou falhou antes (retry): tudo bem. Já rodando ou já feito: um segundo toque não
         // dispara outra chamada.
         guard items[index].status != .megaphoning, items[index].status != .succeeded else { return }
@@ -394,6 +384,14 @@ final class MegaphoneRunner {
         }
     }
 
+    /// Mesma exclusão de `deleteProduct(productID:)`, mas esperando terminar em vez de disparar e
+    /// seguir — usado pela fila de ações, que precisa saber quando pode passar pro próximo item.
+    func deleteProductAndWait(productID: Int) async {
+        guard deleteStatuses[productID] != .megaphoning, deleteStatuses[productID] != .succeeded else { return }
+        deleteStatuses[productID] = .megaphoning
+        await performDelete(productID: productID)
+    }
+
     private func performDelete(productID: Int) async {
         do {
             let token = try await client.csrfToken()
@@ -412,6 +410,79 @@ final class MegaphoneRunner {
         } catch let error as EnjoeiError where error.isCSRFRejection {
             let refreshed = try await client.csrfToken()
             try await client.deleteProduct(productID: productID, csrfToken: refreshed)
+        }
+    }
+
+    /// Inativa um produto — sai da vitrine de publicados sem apagar de vez (ao contrário de
+    /// `deleteProduct`, dá pra reverter mais tarde direto no Enjoei, com `activateProduct`). A
+    /// confirmação fica por conta de quem chama. O item continua em `items`, só marcado como
+    /// inativado.
+    func inactivateProduct(productID: Int) {
+        guard inactivateStatuses[productID] != .megaphoning, inactivateStatuses[productID] != .succeeded else { return }
+        inactivateStatuses[productID] = .megaphoning
+        Task { [weak self] in
+            await self?.performInactivate(productID: productID)
+        }
+    }
+
+    /// Mesma inativação de `inactivateProduct(productID:)`, mas esperando terminar em vez de
+    /// disparar e seguir — usado pela fila de ações.
+    func inactivateProductAndWait(productID: Int) async {
+        guard inactivateStatuses[productID] != .megaphoning, inactivateStatuses[productID] != .succeeded else { return }
+        inactivateStatuses[productID] = .megaphoning
+        await performInactivate(productID: productID)
+    }
+
+    private func performInactivate(productID: Int) async {
+        do {
+            try await sendProductStateUpdate(productID: productID, state: .disable)
+            inactivateStatuses[productID] = .succeeded
+        } catch {
+            inactivateStatuses[productID] = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Ativa de novo um produto inativado — usado a partir da aba "inativos", não da lista de
+    /// publicados (por isso não mexe em `items`/`inactivateStatuses`, que são sobre a loja
+    /// publicada). A confirmação fica por conta de quem chama.
+    func activateProduct(productID: Int) {
+        guard activateStatuses[productID] != .megaphoning, activateStatuses[productID] != .succeeded else { return }
+        activateStatuses[productID] = .megaphoning
+        Task { [weak self] in
+            await self?.performActivate(productID: productID)
+        }
+    }
+
+    /// Mesma ativação de `activateProduct(productID:)`, mas esperando terminar em vez de disparar
+    /// e seguir — usado pela fila de ações.
+    func activateProductAndWait(productID: Int) async {
+        guard activateStatuses[productID] != .megaphoning, activateStatuses[productID] != .succeeded else { return }
+        activateStatuses[productID] = .megaphoning
+        await performActivate(productID: productID)
+    }
+
+    private func performActivate(productID: Int) async {
+        do {
+            try await sendProductStateUpdate(productID: productID, state: .active)
+            activateStatuses[productID] = .succeeded
+        } catch {
+            activateStatuses[productID] = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Lê o produto inteiro primeiro (mesma rota de "duplicar" que o repost usa, só pra leitura —
+    /// nunca cria nada aqui) e reenvia com o `product_state` pedido, porque a rota não aceita um
+    /// update parcial (ver `ProductStateUpdateRequest`). Renova o token CSRF e tenta de novo
+    /// quando o servidor recusa — mesmo laço do `megaphone`/`deleteProduct`.
+    private func sendProductStateUpdate(productID: Int, state: ProductStateUpdateRequest.ProductState) async throws {
+        let template = try await client.productTemplate(productID: productID)
+        let request = ProductStateUpdateRequest(template: template, state: state)
+        let token = try await client.csrfToken()
+        do {
+            try await client.updateProductState(request, productID: productID, csrfToken: token)
+        } catch let error as EnjoeiError where error.isCSRFRejection {
+            let refreshed = try await client.csrfToken()
+            try await client.updateProductState(request, productID: productID, csrfToken: refreshed)
         }
     }
 

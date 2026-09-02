@@ -142,6 +142,27 @@ nonisolated enum EnjoeiJavaScript {
     return { status: response.status, body: await response.text() };
     """
 
+    /// Inativa OU ativa um produto reenviando o objeto inteiro dele — a mesma rota que a edição
+    /// completa do anúncio usa pra qualquer alteração (não existe endpoint dedicado pra nenhuma
+    /// das duas ações; `product_state` no corpo é quem decide qual delas). `requestBody` já vem
+    /// pronto (JSON.stringify de `ProductStateUpdateRequest`, feito no Swift); o id vai na URL.
+    static let updateProductState = """
+    const headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "X-Requested-With": "XMLHttpRequest"
+    };
+    if (token) { headers["X-CSRF-Token"] = token; }
+
+    const response = await fetch(`/perfil/minha-lojinha/a-venda/update_product/${productID}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: headers,
+        body: requestBody
+    });
+    return { status: response.status, body: await response.text() };
+    """
+
     /// Não existe API JSON separada pra lista de inativos, mas os produtos vêm embutidos no HTML
     /// como JSON — no atributo `v-bind:product-list` de um Web Component Vue
     /// (`<product-list-wrapper inline-template v-bind:product-list="[...]">`), não como HTML pronto

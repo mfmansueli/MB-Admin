@@ -18,6 +18,10 @@ nonisolated struct InactiveProduct: Identifiable, Equatable, Sendable, Codable {
         return price.formatted(.currency(code: "BRL").presentation(.narrow))
     }
 
+    var storePageURL: URL {
+        EnjoeiAPI.productURL(path: path)
+    }
+
     var thumbnailURL: URL? {
         guard let photoPublicID else { return nil }
         return EnjoeiPhoto.url(publicID: photoPublicID, size: .thumbnail)

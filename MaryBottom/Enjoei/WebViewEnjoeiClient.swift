@@ -100,6 +100,19 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
         if let error = response.failure { throw error }
     }
 
+    func updateProductState(_ request: ProductStateUpdateRequest, productID: Int, csrfToken: String) async throws {
+        let bodyData = try JSONEncoder().encode(request)
+        guard let bodyString = String(data: bodyData, encoding: .utf8) else {
+            throw EnjoeiError.unexpectedResponse
+        }
+        let result = try await webSession.run(
+            EnjoeiJavaScript.updateProductState,
+            arguments: ["productID": productID, "requestBody": bodyString, "token": csrfToken]
+        )
+        let response = MegaphoneWebResponse(javaScriptResult: result)
+        if let error = response.failure { throw error }
+    }
+
     func inactiveProductsPage(page: Int) async throws -> InactiveProductsPage {
         let result = try await webSession.run(
             EnjoeiJavaScript.inactiveProductsPage,

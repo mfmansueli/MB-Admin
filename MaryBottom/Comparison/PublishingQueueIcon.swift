@@ -1,7 +1,7 @@
 import Combine
 import SwiftUI
 
-/// Ícone da fila de publicação enquanto ela está processando algo — cada linha de dentro pisca
+/// Ícone da fila de ações enquanto ela está processando algo — cada linha de dentro pisca
 /// numa cor diferente, meio "luz de Natal", pra dar um sinal vivo de "rodando agora", já que a
 /// fila continua em segundo plano mesmo com essa tela fechada.
 ///

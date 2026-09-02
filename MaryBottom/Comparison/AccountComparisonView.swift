@@ -52,15 +52,25 @@ struct AccountComparisonView: View {
                         .fixedSize()
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    // Mesmo círculo de tamanho fixo do botão equivalente em "suas contas" — sem
+                    // isso, o bezel padrão de toolbar deixa o ícone espremido/distorcido em
+                    // versões mais antigas do Mac Catalyst.
                     Button {
                         isShowingQueue = true
                     } label: {
-                        if accountsStore.postQueue.isRunning {
-                            PublishingQueueIcon()
-                        } else {
-                            Label("fila de publicação", systemImage: "list.bullet.rectangle")
+                        Group {
+                            if accountsStore.postQueue.isRunning {
+                                PublishingQueueIcon()
+                            } else {
+                                Label("fila de ações", systemImage: "list.bullet.rectangle")
+                                    .labelStyle(.iconOnly)
+                                    .font(.body.weight(.semibold))
+                            }
                         }
+                        .frame(width: 34, height: 34)
+                        .background(.quaternary, in: .circle)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -161,12 +171,27 @@ struct AccountComparisonView: View {
                     .padding(.horizontal, 20)
 
                     if !onlyInA.isEmpty || !onlyInB.isEmpty {
+                        // Só os produtos das seções que o filtro atual realmente mostra — com
+                        // "parecidos" selecionado, por exemplo, não tem o que marcar, já que os
+                        // pares não são selecionáveis.
+                        let selectableIDs = selectableProductIDs(onlyInA: onlyInA, onlyInB: onlyInB)
                         HStack {
                             Button(isSelecting ? "cancelar seleção" : "selecionar") {
                                 isSelecting.toggle()
                                 if !isSelecting { selectedProductIDs.removeAll() }
                             }
                             .buttonStyle(.bordered)
+
+                            if isSelecting, !selectableIDs.isEmpty {
+                                Button(
+                                    selectableIDs.isSubset(of: selectedProductIDs)
+                                        ? "desmarcar todos"
+                                        : "selecionar todos"
+                                ) {
+                                    toggleSelectAll(selectableIDs)
+                                }
+                                .buttonStyle(.bordered)
+                            }
 
                             Spacer()
 
@@ -337,6 +362,23 @@ struct AccountComparisonView: View {
             selectedProductIDs.remove(productID)
         } else {
             selectedProductIDs.insert(productID)
+        }
+    }
+
+    /// Ids selecionáveis de acordo com o que `resultFilter` está exibindo agora — os pares
+    /// ("produtos em comum") nunca entram, porque `ProductMatchRowView` não tem seleção.
+    private func selectableProductIDs(onlyInA: [EnjoeiProduct], onlyInB: [EnjoeiProduct]) -> Set<Int> {
+        var ids: Set<Int> = []
+        if resultFilter == .all || resultFilter == .onlyInA { ids.formUnion(onlyInA.map(\.id)) }
+        if resultFilter == .all || resultFilter == .onlyInB { ids.formUnion(onlyInB.map(\.id)) }
+        return ids
+    }
+
+    private func toggleSelectAll(_ ids: Set<Int>) {
+        if ids.isSubset(of: selectedProductIDs) {
+            selectedProductIDs.subtract(ids)
+        } else {
+            selectedProductIDs.formUnion(ids)
         }
     }
 

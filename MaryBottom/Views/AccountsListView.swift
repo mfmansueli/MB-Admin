@@ -8,6 +8,9 @@ struct AccountsListView: View {
     @State private var selectedAccountID: EnjoeiAccountID?
     @State private var isPresentingComparison = false
     @State private var isShowingQueue = false
+    /// Tamanho atual da janela no Mac Catalyst — só serve pra dimensionar o `.sheet` de comparação
+    /// proporcionalmente (ver uso abaixo); em iPhone/iPad não é lido em lugar nenhum.
+    @State private var windowSize: CGSize = .zero
 
     var body: some View {
         @Bindable var accountsStore = accountsStore
@@ -71,15 +74,27 @@ struct AccountsListView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     // A fila roda em segundo plano mesmo com a tela de comparação fechada — esse
                     // botão é o único jeito de conferir o andamento dela sem reabrir aquela tela.
+                    //
+                    // Círculo com tamanho fixo, igual ao botão "recarregar produtos" — sem isso, o
+                    // bezel padrão de toolbar deixa o ícone (e o `PublishingQueueIcon`, desenhado
+                    // à mão com um tamanho próprio) espremido/distorcido em versões mais antigas do
+                    // Mac Catalyst.
                     Button {
                         isShowingQueue = true
                     } label: {
-                        if accountsStore.postQueue.isRunning {
-                            PublishingQueueIcon()
-                        } else {
-                            Label("fila de publicação", systemImage: "list.bullet.rectangle")
+                        Group {
+                            if accountsStore.postQueue.isRunning {
+                                PublishingQueueIcon()
+                            } else {
+                                Label("fila de ações", systemImage: "list.bullet.rectangle")
+                                    .labelStyle(.iconOnly)
+                                    .font(.body.weight(.semibold))
+                            }
                         }
+                        .frame(width: 34, height: 34)
+                        .background(.quaternary, in: .circle)
                     }
+                    .buttonStyle(.plain)
                 }
                 ToolbarItem(placement: .bottomBar) {
                     // `EditButton()` fica com o texto preto sobre fundo preto nessa toolbar no Mac
@@ -122,6 +137,15 @@ struct AccountsListView: View {
                 ContentUnavailableView("selecione uma conta", systemImage: "person.crop.circle")
             }
         }
+        // Mede a janela inteira (o `NavigationSplitView` ocupa ela toda) pra poder dimensionar o
+        // `.sheet` de comparação como uma fração desse tamanho, em vez de um valor fixo — arrastar
+        // a borda da janela no Mac atualiza `windowSize`, e como o `.sheet` já presente lê esse
+        // valor de novo a cada recomposição, ele acompanha o redimensionamento.
+        .onGeometryChange(for: CGSize.self) { proxy in
+            proxy.size
+        } action: { newSize in
+            windowSize = newSize
+        }
         .sheet(isPresented: $accountsStore.isPresentingLogin) {
             if let accountID = accountsStore.pendingLoginAccountID {
                 // No Mac Catalyst, o conteúdo de `.sheet`/`.fullScreenCover` às vezes não herda o
@@ -133,27 +157,61 @@ struct AccountsListView: View {
                     .environment(accountsStore)
             }
         }
+        // No Mac Catalyst, `.fullScreenCover` (que não tem equivalente real numa janela de Mac)
+        // já apareceu com o layout todo quebrado em versões mais antigas — como se o conteúdo
+        // nunca fosse fixado ao tamanho da janela. `.sheet` já é usado em todo o resto do app sem
+        // esse problema, então cobre o mesmo caso ali; no iPhone/iPad, `.fullScreenCover` continua
+        // valendo, sem mudar o comportamento de quem já usa assim.
+        #if targetEnvironment(macCatalyst)
+        .sheet(isPresented: $isPresentingComparison) {
+            AccountComparisonView(accounts: accountsStore.accounts)
+                .environment(accountsStore)
+                // Sem frame explícito, o Mac Catalyst dimensiona o `.sheet` pelo tamanho
+                // intrínseco do conteúdo — como a tela começa vazia (nenhuma conta comparada
+                // ainda), o sheet abre pequeno e centralizado em vez de aproveitar a janela. Usar
+                // `idealWidth`/`idealHeight` (em vez de um tamanho fixo) proporcionais a
+                // `windowSize` faz o sheet crescer junto quando a janela é redimensionada; os
+                // mínimos evitam um sheet minúsculo antes de `windowSize` ser medido (`.zero`) ou
+                // com a janela muito pequena.
+                .frame(
+                    minWidth: 900,
+                    idealWidth: max(windowSize.width * 0.9, 900),
+                    minHeight: 700,
+                    idealHeight: max(windowSize.height * 0.9, 700)
+                )
+        }
+        #else
         .fullScreenCover(isPresented: $isPresentingComparison) {
             AccountComparisonView(accounts: accountsStore.accounts)
                 .environment(accountsStore)
         }
+        #endif
         .sheet(isPresented: $isShowingQueue) {
             PostQueueView(postQueue: accountsStore.postQueue, poster: accountsStore.poster)
         }
     }
 
-    /// Conta com sessão vencida resolve ali mesmo (reabrindo o login) em vez de selecionar e mostrar
-    /// o detalhe — não tem o que mostrar de megafone enquanto ela não está autenticada.
+    /// Conta com sessão vencida ou não conferida ainda resolve ali mesmo (reabrindo o login, ou
+    /// tentando a checagem de novo) em vez de selecionar e mostrar o detalhe — não tem o que
+    /// mostrar de megafone enquanto não se sabe se ela está autenticada.
     @ViewBuilder
     private func row(for account: AccountSession) -> some View {
-        if account.status == .sessionExpired {
+        switch account.status {
+        case .sessionExpired:
             Button {
                 accountsStore.retryLogin(for: account.id)
             } label: {
                 AccountRowView(account: account)
             }
             .buttonStyle(.plain)
-        } else {
+        case .checkFailed:
+            Button {
+                accountsStore.retryCheckingSession(for: account.id)
+            } label: {
+                AccountRowView(account: account)
+            }
+            .buttonStyle(.plain)
+        case .active:
             AccountRowView(account: account)
         }
     }
