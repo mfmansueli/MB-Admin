@@ -7,14 +7,17 @@ import Observation
 @MainActor
 @Observable
 final class CrossAccountPoster {
-    /// Por id do produto na conta de origem — separado por produto pra postar vários da lista sem
-    /// um atropelar o status do outro.
-    private(set) var statuses: [Int: MegaphoneStatus] = [:]
+    /// Por produto + conta de destino, não só por produto — o mesmo produto pode estar sendo (ou
+    /// já ter sido) postado em duas contas de destino diferentes ao mesmo tempo (ex.: comparado
+    /// contra a conta B e, antes disso terminar, contra a conta C também); chavear só por
+    /// `product.id` faria a segunda postagem reaproveitar o status da primeira sem nunca rodar de
+    /// verdade. Ver `PostTarget`.
+    private(set) var statuses: [PostTarget: MegaphoneStatus] = [:]
     /// Link do anúncio novo, quando a resposta da criação trouxer como identificar ele.
-    private(set) var postedProductURLs: [Int: URL] = [:]
+    private(set) var postedProductURLs: [PostTarget: URL] = [:]
     /// Diagnóstico completo da última falha ao postar cada produto — só em memória. Ver
     /// `MegaphoneRunner.failureDetails`, mesmo raciocínio.
-    private(set) var failureDetails: [Int: MegaphoneFailureDetail] = [:]
+    private(set) var failureDetails: [PostTarget: MegaphoneFailureDetail] = [:]
 
     /// Intervalo mínimo entre uma postagem bem-sucedida e a próxima, pra não martelar a API do
     /// Enjoei — vale pra qualquer produto, não só pro que acabou de ser postado. Propriedade de
@@ -32,15 +35,21 @@ final class CrossAccountPoster {
     }
 
     func post(product: EnjoeiProduct, from source: AccountSession, to destination: AccountSession) {
+        let target = PostTarget(productID: product.id, destinationAccountID: destination.id)
         guard !isInCooldown else { return }
-        guard statuses[product.id] != .megaphoning, statuses[product.id] != .succeeded else { return }
-        statuses[product.id] = .megaphoning
+        guard statuses[target] != .megaphoning, statuses[target] != .succeeded else { return }
+        statuses[target] = .megaphoning
         Task { [weak self] in
-            await self?.run(product: product, from: source, to: destination)
+            await self?.run(product: product, from: source, to: destination, target: target)
         }
     }
 
-    private func run(product: EnjoeiProduct, from source: AccountSession, to destination: AccountSession) async {
+    private func run(
+        product: EnjoeiProduct,
+        from source: AccountSession,
+        to destination: AccountSession,
+        target: PostTarget
+    ) async {
         do {
             let template = try await source.client.productTemplate(productID: product.id)
             let token = try await destination.client.csrfToken()
@@ -50,13 +59,13 @@ final class CrossAccountPoster {
                 client: destination.client
             )
             if let path = response.path {
-                postedProductURLs[product.id] = EnjoeiAPI.productURL(path: path)
+                postedProductURLs[target] = EnjoeiAPI.productURL(path: path)
             }
-            statuses[product.id] = .succeeded
+            statuses[target] = .succeeded
             cooldownUntil = Date().addingTimeInterval(cooldownDuration)
         } catch {
-            statuses[product.id] = .failed(error.localizedDescription)
-            failureDetails[product.id] = MegaphoneFailureDetail(action: .post, error: error)
+            statuses[target] = .failed(error.localizedDescription)
+            failureDetails[target] = MegaphoneFailureDetail(action: .post, error: error)
         }
     }
 

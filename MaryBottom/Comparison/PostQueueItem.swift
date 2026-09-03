@@ -21,4 +21,12 @@ nonisolated struct PostQueueItem: Identifiable, Equatable, Sendable, Codable, Ac
     let sourceAccountName: String
     let destinationAccountID: EnjoeiAccountID
     let destinationAccountName: String
+
+    /// Chave de `CrossAccountPoster.statuses`/`postedProductURLs`/`failureDetails` pra esse item —
+    /// só faz sentido pra `.kind == .post` (as outras três ações vivem nos dicionários do
+    /// `MegaphoneRunner` da própria conta, chaveados só por produto, já que origem e destino são
+    /// sempre a mesma conta ali).
+    var postTarget: PostTarget {
+        PostTarget(productID: product.id, destinationAccountID: destinationAccountID)
+    }
 }

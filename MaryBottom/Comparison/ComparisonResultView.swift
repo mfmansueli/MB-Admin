@@ -1,0 +1,244 @@
+import SwiftUI
+
+/// Resultado de uma comparação já carregada: busca, filtro, seleção múltipla e as três seções
+/// (produtos em comum, só em A, só em B). Extraído de `AccountComparisonView` só por tamanho — quem
+/// chama passa `.id(result.id)`, então cada comparação nova (trocar conta, ou comparar o mesmo par
+/// de novo) sempre nasce com busca/filtro/seleção zerados, em vez de arrastar o que sobrou marcado
+/// da comparação anterior.
+struct ComparisonResultView: View {
+    let result: AccountComparisonResult
+    let accountA: AccountSession
+    let accountB: AccountSession
+    let poster: CrossAccountPoster
+    let postQueue: PostQueue
+
+    @State private var resultFilter: ResultFilter = .all
+    @State private var searchText = ""
+    @State private var isSelecting = false
+    @State private var selectedProductIDs: Set<Int> = []
+    @FocusState private var isSearchFocused: Bool
+
+    private enum ResultFilter: Hashable {
+        case all
+        case matches
+        /// Só em conta A — ou seja, os que faltam na conta B.
+        case onlyInA
+        /// Só em conta B — os que faltam na conta A.
+        case onlyInB
+    }
+
+    var body: some View {
+        let matches = filteredMatches(result.matches)
+        let onlyInA = filteredProducts(result.onlyInA)
+        let onlyInB = filteredProducts(result.onlyInB)
+
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                searchField
+                resultFilterPicker
+            }
+            .padding(.horizontal, 20)
+
+            if !onlyInA.isEmpty || !onlyInB.isEmpty {
+                // Só os produtos das seções que o filtro atual realmente mostra — com "parecidos"
+                // selecionado, por exemplo, não tem o que marcar, já que os pares não são
+                // selecionáveis.
+                let selectableIDs = selectableProductIDs(onlyInA: onlyInA, onlyInB: onlyInB)
+                HStack {
+                    Button(isSelecting ? "cancelar seleção" : "selecionar") {
+                        isSelecting.toggle()
+                        if !isSelecting { selectedProductIDs.removeAll() }
+                    }
+                    .buttonStyle(.bordered)
+
+                    if isSelecting, !selectableIDs.isEmpty {
+                        Button(
+                            selectableIDs.isSubset(of: selectedProductIDs)
+                                ? "desmarcar todos"
+                                : "selecionar todos"
+                        ) {
+                            toggleSelectAll(selectableIDs)
+                        }
+                        .buttonStyle(.bordered)
+                    }
+
+                    Spacer()
+
+                    if isSelecting, !selectedProductIDs.isEmpty {
+                        Button("adicionar \(selectedProductIDs.count) à fila") {
+                            enqueueSelected()
+                        }
+                        .font(.footnote.weight(.semibold))
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                    }
+                }
+                .padding(.horizontal, 20)
+            }
+
+            if matches.isEmpty, onlyInA.isEmpty, onlyInB.isEmpty {
+                ContentUnavailableView.search(text: searchText)
+                    .frame(maxHeight: .infinity)
+            } else {
+                List {
+                    if resultFilter == .all || resultFilter == .matches, !matches.isEmpty {
+                        Section {
+                            ForEach(matches) { match in
+                                ProductMatchRowView(match: match)
+                            }
+                        } header: {
+                            sectionHeader("produtos em comum")
+                        }
+                    }
+                    if resultFilter == .all || resultFilter == .onlyInA, !onlyInA.isEmpty {
+                        Section {
+                            ForEach(onlyInA) { product in
+                                // Só existe em A — postar cria ele em B.
+                                UnmatchedProductRowView(
+                                    product: product,
+                                    sourceAccount: accountA,
+                                    destinationAccount: accountB,
+                                    poster: poster,
+                                    postQueue: postQueue,
+                                    isSelecting: isSelecting,
+                                    isSelected: selectedProductIDs.contains(product.id),
+                                    onToggleSelection: { toggleSelection(productID: product.id) }
+                                )
+                            }
+                        } header: {
+                            sectionHeader("só em \(accountA.user.name)")
+                        }
+                    }
+                    if resultFilter == .all || resultFilter == .onlyInB, !onlyInB.isEmpty {
+                        Section {
+                            ForEach(onlyInB) { product in
+                                // Só existe em B — postar cria ele em A.
+                                UnmatchedProductRowView(
+                                    product: product,
+                                    sourceAccount: accountB,
+                                    destinationAccount: accountA,
+                                    poster: poster,
+                                    postQueue: postQueue,
+                                    isSelecting: isSelecting,
+                                    isSelected: selectedProductIDs.contains(product.id),
+                                    onToggleSelection: { toggleSelection(productID: product.id) }
+                                )
+                            }
+                        } header: {
+                            sectionHeader("só em \(accountB.user.name)")
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+
+    private func filteredMatches(_ matches: [ProductMatch]) -> [ProductMatch] {
+        let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return matches }
+        return matches.filter {
+            $0.productA.title.localizedCaseInsensitiveContains(text)
+                || $0.productB.title.localizedCaseInsensitiveContains(text)
+        }
+    }
+
+    private func filteredProducts(_ products: [EnjoeiProduct]) -> [EnjoeiProduct] {
+        let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return products }
+        return products.filter { $0.title.localizedCaseInsensitiveContains(text) }
+    }
+
+    private var searchField: some View {
+        SearchField(placeholder: "buscar por nome", text: $searchText, isFocused: $isSearchFocused)
+            .frame(maxWidth: .infinity)
+    }
+
+    private var resultFilterPicker: some View {
+        let total = result.matches.count + result.onlyInA.count + result.onlyInB.count
+        return Menu {
+            Picker("filtro", selection: $resultFilter) {
+                Text("todos (\(total))").tag(ResultFilter.all)
+                Text("parecidos (\(result.matches.count))").tag(ResultFilter.matches)
+                Text("não encontrados em \(accountA.user.name) (\(result.onlyInB.count))")
+                    .tag(ResultFilter.onlyInB)
+                Text("não encontrados em \(accountB.user.name) (\(result.onlyInA.count))")
+                    .tag(ResultFilter.onlyInA)
+            }
+            .pickerStyle(.inline)
+        } label: {
+            HStack {
+                Text(resultFilterLabel)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(.rect)
+        }
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+
+    private var resultFilterLabel: String {
+        switch resultFilter {
+        case .all:
+            "todos (\(result.matches.count + result.onlyInA.count + result.onlyInB.count))"
+        case .matches:
+            "parecidos (\(result.matches.count))"
+        case .onlyInB:
+            "não encontrados em \(accountA.user.name) (\(result.onlyInB.count))"
+        case .onlyInA:
+            "não encontrados em \(accountB.user.name) (\(result.onlyInA.count))"
+        }
+    }
+
+    /// Fundo opaco explícito — sem isso, o header de uma `Section` fica transparente e as rows
+    /// parecem "passar por trás" dele enquanto a lista rola.
+    private func sectionHeader(_ title: String) -> some View {
+        Text(title)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .textCase(nil)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 6)
+            .background(.background)
+    }
+
+    private func toggleSelection(productID: Int) {
+        if selectedProductIDs.contains(productID) {
+            selectedProductIDs.remove(productID)
+        } else {
+            selectedProductIDs.insert(productID)
+        }
+    }
+
+    /// Ids selecionáveis de acordo com o que `resultFilter` está exibindo agora — os pares
+    /// ("produtos em comum") nunca entram, porque `ProductMatchRowView` não tem seleção.
+    private func selectableProductIDs(onlyInA: [EnjoeiProduct], onlyInB: [EnjoeiProduct]) -> Set<Int> {
+        var ids: Set<Int> = []
+        if resultFilter == .all || resultFilter == .onlyInA { ids.formUnion(onlyInA.map(\.id)) }
+        if resultFilter == .all || resultFilter == .onlyInB { ids.formUnion(onlyInB.map(\.id)) }
+        return ids
+    }
+
+    private func toggleSelectAll(_ ids: Set<Int>) {
+        if ids.isSubset(of: selectedProductIDs) {
+            selectedProductIDs.subtract(ids)
+        } else {
+            selectedProductIDs.formUnion(ids)
+        }
+    }
+
+    /// Resolve cada id selecionado contra o resultado **completo** (não o filtrado pela busca),
+    /// pra achar a origem/destino certos mesmo se o texto de busca mudar antes de confirmar.
+    private func enqueueSelected() {
+        for product in result.onlyInA where selectedProductIDs.contains(product.id) {
+            postQueue.enqueue(product: product, source: accountA, destination: accountB)
+        }
+        for product in result.onlyInB where selectedProductIDs.contains(product.id) {
+            postQueue.enqueue(product: product, source: accountB, destination: accountA)
+        }
+        selectedProductIDs.removeAll()
+        isSelecting = false
+    }
+}

@@ -132,7 +132,13 @@ struct AccountsListView: View {
             }
         } detail: {
             if let account = accountsStore.accounts.first(where: { $0.id == selectedAccountID }) {
+                // Sem `.id`, o `NavigationSplitView` reaproveita a mesma instância de
+                // `AccountDetailView` ao trocar a conta selecionada na barra lateral (mesma
+                // posição na árvore, view "igual" pro SwiftUI) — todo o estado dela (aba
+                // selecionada, filtro, busca, seleção em andamento) vazaria de uma conta pra outra
+                // em vez de resetar (ou recuperar a própria escolha lembrada, no caso de aba/filtro).
                 AccountDetailView(account: account)
+                    .id(account.id)
             } else {
                 ContentUnavailableView("selecione uma conta", systemImage: "person.crop.circle")
             }

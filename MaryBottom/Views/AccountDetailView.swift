@@ -3,17 +3,23 @@ import SwiftUI
 /// Detalhe de uma conta: identifica o usuário e conduz o megafone da loja dele. A aba "publicados"
 /// (megafonar, busca, filtro, seleção múltipla) vive em `AccountPublishedTabView` — o estado dela
 /// que também importa aqui (pro toolbar, ou pra sobreviver a trocar de aba e voltar) fica com esta
-/// view, passado pra lá por `@Binding`.
+/// view, passado pra lá por `@Binding`. Quem instancia esta view (`AccountsListView`) usa
+/// `.id(account.id)` — sem isso, o `NavigationSplitView` reaproveita a mesma instância ao trocar a
+/// conta selecionada na barra lateral (mesma posição na árvore de views), e todo o `@State` abaixo
+/// vazaria de uma conta pra outra.
 struct AccountDetailView: View {
     let account: AccountSession
 
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var filter: AccountProductFilter = .all
+    /// Aba e filtro escolhidos, lembrados por conta — cada uma guarda a própria escolha entre uma
+    /// visita e outra (inclusive fechar e abrir o app de novo), mesmo raciocínio de
+    /// `AccountPublishedTabView.storedRounds`/`storedSpeed`.
+    @AppStorage private var selectedTab: DetailTab
+    @AppStorage private var filter: AccountProductFilter
     @State private var searchText = ""
     /// Quando ativo, a lista rola sozinha até o produto que está sendo megafonado no momento.
     @State private var isFollowing = true
-    @State private var selectedTab: DetailTab = .published
     @State private var isSelecting = false
     @State private var selectedIDs: Set<Int> = []
     @State private var bulkAction: AccountBulkAction = .repost
@@ -25,6 +31,12 @@ struct AccountDetailView: View {
     private enum DetailTab: String, CaseIterable {
         case published = "publicados"
         case inactive = "inativos"
+    }
+
+    init(account: AccountSession) {
+        self.account = account
+        _selectedTab = AppStorage(wrappedValue: .published, "accountDetail.selectedTab.\(account.id)")
+        _filter = AppStorage(wrappedValue: .all, "accountDetail.filter.\(account.id)")
     }
 
     var body: some View {

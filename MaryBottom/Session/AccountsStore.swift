@@ -146,16 +146,18 @@ final class AccountsStore {
         persist()
     }
 
-    /// Sem isso, a lista de publicados, a de inativos e as preferências de rodada/intervalo da
-    /// conta ficam órfãs em `UserDefaults` pra sempre — o id nunca mais aparece em `accounts` pra
-    /// alguém vir apagar depois.
+    /// Sem isso, a lista de publicados, a de inativos e as preferências de rodada/intervalo/aba/
+    /// filtro da conta ficam órfãs em `UserDefaults` pra sempre — o id nunca mais aparece em
+    /// `accounts` pra alguém vir apagar depois.
     private func clearLocalData(accountID: EnjoeiAccountID) {
         megaphoneItemsPersistence.clearItems(accountID: accountID)
         inactiveProductsPersistence.clearItems(accountID: accountID)
-        // Mesmas chaves que `AccountDetailView` monta em `@AppStorage` — não tem como reusar a
-        // property wrapper daqui, só reconstruir a mesma string.
+        // Mesmas chaves que `AccountPublishedTabView`/`AccountDetailView` montam em `@AppStorage`
+        // — não tem como reusar a property wrapper daqui, só reconstruir a mesma string.
         UserDefaults.standard.removeObject(forKey: "megaphone.rounds.\(accountID)")
         UserDefaults.standard.removeObject(forKey: "megaphone.speed.\(accountID)")
+        UserDefaults.standard.removeObject(forKey: "accountDetail.selectedTab.\(accountID)")
+        UserDefaults.standard.removeObject(forKey: "accountDetail.filter.\(accountID)")
     }
 
     /// Conta já existente (sessão vencida): reusa o client/webView dela — nunca cria uma segunda

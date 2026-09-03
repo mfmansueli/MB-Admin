@@ -93,6 +93,40 @@ struct AccountComparisonLoaderTests {
         }
     }
 
+    @Test("cada comparação tem um id diferente, mesmo comparando o mesmo par de contas de novo")
+    func cadaComparacaoTemIDDiferente() async {
+        let clientA = StubEnjoeiClient(pages: [
+            EnjoeiFixtures.page(ids: [1], endCursor: nil),
+            EnjoeiFixtures.page(ids: [1], endCursor: nil)
+        ])
+        let accountA = makeAccount(client: clientA)
+        let clientB = StubEnjoeiClient(pages: [
+            EnjoeiFixtures.page(ids: [2], endCursor: nil),
+            EnjoeiFixtures.page(ids: [2], endCursor: nil)
+        ])
+        let accountB = makeAccount(client: clientB)
+        let loader = AccountComparisonLoader()
+
+        loader.compare(accountA: accountA, accountB: accountB)
+        await loader.waitUntilFinished()
+        guard case .finished(let firstResult) = loader.phase else {
+            Issue.record("esperava .finished, veio \(loader.phase)")
+            return
+        }
+
+        // Comparar de novo, mesmo par de contas — a tela usa esse id (`.id(result.id)`) pra saber
+        // quando zerar busca/filtro/seleção de `ComparisonResultView`; sem um id novo aqui, uma
+        // seleção feita antes de comparar de novo sobreviveria pro resultado novo.
+        loader.compare(accountA: accountA, accountB: accountB)
+        await loader.waitUntilFinished()
+        guard case .finished(let secondResult) = loader.phase else {
+            Issue.record("esperava .finished, veio \(loader.phase)")
+            return
+        }
+
+        #expect(firstResult.id != secondResult.id)
+    }
+
     @Test("phase passa por loadingProducts antes de finished")
     func phasePassaPorLoadingProducts() async {
         let clientA = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)])

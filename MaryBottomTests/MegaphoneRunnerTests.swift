@@ -65,6 +65,9 @@ struct MegaphoneRunnerTests {
         #expect(runner.items[1].status == .failed("calma lá"))
         #expect(runner.succeededCount == 2)
         #expect(runner.failedCount == 1)
+        #expect(runner.failureDetails[2]?.action == .megaphone)
+        #expect(runner.failureDetails[2]?.httpStatus == 429)
+        #expect(runner.failureDetails[2]?.serverMessage == "calma lá")
     }
 
     @Test("sessão expirada interrompe a rodada na hora")
@@ -81,6 +84,8 @@ struct MegaphoneRunnerTests {
         #expect(runner.phase == .failed(EnjoeiError.notAuthenticated.localizedDescription))
         #expect(await client.megaphonedIDs.isEmpty)
         #expect(runner.items[2].status == .pending)
+        #expect(runner.failureDetails[1]?.action == .megaphone)
+        #expect(runner.failureDetails[1]?.technicalDescription == EnjoeiError.notAuthenticated.diagnosticDescription)
     }
 
     @Test("muitas falhas seguidas não param a rodada — segue pros próximos produtos")
@@ -456,6 +461,34 @@ struct MegaphoneRunnerTests {
         await runner.waitUntilFinished()
     }
 
+    @Test("erro ao aplicar desconto vira falha, com o diagnóstico completo")
+    func aplicarDescontoFalha() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            failuresByProductID: [2: .http(status: 500, message: "o enjoei caiu")],
+            exposuresByProductID: [
+                2: MegaphoneExposure(
+                    productID: 2, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+        runner.start(sellerID: 1)
+        runner.pause()
+        await waitUntil { !runner.items.isEmpty }
+
+        runner.applyDiscount(for: 2)
+        await waitUntil { runner.items.first { $0.id == 2 }?.status != .megaphoning }
+
+        #expect(runner.items.first { $0.id == 2 }?.status == .failed("o enjoei caiu"))
+        #expect(runner.failureDetails[2]?.action == .applyDiscount)
+        #expect(runner.failureDetails[2]?.httpStatus == 500)
+        #expect(runner.failureDetails[2]?.serverMessage == "o enjoei caiu")
+
+        runner.cancel()
+        await runner.waitUntilFinished()
+    }
+
     @Test("token CSRF recusado ao aplicar desconto é renovado e o desconto sai aplicado do mesmo jeito")
     func aplicarDescontoRenovaTokenRecusado() async {
         let client = StubEnjoeiClient(
@@ -698,6 +731,9 @@ struct MegaphoneRunnerTests {
         await waitUntil { runner.deleteStatuses[1] != .megaphoning && runner.deleteStatuses[1] != nil }
 
         #expect(runner.deleteStatuses[1] == .failed("o enjoei caiu"))
+        #expect(runner.failureDetails[1]?.action == .delete)
+        #expect(runner.failureDetails[1]?.httpStatus == 500)
+        #expect(runner.failureDetails[1]?.serverMessage == "o enjoei caiu")
     }
 
     @Test("token CSRF recusado ao apagar é renovado e a exclusão sai do mesmo jeito")
@@ -804,6 +840,8 @@ struct MegaphoneRunnerTests {
 
         #expect(runner.inactivateStatuses[1] == .failed("o enjoei caiu"))
         #expect(await client.updateProductStateCalls.isEmpty)
+        #expect(runner.failureDetails[1]?.action == .inactivate)
+        #expect(runner.failureDetails[1]?.technicalDescription == EnjoeiError.http(status: 500, message: "o enjoei caiu").diagnosticDescription)
     }
 
     @Test("token CSRF recusado ao inativar é renovado e a inativação sai do mesmo jeito")
@@ -881,6 +919,8 @@ struct MegaphoneRunnerTests {
 
         #expect(runner.activateStatuses[1] == .failed("o enjoei caiu"))
         #expect(await client.updateProductStateCalls.isEmpty)
+        #expect(runner.failureDetails[1]?.action == .activate)
+        #expect(runner.failureDetails[1]?.httpStatus == 500)
     }
 
     @Test("token CSRF recusado ao ativar é renovado e a ativação sai do mesmo jeito")

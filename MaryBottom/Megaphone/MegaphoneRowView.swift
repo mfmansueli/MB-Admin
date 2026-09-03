@@ -20,7 +20,8 @@ struct MegaphoneRowView: View {
 
     /// Reposta pela fila de ações compartilhada — mesmo `poster` que a comparação entre contas e
     /// os inativos usam, com origem e destino sendo essa própria conta.
-    private var repostStatus: MegaphoneStatus { accountsStore.poster.statuses[item.id] ?? .pending }
+    private var repostTarget: PostTarget { PostTarget(productID: item.id, destinationAccountID: account.id) }
+    private var repostStatus: MegaphoneStatus { accountsStore.poster.statuses[repostTarget] ?? .pending }
     private var deleteStatus: MegaphoneStatus { runner.deleteStatuses[item.id] ?? .pending }
     private var inactivateStatus: MegaphoneStatus { runner.inactivateStatuses[item.id] ?? .pending }
     private var isDeleted: Bool { deleteStatus == .succeeded }

@@ -12,6 +12,12 @@ struct CrossAccountPosterTests {
         )
     }
 
+    /// Atalho pra chave de `CrossAccountPoster.statuses`/`postedProductURLs`/`failureDetails` nos
+    /// testes — todos aqui têm um único `destination` por cenário, exceto o teste de colisão.
+    private func target(_ productID: Int, destination: AccountSession) -> PostTarget {
+        PostTarget(productID: productID, destinationAccountID: destination.id)
+    }
+
     private func makeTemplate(productID: Int) -> ProductTemplate {
         ProductTemplate(
             title: "produto \(productID)",
@@ -40,9 +46,9 @@ struct CrossAccountPosterTests {
         let poster = CrossAccountPoster()
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
-        #expect(poster.statuses[1] == .succeeded)
+        #expect(poster.statuses[target(1, destination: destination)] == .succeeded)
         #expect(await sourceClient.requestedTemplateIDs == [1])
         let call = await destinationClient.createProductCalls.first
         #expect(call?.request.product.title == "produto 1")
@@ -60,9 +66,9 @@ struct CrossAccountPosterTests {
         let poster = CrossAccountPoster()
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
-        #expect(poster.postedProductURLs[1]?.absoluteString == "https://www.enjoei.com.br/p/colar-curto-149812846")
+        #expect(poster.postedProductURLs[target(1, destination: destination)]?.absoluteString == "https://www.enjoei.com.br/p/colar-curto-149812846")
     }
 
     @Test("erro ao ler o template na origem vira falha, sem tentar criar no destino")
@@ -73,10 +79,13 @@ struct CrossAccountPosterTests {
         let poster = CrossAccountPoster()
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
-        #expect(poster.statuses[1] == .failed("o enjoei caiu"))
+        #expect(poster.statuses[target(1, destination: destination)] == .failed("o enjoei caiu"))
         #expect(await destinationClient.createProductCalls.isEmpty)
+        #expect(poster.failureDetails[target(1, destination: destination)]?.action == .post)
+        #expect(poster.failureDetails[target(1, destination: destination)]?.httpStatus == 500)
+        #expect(poster.failureDetails[target(1, destination: destination)]?.serverMessage == "o enjoei caiu")
     }
 
     @Test("erro ao criar no destino vira falha")
@@ -88,9 +97,11 @@ struct CrossAccountPosterTests {
         let poster = CrossAccountPoster()
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
-        #expect(poster.statuses[1] == .failed("preço mínimo não atingido"))
+        #expect(poster.statuses[target(1, destination: destination)] == .failed("preço mínimo não atingido"))
+        #expect(poster.failureDetails[target(1, destination: destination)]?.action == .post)
+        #expect(poster.failureDetails[target(1, destination: destination)]?.httpStatus == 422)
     }
 
     @Test("token CSRF recusado no destino é renovado e a criação sai do mesmo jeito")
@@ -101,9 +112,9 @@ struct CrossAccountPosterTests {
         let poster = CrossAccountPoster()
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
-        #expect(poster.statuses[1] == .succeeded)
+        #expect(poster.statuses[target(1, destination: destination)] == .succeeded)
         let tokens = await destinationClient.createProductCalls.map(\.token)
         #expect(tokens == ["token-1", "token-2"])
     }
@@ -117,7 +128,7 @@ struct CrossAccountPosterTests {
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
         #expect(await sourceClient.requestedTemplateIDs.count == 1)
     }
@@ -134,7 +145,7 @@ struct CrossAccountPosterTests {
         #expect(poster.isInCooldown == false)
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
         #expect(poster.isInCooldown)
         let cooldownUntil = try #require(poster.cooldownUntil)
@@ -143,8 +154,32 @@ struct CrossAccountPosterTests {
 
         // Um segundo produto, ainda dentro do bloqueio, nem chega a pedir o template.
         poster.post(product: EnjoeiFixtures.product(id: 2), from: source, to: destination)
-        #expect(poster.statuses[2] == nil)
+        #expect(poster.statuses[target(2, destination: destination)] == nil)
         #expect(await destinationClient.createProductCalls.count == 1)
+    }
+
+    @Test("o mesmo produto postado pra dois destinos diferentes não colide: os dois rodam de verdade")
+    func mesmoProdutoDoisDestinosNaoColide() async {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let source = makeAccount(client: sourceClient)
+        let destinationBClient = StubEnjoeiClient()
+        let destinationB = makeAccount(client: destinationBClient)
+        let destinationCClient = StubEnjoeiClient()
+        let destinationC = makeAccount(client: destinationCClient)
+        // Sem cooldown: o que este teste verifica é a chave do dicionário, não o bloqueio de 3 min.
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+
+        poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destinationB)
+        await waitUntil { poster.statuses[target(1, destination: destinationB)] != .megaphoning && poster.statuses[target(1, destination: destinationB)] != nil }
+        // Sem isso, `post` pra C via a mesma chave (só `product.id`) veria `.succeeded` da postagem
+        // em B e nunca chamaria `run` de verdade — reproduz o bug antes da correção.
+        poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destinationC)
+        await waitUntil { poster.statuses[target(1, destination: destinationC)] != .megaphoning && poster.statuses[target(1, destination: destinationC)] != nil }
+
+        #expect(poster.statuses[target(1, destination: destinationB)] == .succeeded)
+        #expect(poster.statuses[target(1, destination: destinationC)] == .succeeded)
+        #expect(await destinationBClient.createProductCalls.count == 1)
+        #expect(await destinationCClient.createProductCalls.count == 1)
     }
 
     /// Erro não conta como "postagem bem-sucedida" — não trava a próxima tentativa.
@@ -155,7 +190,7 @@ struct CrossAccountPosterTests {
         let poster = CrossAccountPoster()
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
         #expect(poster.isInCooldown == false)
         #expect(poster.cooldownUntil == nil)

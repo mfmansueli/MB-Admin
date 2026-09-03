@@ -18,6 +18,12 @@ struct PostQueueTests {
         )
     }
 
+    /// Atalho pra chave de `CrossAccountPoster.statuses`/`failureDetails` nos testes — todos aqui
+    /// têm um único `destination` por cenário.
+    private func target(_ productID: Int, destination: AccountSession) -> PostTarget {
+        PostTarget(productID: productID, destinationAccountID: destination.id)
+    }
+
     private func makeTemplate(productID: Int) -> ProductTemplate {
         ProductTemplate(
             title: "produto \(productID)",
@@ -58,8 +64,8 @@ struct PostQueueTests {
         // iterações) em vez de um único `waitUntil { !queue.isRunning }` — sob carga pesada (suíte
         // inteira rodando em paralelo), a cadeia dos dois itens juntos pode não caber no limite de
         // um `waitUntil` só.
-        await waitUntil { poster.statuses[1] != nil && poster.statuses[1] != .megaphoning }
-        await waitUntil { poster.statuses[2] != nil && poster.statuses[2] != .megaphoning }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != nil && poster.statuses[target(1, destination: destination)] != .megaphoning }
+        await waitUntil { poster.statuses[target(2, destination: destination)] != nil && poster.statuses[target(2, destination: destination)] != .megaphoning }
         await waitUntil { !queue.isRunning }
 
         #expect(await sourceClient.requestedTemplateIDs == [1, 2])
@@ -83,7 +89,7 @@ struct PostQueueTests {
         queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
         let secondItemID = queue.items[1].id
 
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
         queue.remove(id: secondItemID)
 
         #expect(queue.items.map(\.id) == [queue.items.first?.id].compactMap { $0 })
@@ -105,7 +111,7 @@ struct PostQueueTests {
         queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
         queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
 
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
         queue.removeAll()
 
         #expect(queue.items.isEmpty)
@@ -130,13 +136,13 @@ struct PostQueueTests {
 
         // Várias chances do laço rodar — nada é postado enquanto pausado.
         for _ in 0..<200 { await Task.yield() }
-        #expect(poster.statuses[1] == nil)
+        #expect(poster.statuses[target(1, destination: destination)] == nil)
         #expect(queue.isPaused)
         #expect(queue.isRunning)
 
         queue.resume()
-        await waitUntil { poster.statuses[1] != nil && poster.statuses[1] != .megaphoning }
-        await waitUntil { poster.statuses[2] != nil && poster.statuses[2] != .megaphoning }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != nil && poster.statuses[target(1, destination: destination)] != .megaphoning }
+        await waitUntil { poster.statuses[target(2, destination: destination)] != nil && poster.statuses[target(2, destination: destination)] != .megaphoning }
 
         #expect(queue.items.allSatisfy { queue.status(for: $0) == .succeeded })
         #expect(queue.isPaused == false)
@@ -158,7 +164,7 @@ struct PostQueueTests {
         queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
 
         // Ainda dentro do intervalo de 60s entre o primeiro item e o segundo.
-        await waitUntil { poster.statuses[1] != nil && poster.statuses[1] != .megaphoning }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != nil && poster.statuses[target(1, destination: destination)] != .megaphoning }
         queue.pause()
         // Tempo real (não só `Task.yield`) maior que o pedaço de 0.2s do laço de espera interno —
         // sem isso, um `resume()` na sequência pode acontecer antes do laço sequer checar
@@ -166,7 +172,37 @@ struct PostQueueTests {
         try? await Task.sleep(for: .milliseconds(500))
         queue.resume()
 
-        await waitUntil { poster.statuses[2] != nil && poster.statuses[2] != .megaphoning }
+        await waitUntil { poster.statuses[target(2, destination: destination)] != nil && poster.statuses[target(2, destination: destination)] != .megaphoning }
+        #expect(queue.items.allSatisfy { queue.status(for: $0) == .succeeded })
+    }
+
+    @Test("trocar o intervalo enquanto a fila já está esperando vale na hora, sem esperar a espera antiga terminar")
+    func trocarIntervaloDuranteAEsperaValeNaHora() async {
+        let sourceClient = StubEnjoeiClient(
+            templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)]
+        )
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        // Intervalo bem maior que a duração do teste — sem trocar pra um intervalo curto no meio
+        // da espera, o segundo item não sairia dela a tempo do teste terminar.
+        let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: 60)
+
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
+
+        // Ainda dentro do intervalo de 60s entre o primeiro item e o segundo.
+        await waitUntil { poster.statuses[target(1, destination: destination)] != nil && poster.statuses[target(1, destination: destination)] != .megaphoning }
+        queue.setInterval(0)
+        // Tempo real (não só `Task.yield`) maior que o pedaço de 0.2s do laço de espera interno —
+        // mesmo raciocínio de `pausarDuranteOIntervaloInterrompeNaHora`: sem isso, o teste checa
+        // de novo rápido demais pro laço interno sequer ter tido a chance de reler `interval`.
+        try? await Task.sleep(for: .milliseconds(500))
+
+        // Sem essa correção, `waitInterval` guardava os 60s originais numa variável local no
+        // começo da espera e ignorava a troca até a espera seguinte — o segundo item só sairia
+        // muito depois do fim deste teste.
+        await waitUntil { poster.statuses[target(2, destination: destination)] != nil && poster.statuses[target(2, destination: destination)] != .megaphoning }
         #expect(queue.items.allSatisfy { queue.status(for: $0) == .succeeded })
     }
 
@@ -371,7 +407,7 @@ struct PostQueueTests {
         firstQueue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
         firstQueue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
         let pendingItemID = firstQueue.items[1].id
-        await waitUntil { poster.statuses[1] != nil && poster.statuses[1] != .megaphoning }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != nil && poster.statuses[target(1, destination: destination)] != .megaphoning }
 
         // Simula reabrir o app: uma fila nova, mesma persistência de itens.
         let secondQueue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, itemsPersistence: itemsPersistence)
@@ -495,7 +531,7 @@ struct PostQueueTests {
         // `processaEmSequencia` sobre por que não dá pra confiar num único `waitUntil` pra dois
         // itens seguidos sob carga pesada.
         await waitUntil { queue.status(for: queue.items[0]) != .pending }
-        await waitUntil { poster.statuses[2] != nil && poster.statuses[2] != .megaphoning }
+        await waitUntil { poster.statuses[target(2, destination: stableDestination)] != nil && poster.statuses[target(2, destination: stableDestination)] != .megaphoning }
         await waitUntil { !queue.isRunning }
 
         #expect(queue.status(for: queue.items[0]) == .failed("conta não está mais logada"))
@@ -517,7 +553,7 @@ struct PostQueueTests {
         let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: .zero)
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
         #expect(await destinationClient.createProductCalls.count == 1)
 
         queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
@@ -525,6 +561,33 @@ struct PostQueueTests {
 
         #expect(await destinationClient.createProductCalls.count == 1)
         #expect(queue.status(for: queue.items[0]) == .succeeded)
+    }
+
+    @Test("mesmo produto enfileirado pra dois destinos diferentes: os dois postam de verdade")
+    func mesmoProdutoDoisDestinosNaFila() async {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destinationBClient = StubEnjoeiClient()
+        let destinationB = makeAccount(name: "destino B", client: destinationBClient)
+        let destinationCClient = StubEnjoeiClient()
+        let destinationC = makeAccount(name: "destino C", client: destinationCClient)
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let queue = PostQueue(
+            poster: poster,
+            accountsProvider: { [source, destinationB, destinationC] },
+            interval: .zero
+        )
+
+        // Mesmo produto, dois itens, um pra cada destino — antes da correção, o segundo reaproveitava
+        // o `.succeeded` do primeiro (colisão por `product.id`) e nunca chamava `createProduct` de
+        // verdade em C.
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destinationB)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destinationC)
+        await waitUntil { !queue.isRunning }
+
+        #expect(queue.items.allSatisfy { queue.status(for: $0) == .succeeded })
+        #expect(await destinationBClient.createProductCalls.count == 1)
+        #expect(await destinationCClient.createProductCalls.count == 1)
     }
 
     @Test("currentItem aponta pro item em voo processando a fila, e volta a nil no fim")
@@ -557,9 +620,9 @@ struct PostQueueTests {
         queue.postSingle(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
         queue.postSingle(product: EnjoeiFixtures.product(id: 2), from: source, to: destination)
 
-        await waitUntil { poster.statuses[1] != .megaphoning && poster.statuses[1] != nil }
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
 
-        #expect(poster.statuses[2] == nil)
+        #expect(poster.statuses[target(2, destination: destination)] == nil)
     }
 
     /// Espera uma condição sem prender o teste pra sempre se algo der errado.

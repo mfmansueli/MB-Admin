@@ -16,7 +16,8 @@ struct UnmatchedProductRowView: View {
     @State private var isConfirmingPost = false
     @State private var isShowingPostStatus = false
 
-    private var postStatus: MegaphoneStatus { poster.statuses[product.id] ?? .pending }
+    private var postTarget: PostTarget { PostTarget(productID: product.id, destinationAccountID: destinationAccount.id) }
+    private var postStatus: MegaphoneStatus { poster.statuses[postTarget] ?? .pending }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -73,7 +74,7 @@ struct UnmatchedProductRowView: View {
         .sheet(isPresented: $isShowingPostStatus) {
             RepostStatusSheet(
                 status: postStatus,
-                productURL: poster.postedProductURLs[product.id],
+                productURL: poster.postedProductURLs[postTarget],
                 onDismiss: { isShowingPostStatus = false }
             )
         }

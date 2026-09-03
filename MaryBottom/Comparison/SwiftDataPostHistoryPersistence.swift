@@ -15,7 +15,7 @@ final class SwiftDataPostHistoryPersistence: PostHistoryPersisting {
     private let context: ModelContext
     private let defaults: UserDefaults
 
-    init(container: ModelContainer = SwiftDataPostHistoryPersistence.makeSharedContainer(), defaults: UserDefaults = .standard) {
+    init(container: ModelContainer = SwiftDataPostHistoryPersistence.sharedContainer, defaults: UserDefaults = .standard) {
         context = ModelContext(container)
         self.defaults = defaults
         migrateLegacyEntriesIfNeeded()
@@ -23,13 +23,18 @@ final class SwiftDataPostHistoryPersistence: PostHistoryPersisting {
 
     // `nonisolated`: usado como expressão de argumento padrão em `init`, que é avaliada fora do
     // MainActor — mesma razão do `nonisolated init()` de `InMemoryPostHistoryPersistence`.
-    nonisolated static func makeSharedContainer() -> ModelContainer {
+    // `static let`, não `func`: computado uma vez só e cacheado. Sem isso, duas instâncias desta
+    // classe sem `container` explícito (ex.: dois `AccountsStore()` construídos por engano, num
+    // teste ou preview futuro) criariam dois `ModelContainer` apontando pro mesmo arquivo em
+    // disco, arriscando os dois brigarem por lock do SQLite — a inicialização de `static let` é
+    // atômica e uma vez só, então isso resolve o problema de propósito, não por acidente.
+    nonisolated static let sharedContainer: ModelContainer = {
         let schema = Schema([PostHistoryRecord.self])
         // Esquema fixo, conhecido em tempo de compilação — não tem como falhar em runtime a não
         // ser por disco cheio/corrompido, quando não haveria app funcional mesmo (mesmo padrão de
         // `URL(string:)!` em `EnjoeiAPI`).
         return try! ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema)])
-    }
+    }()
 
     func loadEntries() -> [PostHistoryEntry] {
         let descriptor = FetchDescriptor<PostHistoryRecord>(

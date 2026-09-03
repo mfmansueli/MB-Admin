@@ -300,6 +300,8 @@ struct AccountsStoreTests {
         inactiveProductsPersistence.saveItems([inactiveB], accountID: idB)
         UserDefaults.standard.set(3, forKey: "megaphone.rounds.\(idA)")
         UserDefaults.standard.set(1.5, forKey: "megaphone.speed.\(idA)")
+        UserDefaults.standard.set("inativos", forKey: "accountDetail.selectedTab.\(idA)")
+        UserDefaults.standard.set("discountOnly", forKey: "accountDetail.filter.\(idA)")
         let persistence = InMemoryAccountsPersistence(stored: [
             AccountRecord(id: idA, user: .stub, lastRoundSummary: nil),
             AccountRecord(id: idB, user: otherUser, lastRoundSummary: nil)
@@ -320,6 +322,8 @@ struct AccountsStoreTests {
         #expect(inactiveProductsPersistence.loadItems(accountID: idB).map(\.id) == [2])
         #expect(UserDefaults.standard.object(forKey: "megaphone.rounds.\(idA)") == nil)
         #expect(UserDefaults.standard.object(forKey: "megaphone.speed.\(idA)") == nil)
+        #expect(UserDefaults.standard.object(forKey: "accountDetail.selectedTab.\(idA)") == nil)
+        #expect(UserDefaults.standard.object(forKey: "accountDetail.filter.\(idA)") == nil)
     }
 
     @Test("fim de rodada do megafone preenche e persiste o resumo da conta")

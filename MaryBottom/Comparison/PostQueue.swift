@@ -89,7 +89,7 @@ final class PostQueue {
         if let message = failureOverrides[item.id] { return .failed(message) }
         switch item.kind {
         case .post:
-            return poster.statuses[item.product.id] ?? .pending
+            return poster.statuses[item.postTarget] ?? .pending
         case .delete:
             guard let account = accountsProvider().first(where: { $0.id == item.sourceAccountID }) else {
                 return .pending
@@ -118,7 +118,7 @@ final class PostQueue {
         }
         switch item.kind {
         case .post:
-            return poster.failureDetails[item.product.id]
+            return poster.failureDetails[item.postTarget]
         case .delete, .inactivate, .activate:
             guard let account = accountsProvider().first(where: { $0.id == item.sourceAccountID }) else {
                 return nil
@@ -240,9 +240,10 @@ final class PostQueue {
     /// `poster.post` direto, só pra também virar `currentItem` (e aparecer na row da conta)
     /// enquanto estiver em voo. Não entra em `items`: não é fila.
     func postSingle(product: EnjoeiProduct, from source: AccountSession, to destination: AccountSession) {
+        let target = PostTarget(productID: product.id, destinationAccountID: destination.id)
         guard currentItem == nil,
-              poster.statuses[product.id] != .megaphoning,
-              poster.statuses[product.id] != .succeeded else { return }
+              poster.statuses[target] != .megaphoning,
+              poster.statuses[target] != .succeeded else { return }
         let item = PostQueueItem(
             id: UUID(),
             product: product,
@@ -314,13 +315,17 @@ final class PostQueue {
     /// Espera o intervalo entre uma ação e a próxima, em pedaços curtos — pausar durante essa
     /// espera larga ela na hora (dentro de um pedaço) em vez de deixar o resto do intervalo correr
     /// escondido atrás da mesma UI de "pausado"; `waitWhilePaused`, logo na volta ao topo do laço,
-    /// é quem de fato prende até o `resume()`.
+    /// é quem de fato prende até o `resume()`. Mesmo raciocínio pra `interval`: lido de novo a cada
+    /// pedaço (não guardado numa variável local no começo da espera), pra trocar o intervalo
+    /// preferido enquanto a fila já está esperando também valer na hora, dentro de um pedaço — sem
+    /// isso, a troca só valeria a partir da espera seguinte, deixando a impressão de que o app
+    /// ignorou a escolha nova até 5 minutos depois.
     private func waitInterval() async {
-        var remaining = interval
-        while remaining > 0, !isPaused {
-            let chunk = min(0.2, remaining)
-            try? await Task.sleep(for: .seconds(chunk))
-            remaining -= chunk
+        let start = Date()
+        while !isPaused {
+            let remaining = interval - Date().timeIntervalSince(start)
+            guard remaining > 0 else { return }
+            try? await Task.sleep(for: .seconds(min(0.2, remaining)))
         }
     }
 
@@ -342,7 +347,7 @@ final class PostQueue {
     private func postAndTrack(item: PostQueueItem, source: AccountSession, destination: AccountSession) async {
         currentItem = item
         poster.post(product: item.product, from: source, to: destination)
-        while poster.statuses[item.product.id] == .megaphoning {
+        while poster.statuses[item.postTarget] == .megaphoning {
             await Task.yield()
         }
         if currentItem?.id == item.id {
