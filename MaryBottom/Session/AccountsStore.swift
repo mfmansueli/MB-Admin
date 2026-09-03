@@ -27,18 +27,23 @@ final class AccountsStore {
         persistence: AccountsPersisting? = nil,
         megaphoneItemsPersistence: MegaphoneItemsPersisting? = nil,
         inactiveProductsPersistence: InactiveProductsPersisting? = nil,
-        postHistoryPersistence: PostHistoryPersisting? = nil
+        postHistoryPersistence: PostHistoryPersisting? = nil,
+        postQueueItemsPersistence: PostQueueItemsPersisting? = nil
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
         self.megaphoneItemsPersistence = megaphoneItemsPersistence ?? UserDefaultsMegaphoneItemsPersistence()
         self.inactiveProductsPersistence = inactiveProductsPersistence ?? UserDefaultsInactiveProductsPersistence()
         // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
-        // provider de verdade é ligado logo abaixo, já com `self` totalmente inicializado.
+        // provider de verdade é ligado logo abaixo, já com `self` totalmente inicializado. Se
+        // houver itens pendentes restaurados, `PostQueue.init` já começa a fila (pausada, esperando
+        // o toque em "continuar") antes dessa troca — sem problema: nada roda de verdade até a
+        // pausa ser desfeita, bem depois deste `init` terminar.
         postQueue = PostQueue(
             poster: poster,
             accountsProvider: { [] },
-            historyPersistence: postHistoryPersistence ?? SwiftDataPostHistoryPersistence()
+            historyPersistence: postHistoryPersistence ?? SwiftDataPostHistoryPersistence(),
+            itemsPersistence: postQueueItemsPersistence ?? UserDefaultsPostQueueItemsPersistence()
         )
         postQueue.accountsProvider = { [weak self] in self?.accounts ?? [] }
     }

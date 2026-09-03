@@ -344,6 +344,97 @@ struct PostQueueTests {
         UserDefaults(suiteName: "PostQueueTests.interval.\(UUID().uuidString)")!
     }
 
+    @Test("sem itens pendentes salvos, a fila nasce ativa e sem pausa nenhuma")
+    func filaSemItensPendentesNasceNormal() {
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, itemsPersistence: InMemoryPostQueueItemsPersistence())
+
+        #expect(queue.items.isEmpty)
+        #expect(!queue.isPaused)
+        #expect(!queue.isRunning)
+    }
+
+    @Test("item pendente sobrevive a reabrir o app; concluído não, já está no histórico")
+    func itemPendenteSobreviveAReabrirOApp() async {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let itemsPersistence = InMemoryPostQueueItemsPersistence()
+        // Intervalo grande: dá tempo de "fechar o app" (construir a segunda fila) antes do
+        // segundo item sair da espera.
+        let firstQueue = PostQueue(
+            poster: poster,
+            accountsProvider: { [source, destination] },
+            interval: 60,
+            itemsPersistence: itemsPersistence
+        )
+        firstQueue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        firstQueue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
+        let pendingItemID = firstQueue.items[1].id
+        await waitUntil { poster.statuses[1] != nil && poster.statuses[1] != .megaphoning }
+
+        // Simula reabrir o app: uma fila nova, mesma persistência de itens.
+        let secondQueue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, itemsPersistence: itemsPersistence)
+
+        #expect(secondQueue.items.map(\.id) == [pendingItemID])
+        // Recuperada pausada de propósito — ver `PostQueue.init`.
+        #expect(secondQueue.isPaused)
+        #expect(secondQueue.isRunning)
+    }
+
+    @Test("fila recuperada com itens pendentes continua processando depois do toque em continuar")
+    func filaRecuperadaContinuaAoRetomar() async {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let itemsPersistence = InMemoryPostQueueItemsPersistence()
+        itemsPersistence.saveItems([
+            PostQueueItem(
+                id: UUID(), product: EnjoeiFixtures.product(id: 1),
+                sourceAccountID: source.id, sourceAccountName: "origem",
+                destinationAccountID: destination.id, destinationAccountName: "destino"
+            )
+        ])
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let queue = PostQueue(
+            poster: poster,
+            accountsProvider: { [source, destination] },
+            interval: .zero,
+            itemsPersistence: itemsPersistence
+        )
+        #expect(queue.isPaused)
+
+        queue.resume()
+        await waitUntil { !queue.isRunning }
+
+        #expect(queue.status(for: queue.items[0]) == .succeeded)
+    }
+
+    @Test("remover ou limpar a fila atualiza o que fica persistido")
+    func removerOuLimparAtualizaPersistencia() {
+        let itemsPersistence = InMemoryPostQueueItemsPersistence()
+        let source = makeAccount(name: "origem", client: StubEnjoeiClient())
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let queue = PostQueue(
+            poster: CrossAccountPoster(),
+            accountsProvider: { [source, destination] },
+            itemsPersistence: itemsPersistence
+        )
+        // Pausa antes de enfileirar pra nada começar a processar sozinho — só interessa aqui o
+        // que fica salvo, não o resultado de rede.
+        queue.pause()
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
+        let firstItemID = queue.items[0].id
+        #expect(itemsPersistence.loadItems().map(\.id) == queue.items.map(\.id))
+
+        queue.remove(id: firstItemID)
+        #expect(itemsPersistence.loadItems().map(\.id) == [queue.items[0].id])
+
+        queue.removeAll()
+        #expect(itemsPersistence.loadItems().isEmpty)
+    }
+
     @Test("mudar o intervalo persiste a escolha")
     func mudarIntervaloPersiste() {
         let defaults = makeIntervalDefaults()

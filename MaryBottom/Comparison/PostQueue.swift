@@ -9,6 +9,8 @@ import Observation
 @MainActor
 @Observable
 final class PostQueue {
+    /// Restaurado de disco no `init` — só os itens que ainda estavam pendentes (nunca chegaram a
+    /// terminar) sobrevivem a fechar e abrir o app de novo; ver `persistPendingItems`.
     private(set) var items: [PostQueueItem] = []
     /// Ações já concluídas (sucesso ou erro), mais recente primeiro — sobrevive à remoção do item
     /// da fila e a fechar/abrir o app de novo, ao contrário de `items`. Ver `recordHistory`.
@@ -27,6 +29,7 @@ final class PostQueue {
 
     private let poster: CrossAccountPoster
     private let historyPersistence: PostHistoryPersisting
+    private let itemsPersistence: PostQueueItemsPersisting
     private let defaults: UserDefaults
     /// `var`, não `let`: quem cria a fila às vezes não pode capturar `self` no provider ainda
     /// (dentro do próprio `init` de quem a possui) e liga ele de verdade logo em seguida.
@@ -44,11 +47,13 @@ final class PostQueue {
         accountsProvider: @escaping () -> [AccountSession],
         interval: TimeInterval? = nil,
         historyPersistence: PostHistoryPersisting = InMemoryPostHistoryPersistence(),
+        itemsPersistence: PostQueueItemsPersisting = InMemoryPostQueueItemsPersistence(),
         defaults: UserDefaults = .standard
     ) {
         self.poster = poster
         self.accountsProvider = accountsProvider
         self.historyPersistence = historyPersistence
+        self.itemsPersistence = itemsPersistence
         self.defaults = defaults
         history = historyPersistence.loadEntries()
         // Um `interval` explícito (testes, sobretudo) vale por cima de qualquer coisa persistida.
@@ -59,6 +64,17 @@ final class PostQueue {
         } else {
             let stored = defaults.double(forKey: Self.intervalDefaultsKey)
             self.interval = stored > 0 ? stored : poster.cooldownDuration
+        }
+        items = itemsPersistence.loadItems()
+        // Recupera pausada de propósito, nunca processando sozinha: reabrir o app não é o mesmo
+        // que o usuário confirmar que quer continuar — em especial pra `.post`, onde repetir por
+        // engano a ação que estava em voo na hora do fechamento criaria um anúncio duplicado.
+        // `isPaused = true` antes de `startIfNeeded()` faz o laço nascer e travar direto em
+        // `waitWhilePaused()`, esperando o toque em "continuar" (mesmo mecanismo de uma pausa
+        // pedida em tela, sem precisar de um estado à parte).
+        if !items.isEmpty {
+            isPaused = true
+            startIfNeeded()
         }
     }
 
@@ -122,6 +138,7 @@ final class PostQueue {
                 destinationAccountName: destination.user.name
             )
         )
+        persistPendingItems()
         startIfNeeded()
     }
 
@@ -140,6 +157,7 @@ final class PostQueue {
                 destinationAccountName: account.user.name
             )
         )
+        persistPendingItems()
         startIfNeeded()
     }
 
@@ -158,6 +176,7 @@ final class PostQueue {
                 destinationAccountName: account.user.name
             )
         )
+        persistPendingItems()
         startIfNeeded()
     }
 
@@ -175,6 +194,7 @@ final class PostQueue {
                 destinationAccountName: account.user.name
             )
         )
+        persistPendingItems()
         startIfNeeded()
     }
 
@@ -182,6 +202,7 @@ final class PostQueue {
     /// lista e da vez dele na fila.
     func remove(id: UUID) {
         items.removeAll { $0.id == id }
+        persistPendingItems()
     }
 
     /// Tira tudo da fila de uma vez — pro botão "limpar fila". Mesmo raciocínio do `remove(id:)`:
@@ -189,6 +210,7 @@ final class PostQueue {
     /// dela.
     func removeAll() {
         items.removeAll()
+        persistPendingItems()
     }
 
     /// Apaga o histórico salvo — não afeta a fila ativa (`items`), só o registro persistido de
@@ -256,12 +278,14 @@ final class PostQueue {
             guard let item = items.first(where: { status(for: $0) == .pending }) else { return }
             guard let source = accountsProvider().first(where: { $0.id == item.sourceAccountID }) else {
                 failureOverrides[item.id] = "conta não está mais logada"
+                persistPendingItems()
                 continue
             }
             switch item.kind {
             case .post:
                 guard let destination = accountsProvider().first(where: { $0.id == item.destinationAccountID }) else {
                     failureOverrides[item.id] = "conta não está mais logada"
+                    persistPendingItems()
                     continue
                 }
                 // Uma postagem avulsa pode ter acabado de deixar o poster compartilhado em
@@ -325,6 +349,7 @@ final class PostQueue {
             currentItem = nil
         }
         recordHistory(item: item)
+        persistPendingItems()
     }
 
     /// Delega a exclusão de verdade pro `MegaphoneRunner` da própria conta — ele já sabe renovar
@@ -337,6 +362,7 @@ final class PostQueue {
             currentItem = nil
         }
         recordHistory(item: item)
+        persistPendingItems()
     }
 
     /// Mesma ideia de `deleteAndTrack`, delegando pro `MegaphoneRunner` da conta — ele já sabe ler
@@ -348,6 +374,7 @@ final class PostQueue {
             currentItem = nil
         }
         recordHistory(item: item)
+        persistPendingItems()
     }
 
     /// Mesma ideia de `inactivateAndTrack`, delegando pro `MegaphoneRunner` da conta pra reenviar
@@ -359,6 +386,7 @@ final class PostQueue {
             currentItem = nil
         }
         recordHistory(item: item)
+        persistPendingItems()
     }
 
     /// Guarda no histórico persistido, mais recente primeiro — chamado pelos quatro `xAndTrack`
@@ -382,5 +410,14 @@ final class PostQueue {
         )
         history.insert(entry, at: 0)
         historyPersistence.insert(entry)
+    }
+
+    /// Guarda em disco só os itens ainda `.pending` — os concluídos (sucesso ou erro) não
+    /// precisam sobreviver ao fechar o app: já foram gravados em `history` por `recordHistory`, e
+    /// tentar de novo uma ação que já rodou (em especial `.post`, que criaria um anúncio duplicado)
+    /// é exatamente o que essa exclusão evita. Chamado a cada mudança que afeta quais itens contam
+    /// como pendentes: enfileirar, remover, e o fim de cada ação (sucesso, erro ou conta deslogada).
+    private func persistPendingItems() {
+        itemsPersistence.saveItems(items.filter { status(for: $0) == .pending })
     }
 }
