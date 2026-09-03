@@ -110,39 +110,41 @@ struct PostQueueView: View {
         }
     }
 
-    /// Contagem regressiva até o próximo item da fila poder começar — só faz sentido pra postar
-    /// (o cooldown é o limite do Enjoei pra criar produto); apagar/inativar/ativar não esperam isso.
+    /// Contagem regressiva até a próxima ação da fila poder começar — as quatro (postar, apagar,
+    /// inativar, ativar) respeitam o mesmo `postQueue.interval`, então a mesma contagem vale pra
+    /// qualquer uma; enquanto uma já está em voo, mostra o quê em vez de quando.
     @ViewBuilder
     private var cooldownStatus: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in
-            if let label = nonPostActionLabel {
+            if let label = inFlightActionLabel {
                 Label(label, systemImage: "arrow.triangle.2.circlepath")
                     .font(.footnote)
                     .foregroundStyle(.blue)
-            } else if let cooldownUntil = poster.cooldownUntil, poster.isInCooldown {
-                let remaining = Int(cooldownUntil.timeIntervalSinceNow.rounded(.up))
+            } else if let nextActionAt = postQueue.nextActionAt, nextActionAt > .now {
+                let remaining = Int(nextActionAt.timeIntervalSinceNow.rounded(.up))
                 Label(
-                    "próxima publicação em \(String(format: "%d:%02d", remaining / 60, remaining % 60))",
+                    "próxima ação em \(String(format: "%d:%02d", remaining / 60, remaining % 60))",
                     systemImage: "clock"
                 )
                 .font(.footnote)
                 .foregroundStyle(.orange)
             } else {
-                Label("publicando agora…", systemImage: "arrow.triangle.2.circlepath")
+                Label("processando agora…", systemImage: "arrow.triangle.2.circlepath")
                     .font(.footnote)
                     .foregroundStyle(.blue)
             }
         }
     }
 
-    /// Texto pro item em voo quando não é uma postagem — essas ações não têm cooldown nenhum pra
-    /// contar, então a barra só mostra que estão rolando agora.
-    private var nonPostActionLabel: String? {
+    /// Texto pro item em voo agora, por tipo de ação — enquanto isso está rolando, não tem "quando"
+    /// pra contar, só o quê.
+    private var inFlightActionLabel: String? {
         switch postQueue.currentItem?.kind {
+        case .post: "postando agora…"
         case .delete: "apagando agora…"
         case .inactivate: "inativando agora…"
         case .activate: "ativando agora…"
-        case .post, nil: nil
+        case nil: nil
         }
     }
 

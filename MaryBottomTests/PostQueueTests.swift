@@ -51,8 +51,6 @@ struct PostQueueTests {
         let source = makeAccount(name: "origem", client: sourceClient)
         let destinationClient = StubEnjoeiClient()
         let destination = makeAccount(name: "destino", client: destinationClient)
-        // Os dois itens têm que suceder um atrás do outro — sem isso, o cooldown de verdade do
-        // `poster` compartilhado (2 minutos) travaria o segundo item bem além do que o teste espera.
         let poster = CrossAccountPoster(cooldownDuration: .zero)
         let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: .zero)
 
@@ -204,6 +202,45 @@ struct PostQueueTests {
         // muito depois do fim deste teste.
         await waitUntil { poster.statuses[target(2, destination: destination)] != nil && poster.statuses[target(2, destination: destination)] != .megaphoning }
         #expect(queue.items.allSatisfy { queue.status(for: $0) == .succeeded })
+    }
+
+    @Test("postagens da fila não esperam o cooldown fixo do poster — só o intervalo escolhido")
+    func postagensDaFilaIgnoramCooldownDoPoster() async {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        // Cooldown padrão do poster (60s, não zerado de propósito) — antes da correção, o segundo
+        // item ficava preso nele mesmo com um intervalo bem mais curto escolhido na fila.
+        let poster = CrossAccountPoster()
+        let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: .zero)
+
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
+        await waitUntil { !queue.isRunning }
+
+        #expect(queue.items.allSatisfy { queue.status(for: $0) == .succeeded })
+    }
+
+    @Test("nextActionAt fica setado enquanto a fila espera entre ações, e some assim que a próxima começa")
+    func nextActionAtDuranteAEspera() async {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        // Intervalo grande o bastante pra dar tempo de conferir `nextActionAt` antes do segundo
+        // item começar de verdade.
+        let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: 60)
+        #expect(queue.nextActionAt == nil)
+
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
+
+        await waitUntil { poster.statuses[target(1, destination: destination)] != nil && poster.statuses[target(1, destination: destination)] != .megaphoning }
+        await waitUntil { queue.nextActionAt != nil }
+
+        let remaining = queue.nextActionAt?.timeIntervalSinceNow
+        #expect((remaining ?? 0) > 0)
+        #expect((remaining ?? .infinity) <= 60)
     }
 
     @Test("apagar pela fila delega pro runner da conta e aparece como succeeded")
@@ -407,7 +444,13 @@ struct PostQueueTests {
         firstQueue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
         firstQueue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
         let pendingItemID = firstQueue.items[1].id
-        await waitUntil { poster.statuses[target(1, destination: destination)] != nil && poster.statuses[target(1, destination: destination)] != .megaphoning }
+        // Espera `firstQueue.history` (não `poster.statuses` direto): as duas coisas que
+        // `postAndTrack` faz depois que o item 1 termina — gravar no histórico e persistir só o
+        // que ainda é pendente — rodam sem suspensão entre elas, então ver o histórico com 1 item
+        // já garante que `itemsPersistence` também foi atualizado. Esperar `poster.statuses`
+        // direto corre atrás da mesma variável que o próprio `postAndTrack` está checando, então o
+        // teste pode "ganhar a corrida" e ler `itemsPersistence` antes dele persistir de verdade.
+        await waitUntil { !firstQueue.history.isEmpty }
 
         // Simula reabrir o app: uma fila nova, mesma persistência de itens.
         let secondQueue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, itemsPersistence: itemsPersistence)

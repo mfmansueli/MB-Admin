@@ -133,8 +133,11 @@ struct CrossAccountPosterTests {
         #expect(await sourceClient.requestedTemplateIDs.count == 1)
     }
 
-    @Test("postar com sucesso trava novas postagens por 3 minutos, mesmo de outro produto")
-    func sucessoAtivaOBloqueio() async throws {
+    @Test("postar com sucesso ativa isInCooldown, mas isso não bloqueia mais post(...) de outro produto")
+    func sucessoAtivaIsInCooldownSemBloquear() async throws {
+        // `isInCooldown` virou só um sinal pra UI (o botão "postar em X" da tela de comparação) —
+        // quem manda na pacing de verdade agora é só `PostQueue.interval`. Ver comentário em
+        // `CrossAccountPoster.cooldownDuration`.
         let source = makeAccount(client: StubEnjoeiClient(
             templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)]
         ))
@@ -152,10 +155,11 @@ struct CrossAccountPosterTests {
         #expect(cooldownUntil.timeIntervalSinceNow > poster.cooldownDuration - 5)
         #expect(cooldownUntil.timeIntervalSinceNow <= poster.cooldownDuration)
 
-        // Um segundo produto, ainda dentro do bloqueio, nem chega a pedir o template.
+        // Um segundo produto, mesmo com `isInCooldown` ainda ativo, posta normalmente.
         poster.post(product: EnjoeiFixtures.product(id: 2), from: source, to: destination)
-        #expect(poster.statuses[target(2, destination: destination)] == nil)
-        #expect(await destinationClient.createProductCalls.count == 1)
+        await waitUntil { poster.statuses[target(2, destination: destination)] != .megaphoning && poster.statuses[target(2, destination: destination)] != nil }
+        #expect(poster.statuses[target(2, destination: destination)] == .succeeded)
+        #expect(await destinationClient.createProductCalls.count == 2)
     }
 
     @Test("o mesmo produto postado pra dois destinos diferentes não colide: os dois rodam de verdade")

@@ -19,9 +19,13 @@ final class CrossAccountPoster {
     /// `MegaphoneRunner.failureDetails`, mesmo raciocínio.
     private(set) var failureDetails: [PostTarget: MegaphoneFailureDetail] = [:]
 
-    /// Intervalo mínimo entre uma postagem bem-sucedida e a próxima, pra não martelar a API do
-    /// Enjoei — vale pra qualquer produto, não só pro que acabou de ser postado. Propriedade de
-    /// instância (não `static`) pra testes poderem encurtar sem esperar 1 minuto de verdade.
+    /// Só informativo pra UI (desabilita o botão "postar em X" da tela de comparação e mostra a
+    /// contagem regressiva ali) — não bloqueia mais `post(...)` de verdade. Chegou a ser um gate de
+    /// verdade (`guard !isInCooldown`), mas isso entrava em conflito com o intervalo configurável
+    /// da fila (`PostQueue.interval`): postagens vindas da fila ficavam presas nesse piso fixo de
+    /// 60s mesmo quando o usuário escolhia um intervalo menor, e a fila é quem deve mandar na
+    /// pacing de tudo que ela processa — ver `PostQueue.run`. Propriedade de instância (não
+    /// `static`) pra testes poderem encurtar sem esperar 1 minuto de verdade.
     let cooldownDuration: TimeInterval
     private(set) var cooldownUntil: Date?
 
@@ -36,7 +40,6 @@ final class CrossAccountPoster {
 
     func post(product: EnjoeiProduct, from source: AccountSession, to destination: AccountSession) {
         let target = PostTarget(productID: product.id, destinationAccountID: destination.id)
-        guard !isInCooldown else { return }
         guard statuses[target] != .megaphoning, statuses[target] != .succeeded else { return }
         statuses[target] = .megaphoning
         Task { [weak self] in

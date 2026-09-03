@@ -1,11 +1,11 @@
 import Foundation
 import Observation
 
-/// Fila de ações entre contas: posta (numa conta diferente, ou reposta na mesma) ou apaga um
-/// produto de cada vez, respeitando o mesmo intervalo do `CrossAccountPoster` entre uma postagem e
-/// a próxima. Também é o único ponto de entrada pra postar — tanto a fila quanto o botão avulso
-/// "postar em X" de uma linha passam por aqui, pra `currentItem` sempre refletir o que está em voo
-/// agora, esteja vindo da fila ou não.
+/// Fila de ações entre contas: posta (numa conta diferente, ou reposta na mesma), apaga, inativa
+/// ou ativa um produto de cada vez, respeitando `interval` entre uma ação e a próxima — o mesmo
+/// intervalo pras quatro, `.post` incluído (ver `waitInterval`). Também é o único ponto de entrada
+/// pra postar — tanto a fila quanto o botão avulso "postar em X" de uma linha passam por aqui, pra
+/// `currentItem` sempre refletir o que está em voo agora, esteja vindo da fila ou não.
 @MainActor
 @Observable
 final class PostQueue {
@@ -22,6 +22,12 @@ final class PostQueue {
     /// O item em voo agora (chamada de rede rolando) — fila ou postagem avulsa — pra
     /// `AccountRowView` saber se a conta dela é origem ou destino dele.
     private(set) var currentItem: PostQueueItem?
+    /// Quando a próxima ação da fila deve começar — só setado durante `waitInterval` (entre uma
+    /// ação e a próxima), `nil` o resto do tempo (nada em espera agora: parado, pausado, ou uma
+    /// ação já em voo). Recalculado a cada pedaço de 0.2s com o `interval` atual, então reflete uma
+    /// troca de intervalo em andamento na hora — pra `PostQueueView` mostrar a contagem regressiva
+    /// de verdade, em vez do cooldown fixo do `CrossAccountPoster` de antes.
+    private(set) var nextActionAt: Date?
     /// Só pro caso "a conta de origem ou destino não existe mais quando a vez do item chega".
     private var failureOverrides: [UUID: String] = [:]
     private var task: Task<Void, Never>?
@@ -289,19 +295,14 @@ final class PostQueue {
                     persistPendingItems()
                     continue
                 }
-                // Uma postagem avulsa pode ter acabado de deixar o poster compartilhado em
-                // cooldown — espera passar antes de tentar, senão `poster.post` vira no-op.
-                while poster.isInCooldown {
-                    try? await Task.sleep(for: .seconds(1))
-                }
+                // Sem esperar `poster.isInCooldown` aqui de propósito: quem manda na pacing de uma
+                // ação vinda da fila é só `interval` (`waitInterval`, logo abaixo), igual às outras
+                // três — o cooldown fixo do `CrossAccountPoster` virou só um sinal pra UI da
+                // postagem avulsa (`UnmatchedProductRowView`), não bloqueia mais nada aqui.
                 await postAndTrack(item: item, source: source, destination: destination)
             case .delete:
-                // Apagar não passa pelo cooldown de postagem — são rotas diferentes do Enjoei, sem
-                // relação com o limite de criar produtos.
                 await deleteAndTrack(item: item, account: source)
             case .inactivate:
-                // Mesmo raciocínio de `.delete`: rota diferente, sem relação com o cooldown de
-                // postagem.
                 await inactivateAndTrack(item: item, account: source)
             case .activate:
                 await activateAndTrack(item: item, account: source)
@@ -322,9 +323,11 @@ final class PostQueue {
     /// ignorou a escolha nova até 5 minutos depois.
     private func waitInterval() async {
         let start = Date()
+        defer { nextActionAt = nil }
         while !isPaused {
             let remaining = interval - Date().timeIntervalSince(start)
             guard remaining > 0 else { return }
+            nextActionAt = Date().addingTimeInterval(remaining)
             try? await Task.sleep(for: .seconds(min(0.2, remaining)))
         }
     }
