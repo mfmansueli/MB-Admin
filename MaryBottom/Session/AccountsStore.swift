@@ -21,12 +21,14 @@ final class AccountsStore {
     private let persistence: AccountsPersisting
     private let megaphoneItemsPersistence: MegaphoneItemsPersisting
     private let inactiveProductsPersistence: InactiveProductsPersisting
+    private let smartPriceProductsPersistence: SmartPriceProductsPersisting
 
     init(
         dependenciesFactory: AccountDependenciesFactory? = nil,
         persistence: AccountsPersisting? = nil,
         megaphoneItemsPersistence: MegaphoneItemsPersisting? = nil,
         inactiveProductsPersistence: InactiveProductsPersisting? = nil,
+        smartPriceProductsPersistence: SmartPriceProductsPersisting? = nil,
         postHistoryPersistence: PostHistoryPersisting? = nil,
         postQueueItemsPersistence: PostQueueItemsPersisting? = nil
     ) {
@@ -34,6 +36,7 @@ final class AccountsStore {
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
         self.megaphoneItemsPersistence = megaphoneItemsPersistence ?? UserDefaultsMegaphoneItemsPersistence()
         self.inactiveProductsPersistence = inactiveProductsPersistence ?? UserDefaultsInactiveProductsPersistence()
+        self.smartPriceProductsPersistence = smartPriceProductsPersistence ?? UserDefaultsSmartPriceProductsPersistence()
         // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
         // provider de verdade é ligado logo abaixo, já com `self` totalmente inicializado. Se
         // houver itens pendentes restaurados, `PostQueue.init` já começa a fila (pausada, esperando
@@ -152,6 +155,7 @@ final class AccountsStore {
     private func clearLocalData(accountID: EnjoeiAccountID) {
         megaphoneItemsPersistence.clearItems(accountID: accountID)
         inactiveProductsPersistence.clearItems(accountID: accountID)
+        smartPriceProductsPersistence.clearItems(accountID: accountID)
         // Mesmas chaves que `AccountPublishedTabView`/`AccountDetailView` montam em `@AppStorage`
         // — não tem como reusar a property wrapper daqui, só reconstruir a mesma string.
         UserDefaults.standard.removeObject(forKey: "megaphone.rounds.\(accountID)")

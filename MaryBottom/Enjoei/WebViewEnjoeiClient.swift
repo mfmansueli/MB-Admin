@@ -125,4 +125,23 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
         if let error = response.failure { throw error }
         return try JSONDecoder().decode(InactiveProductsPage.self, from: Data(response.body.utf8))
     }
+
+    func smartPriceProductsPage(page: Int, tab: Bool) async throws -> SmartPriceProductsPage {
+        let result = try await webSession.run(
+            EnjoeiJavaScript.smartPriceProductsPage,
+            arguments: ["page": page, "tab": tab]
+        )
+        let response = MegaphoneWebResponse(javaScriptResult: result)
+        if let error = response.failure { throw error }
+        return try JSONDecoder().decode(SmartPriceProductsPage.self, from: Data(response.body.utf8))
+    }
+
+    func setSmartPrice(productID: Int, activate: Bool, csrfToken: String) async throws {
+        let result = try await webSession.run(
+            EnjoeiJavaScript.setSmartPrice,
+            arguments: ["productID": productID, "token": csrfToken, "activate": activate]
+        )
+        let response = MegaphoneWebResponse(javaScriptResult: result)
+        if let error = response.failure { throw error }
+    }
 }

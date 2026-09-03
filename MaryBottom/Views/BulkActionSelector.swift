@@ -27,34 +27,12 @@ struct BulkActionSelector<Action: BulkActionOption>: View {
                 .contentShape(.rect)
             }
 
-            Button(action: onConfirm) {
-                confirmIcon
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(selection.label) \(selectedCount) produtos")
-        }
-    }
-
-    // Redimensionado explicitamente (em vez de só fixar a fonte) — sem isso, `doc.on.doc.fill`
-    // (duas páginas sobrepostas, mais largo que os outros ícones do conjunto) estourava o círculo
-    // em vez de ficar contido nele.
-    private var confirmIcon: some View {
-        let image = Image(systemName: selection.systemImage)
-            .resizable()
-            .scaledToFit()
-            .fontWeight(.semibold)
-            .foregroundStyle(.white)
-            .frame(width: 18, height: 18)
-            .frame(width: 38, height: 38)
-
-        // O material "liquid glass" só existe a partir do iOS/Mac Catalyst 26 — mais velho que
-        // isso cai de volta pro círculo colorido sólido de antes.
-        return Group {
-            if #available(iOS 26.0, macCatalyst 26.0, *) {
-                image.glassEffect(.regular.tint(selection.tint).interactive(), in: .circle)
-            } else {
-                image.background(selection.tint, in: .circle)
-            }
+            BulkConfirmButton(
+                systemImage: selection.systemImage,
+                tint: selection.tint,
+                accessibilityLabel: "\(selection.label) \(selectedCount) produtos",
+                action: onConfirm
+            )
         }
     }
 }

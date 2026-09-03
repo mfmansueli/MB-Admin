@@ -31,4 +31,9 @@ nonisolated protocol EnjoeiClientProtocol: Sendable {
     /// Uma página da listagem de produtos inativos da própria loja (extraída do HTML — não existe
     /// API JSON pra isso). `page` começa em 1.
     func inactiveProductsPage(page: Int) async throws -> InactiveProductsPage
+    /// Uma página da listagem de "preço esperto" da própria loja. `tab` escolhe entre produtos já
+    /// ativados (`true`) e ainda sem preço esperto (`false`); `page` começa em 1.
+    func smartPriceProductsPage(page: Int, tab: Bool) async throws -> SmartPriceProductsPage
+    /// Ativa (ou desativa) o preço esperto de um produto (ver `EnjoeiJavaScript.setSmartPrice`).
+    func setSmartPrice(productID: Int, activate: Bool, csrfToken: String) async throws
 }

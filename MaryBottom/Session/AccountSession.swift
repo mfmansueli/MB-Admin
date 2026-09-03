@@ -18,6 +18,7 @@ final class AccountSession: Identifiable {
     let runner: MegaphoneRunner
     let keepAlive: MegaphoneKeepAlive
     let inactiveProductsLoader: InactiveProductsLoader
+    let smartPriceProductsLoader: SmartPriceProductsLoader
     let webView: WKWebView?
 
     private let sessionClearer: EnjoeiSessionClearing
@@ -46,6 +47,11 @@ final class AccountSession: Identifiable {
             client: dependencies.client,
             accountID: id,
             itemsPersistence: UserDefaultsInactiveProductsPersistence()
+        )
+        smartPriceProductsLoader = SmartPriceProductsLoader(
+            client: dependencies.client,
+            accountID: id,
+            itemsPersistence: UserDefaultsSmartPriceProductsPersistence()
         )
     }
 

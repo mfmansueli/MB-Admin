@@ -233,4 +233,35 @@ nonisolated enum EnjoeiJavaScript {
         })
     };
     """
+
+    /// Uma página da listagem de "preço esperto" — API JSON de verdade, ao contrário da de inativos
+    /// (ver `~/Downloads/enjoeiprecoespertoapi.md`). `tab` escolhe entre produtos já ativados
+    /// (`true`) e ainda sem preço esperto (`false`); `page` começa em 1.
+    static let smartPriceProductsPage = """
+    const response = await fetch(`/api/smart_price/v2?page=${page}&tab=${tab}`, {
+        credentials: "include",
+        headers: { "Accept": "application/json, text/plain, */*", "X-Requested-With": "XMLHttpRequest" }
+    });
+    return { status: response.status, body: await response.text() };
+    """
+
+    /// Ativa (ou desativa, com `activate: false`) o preço esperto de um produto — mesma rota que o
+    /// toggle da tela `/l/preco-esperto` usa. O corpo pra desativar ainda não foi confirmado por
+    /// captura de tráfego (só assumido pelo documento), mas o endpoint é o mesmo dos dois lados.
+    static let setSmartPrice = """
+    const headers = {
+        "Content-Type": "application/json",
+        "Accept": "application/json, text/plain, */*",
+        "X-Requested-With": "XMLHttpRequest"
+    };
+    if (token) { headers["X-CSRF-Token"] = token; }
+
+    const response = await fetch(`/api/smart_price/v2/product/${productID}`, {
+        method: "POST",
+        credentials: "include",
+        headers: headers,
+        body: JSON.stringify({ activate: activate })
+    });
+    return { status: response.status, body: await response.text() };
+    """
 }

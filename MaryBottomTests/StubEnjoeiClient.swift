@@ -34,6 +34,14 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     var inactivePagesByNumber: [Int: InactiveProductsPage]
     /// Erro a lançar em qualquer chamada de `inactiveProductsPage`.
     var inactiveProductsError: EnjoeiError?
+    /// Página combinada por número, devolvida por `smartPriceProductsPage(page:tab:)` (só a aba
+    /// `tab: false`, a única que o app usa). Página não configurada devolve vazia com
+    /// `totalPages: 1`, pra um teste que só configura a página 1 não travar.
+    var smartPricePagesByNumber: [Int: SmartPriceProductsPage]
+    /// Erro a lançar em qualquer chamada de `smartPriceProductsPage`.
+    var smartPriceProductsError: EnjoeiError?
+    /// Erro a lançar em qualquer chamada de `setSmartPrice`, por id de produto.
+    var setSmartPriceFailuresByProductID: [Int: EnjoeiError]
 
     private(set) var megaphonedIDs: [Int] = []
     private(set) var requestedCursors: [String?] = []
@@ -53,6 +61,10 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     private(set) var updateProductStateCalls: [(productID: Int, request: ProductStateUpdateRequest, token: String)] = []
     /// Um item por chamada a `inactiveProductsPage`, com o número da página pedida.
     private(set) var requestedInactivePages: [Int] = []
+    /// Um item por chamada a `smartPriceProductsPage`, com a página e a aba pedidas.
+    private(set) var requestedSmartPricePages: [(page: Int, tab: Bool)] = []
+    /// Um item por chamada a `setSmartPrice`, com o id, se ativou/desativou e o token usados.
+    private(set) var setSmartPriceCalls: [(productID: Int, activate: Bool, token: String)] = []
 
     init(
         user: EnjoeiUser = .stub,
@@ -70,6 +82,9 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         updateProductStateError: EnjoeiError? = nil,
         inactivePagesByNumber: [Int: InactiveProductsPage] = [:],
         inactiveProductsError: EnjoeiError? = nil,
+        smartPricePagesByNumber: [Int: SmartPriceProductsPage] = [:],
+        smartPriceProductsError: EnjoeiError? = nil,
+        setSmartPriceFailuresByProductID: [Int: EnjoeiError] = [:],
         currentUserDelay: Duration = .zero
     ) {
         self.user = user
@@ -83,6 +98,9 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         self.templatesByProductID = templatesByProductID
         self.inactivePagesByNumber = inactivePagesByNumber
         self.inactiveProductsError = inactiveProductsError
+        self.smartPricePagesByNumber = smartPricePagesByNumber
+        self.smartPriceProductsError = smartPriceProductsError
+        self.setSmartPriceFailuresByProductID = setSmartPriceFailuresByProductID
         self.templateError = templateError
         self.createProductError = createProductError
         self.createProductResponse = createProductResponse
@@ -174,5 +192,20 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         requestedInactivePages.append(page)
         if let inactiveProductsError { throw inactiveProductsError }
         return inactivePagesByNumber[page] ?? InactiveProductsPage(products: [], maxPage: 1)
+    }
+
+    func smartPriceProductsPage(page: Int, tab: Bool) async throws -> SmartPriceProductsPage {
+        requestedSmartPricePages.append((page, tab))
+        if let smartPriceProductsError { throw smartPriceProductsError }
+        return smartPricePagesByNumber[page] ?? SmartPriceProductsPage(products: [], currentPage: page, totalPages: 1)
+    }
+
+    func setSmartPrice(productID: Int, activate: Bool, csrfToken: String) async throws {
+        setSmartPriceCalls.append((productID, activate, csrfToken))
+        if csrfRejectionsRemaining > 0 {
+            csrfRejectionsRemaining -= 1
+            throw EnjoeiError.invalidCSRFToken
+        }
+        if let failure = setSmartPriceFailuresByProductID[productID] { throw failure }
     }
 }

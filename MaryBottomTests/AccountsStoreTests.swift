@@ -17,7 +17,8 @@ struct AccountsStoreTests {
         clearersByID: [EnjoeiAccountID: FakeSessionClearer] = [:],
         persistence: InMemoryAccountsPersistence? = nil,
         megaphoneItemsPersistence: MegaphoneItemsPersisting? = nil,
-        inactiveProductsPersistence: InactiveProductsPersisting? = nil
+        inactiveProductsPersistence: InactiveProductsPersisting? = nil,
+        smartPriceProductsPersistence: SmartPriceProductsPersisting? = nil
     ) -> AccountsStore {
         let persistence = persistence ?? InMemoryAccountsPersistence()
         return AccountsStore(
@@ -30,7 +31,8 @@ struct AccountsStoreTests {
             },
             persistence: persistence,
             megaphoneItemsPersistence: megaphoneItemsPersistence ?? InMemoryMegaphoneItemsPersistence(),
-            inactiveProductsPersistence: inactiveProductsPersistence ?? InMemoryInactiveProductsPersistence()
+            inactiveProductsPersistence: inactiveProductsPersistence ?? InMemoryInactiveProductsPersistence(),
+            smartPriceProductsPersistence: smartPriceProductsPersistence ?? InMemorySmartPriceProductsPersistence()
         )
     }
 
@@ -274,12 +276,13 @@ struct AccountsStoreTests {
         #expect(persistence.stored.map(\.id) == [idB])
     }
 
-    @Test("logout limpa produtos do megafone e inativos persistidos da conta")
+    @Test("logout limpa produtos do megafone, inativos e sem preço esperto persistidos da conta")
     func logoutLimpaDadosLocaisDaConta() async {
         let idA = EnjoeiAccountID()
         let idB = EnjoeiAccountID()
         let megaphoneItemsPersistence = InMemoryMegaphoneItemsPersistence()
         let inactiveProductsPersistence = InMemoryInactiveProductsPersistence()
+        let smartPriceProductsPersistence = InMemorySmartPriceProductsPersistence()
         let productA = EnjoeiProduct(
             id: 1, title: "produto a", path: "produto-a", photoPublicID: "foto-a",
             currentPrice: 100, originalPrice: 150
@@ -298,6 +301,16 @@ struct AccountsStoreTests {
         )
         inactiveProductsPersistence.saveItems([inactiveA], accountID: idA)
         inactiveProductsPersistence.saveItems([inactiveB], accountID: idB)
+        let smartPriceA = SmartPriceProduct(
+            id: 1, price: 100, minPrice: 70, maxPrice: 150, blocked: false, smartPriceEnabled: false,
+            statusText: nil, statusColor: nil, photoPublicID: nil
+        )
+        let smartPriceB = SmartPriceProduct(
+            id: 2, price: 100, minPrice: 70, maxPrice: 150, blocked: false, smartPriceEnabled: false,
+            statusText: nil, statusColor: nil, photoPublicID: nil
+        )
+        smartPriceProductsPersistence.saveItems([smartPriceA], accountID: idA)
+        smartPriceProductsPersistence.saveItems([smartPriceB], accountID: idB)
         UserDefaults.standard.set(3, forKey: "megaphone.rounds.\(idA)")
         UserDefaults.standard.set(1.5, forKey: "megaphone.speed.\(idA)")
         UserDefaults.standard.set("inativos", forKey: "accountDetail.selectedTab.\(idA)")
@@ -310,7 +323,8 @@ struct AccountsStoreTests {
             clientsByID: [idA: StubEnjoeiClient(user: .stub), idB: StubEnjoeiClient(user: otherUser)],
             persistence: persistence,
             megaphoneItemsPersistence: megaphoneItemsPersistence,
-            inactiveProductsPersistence: inactiveProductsPersistence
+            inactiveProductsPersistence: inactiveProductsPersistence,
+            smartPriceProductsPersistence: smartPriceProductsPersistence
         )
         await store.restoreAccounts()
 
@@ -320,6 +334,8 @@ struct AccountsStoreTests {
         #expect(megaphoneItemsPersistence.loadItems(accountID: idB).map(\.id) == [2])
         #expect(inactiveProductsPersistence.loadItems(accountID: idA).isEmpty)
         #expect(inactiveProductsPersistence.loadItems(accountID: idB).map(\.id) == [2])
+        #expect(smartPriceProductsPersistence.loadItems(accountID: idA).isEmpty)
+        #expect(smartPriceProductsPersistence.loadItems(accountID: idB).map(\.id) == [2])
         #expect(UserDefaults.standard.object(forKey: "megaphone.rounds.\(idA)") == nil)
         #expect(UserDefaults.standard.object(forKey: "megaphone.speed.\(idA)") == nil)
         #expect(UserDefaults.standard.object(forKey: "accountDetail.selectedTab.\(idA)") == nil)

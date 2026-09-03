@@ -31,6 +31,7 @@ struct AccountDetailView: View {
     private enum DetailTab: String, CaseIterable {
         case published = "publicados"
         case inactive = "inativos"
+        case smartPrice = "sem preço esperto"
     }
 
     init(account: AccountSession) {
@@ -68,6 +69,8 @@ struct AccountDetailView: View {
                 )
             case .inactive:
                 inactiveContent
+            case .smartPrice:
+                smartPriceContent
             }
         }
         .padding(.horizontal, 20)
@@ -95,6 +98,7 @@ struct AccountDetailView: View {
                 Button {
                     runner.reload(sellerID: account.user.id)
                     account.inactiveProductsLoader.load()
+                    account.smartPriceProductsLoader.load()
                 } label: {
                     // Círculo com tamanho fixo (em vez do bezel padrão de toolbar, que no Mac
                     // idiom otimizado saía pequeno e num "squircle" em vez de redondo) — largura e
@@ -140,11 +144,18 @@ struct AccountDetailView: View {
             if account.inactiveProductsLoader.items.isEmpty, account.inactiveProductsLoader.phase == .idle {
                 account.inactiveProductsLoader.load()
             }
+            if account.smartPriceProductsLoader.items.isEmpty, account.smartPriceProductsLoader.phase == .idle {
+                account.smartPriceProductsLoader.load()
+            }
         }
     }
 
     private var inactiveContent: some View {
         InactiveProductsListView(account: account)
+    }
+
+    private var smartPriceContent: some View {
+        SmartPriceProductsListView(account: account)
     }
 
     /// Só mostra a quantidade depois de já ter dado carregado (produtos publicados ou inativos) —
@@ -156,6 +167,10 @@ struct AccountDetailView: View {
             return "\(tab.rawValue) (\(runner.items.count.formatted()))"
         case .inactive:
             let loader = account.inactiveProductsLoader
+            guard !loader.items.isEmpty || loader.phase == .finished else { return tab.rawValue }
+            return "\(tab.rawValue) (\(loader.items.count.formatted()))"
+        case .smartPrice:
+            let loader = account.smartPriceProductsLoader
             guard !loader.items.isEmpty || loader.phase == .finished else { return tab.rawValue }
             return "\(tab.rawValue) (\(loader.items.count.formatted()))"
         }
