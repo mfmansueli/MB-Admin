@@ -8,6 +8,7 @@ struct PostQueueView: View {
     let poster: CrossAccountPoster
 
     @State private var isConfirmingClear = false
+    @State private var isShowingHistory = false
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -70,6 +71,19 @@ struct PostQueueView: View {
                         .fixedSize()
                     }
                 }
+                // Botão de histórico como primeiro item da bottom bar — fica encostado na ponta
+                // leading, com o `Spacer` logo depois empurrando o menu de intervalo pra ponta
+                // trailing.
+                ToolbarItem(placement: .bottomBar) {
+                    Button {
+                        isShowingHistory = true
+                    } label: {
+                        // `.titleAndIcon` explícito — a bottom bar, sem isso, mostra só o ícone.
+                        Label("histórico", systemImage: "clock.arrow.circlepath")
+                            .labelStyle(.titleAndIcon)
+                    }
+                    .fixedSize()
+                }
                 ToolbarItem(placement: .bottomBar) {
                     Spacer()
                 }
@@ -88,6 +102,9 @@ struct PostQueueView: View {
                 Button("cancelar", role: .cancel) {}
             } message: {
                 Text("remove todos os itens da fila — uma ação já em andamento termina normalmente, só não entra mais nenhuma depois dela.")
+            }
+            .macCatalystSizedSheet(isPresented: $isShowingHistory) {
+                PostHistoryView(postQueue: postQueue)
             }
         }
     }
@@ -128,20 +145,29 @@ struct PostQueueView: View {
         }
     }
 
-    /// Deixa escolher o intervalo entre ações da fila, de 1 a 5 minutos — mesmo padrão de
-    /// Menu+Picker do seletor de ação em massa (`InactiveProductsListView.bulkActionSelector`).
+    /// Presets oferecidos no menu de intervalo, de 30 segundos a 5 minutos.
+    private static let intervalPresets: [TimeInterval] = [30, 60, 120, 180, 240, 300]
+
+    /// "30s" abaixo de um minuto, "N min" a partir de 1 minuto.
+    private static func intervalLabel(_ interval: TimeInterval) -> String {
+        interval < 60 ? "\(Int(interval))s" : "\(Int(interval / 60)) min"
+    }
+
+    /// Deixa escolher o intervalo entre ações da fila, de 30 segundos a 5 minutos — mesmo padrão
+    /// de Menu+Picker do seletor de ação em massa (`InactiveProductsListView.bulkActionSelector`).
+    /// A escolha é persistida por `PostQueue.setInterval` — sobrevive a fechar e abrir o app.
     private var intervalMenu: some View {
         Menu {
             Picker("intervalo entre ações", selection: intervalBinding) {
-                ForEach(1...5, id: \.self) { minutes in
-                    Text("\(minutes) min").tag(TimeInterval(minutes * 60))
+                ForEach(Self.intervalPresets, id: \.self) { seconds in
+                    Text(Self.intervalLabel(seconds)).tag(seconds)
                 }
             }
             .pickerStyle(.inline)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "timer")
-                Text("\(Int(postQueue.interval / 60)) min")
+                Text(Self.intervalLabel(postQueue.interval))
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
             }
@@ -151,11 +177,12 @@ struct PostQueueView: View {
     }
 
     /// `PostQueue` é uma classe (`@Observable`, não `@Bindable` aqui) — sem açúcar de `$`, o
-    /// binding pro Picker precisa ser montado à mão.
+    /// binding pro Picker precisa ser montado à mão. O `set` passa por `setInterval` (não atribui
+    /// `postQueue.interval` direto) pra escolha persistir.
     private var intervalBinding: Binding<TimeInterval> {
         Binding(
             get: { postQueue.interval },
-            set: { postQueue.interval = $0 }
+            set: { postQueue.setInterval($0) }
         )
     }
 }

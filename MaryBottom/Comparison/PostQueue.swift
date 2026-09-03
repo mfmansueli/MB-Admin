@@ -10,6 +10,9 @@ import Observation
 @Observable
 final class PostQueue {
     private(set) var items: [PostQueueItem] = []
+    /// Ações já concluídas (sucesso ou erro), mais recente primeiro — sobrevive à remoção do item
+    /// da fila e a fechar/abrir o app de novo, ao contrário de `items`. Ver `recordHistory`.
+    private(set) var history: [PostHistoryEntry] = []
     private(set) var isRunning = false
     /// Pausa pedida pelo usuário — o laço espera aqui antes de começar o próximo item; o item em
     /// voo no momento da pausa termina normalmente.
@@ -23,23 +26,50 @@ final class PostQueue {
     private var pauseGate: CheckedContinuation<Void, Never>?
 
     private let poster: CrossAccountPoster
+    private let historyPersistence: PostHistoryPersisting
+    private let defaults: UserDefaults
     /// `var`, não `let`: quem cria a fila às vezes não pode capturar `self` no provider ainda
     /// (dentro do próprio `init` de quem a possui) e liga ele de verdade logo em seguida.
     var accountsProvider: () -> [AccountSession]
-    /// Inicializado a partir do intervalo do `poster` compartilhado (ou injetado, só pros testes
-    /// não esperarem o intervalo de verdade) — mas depois disso é um `var` de verdade: a tela da
-    /// fila deixa o usuário reconfigurar entre 1 e 5 minutos, e `run()` lê o valor atual a cada
-    /// volta do laço, então a mudança já vale a partir da próxima espera entre ações.
-    var interval: TimeInterval
+    /// Intervalo entre uma ação da fila e a próxima — a tela deixa o usuário escolher entre 30s e
+    /// 5 minutos, `run()` lê o valor atual a cada volta do laço (a mudança já vale a partir da
+    /// próxima espera), e a escolha sobrevive a fechar e abrir o app de novo (ver `setInterval`).
+    /// Só mutável por aqui dentro — `setInterval` é quem persiste, então a UI nunca atribui direto.
+    private(set) var interval: TimeInterval
+
+    /// Quantas entradas de histórico guardar no máximo — mais antiga que isso cai fora, pra não
+    /// crescer sem fim dentro de `UserDefaults` numa loja que fica meses sendo usada.
+    private static let maxHistoryEntries = 500
+    private static let intervalDefaultsKey = "postQueue.interval"
 
     init(
         poster: CrossAccountPoster,
         accountsProvider: @escaping () -> [AccountSession],
-        interval: TimeInterval? = nil
+        interval: TimeInterval? = nil,
+        historyPersistence: PostHistoryPersisting = InMemoryPostHistoryPersistence(),
+        defaults: UserDefaults = .standard
     ) {
         self.poster = poster
         self.accountsProvider = accountsProvider
-        self.interval = interval ?? poster.cooldownDuration
+        self.historyPersistence = historyPersistence
+        self.defaults = defaults
+        history = historyPersistence.loadEntries()
+        // Um `interval` explícito (testes, sobretudo) vale por cima de qualquer coisa persistida.
+        // Sem ele, a última escolha do usuário — se existir — prevalece sobre o cooldown padrão do
+        // `poster`.
+        if let interval {
+            self.interval = interval
+        } else {
+            let stored = defaults.double(forKey: Self.intervalDefaultsKey)
+            self.interval = stored > 0 ? stored : poster.cooldownDuration
+        }
+    }
+
+    /// Muda o intervalo entre ações e já persiste a escolha — chamado pelo menu de intervalo da
+    /// fila (`PostQueueView`), pra sobreviver a fechar e abrir o app de novo.
+    func setInterval(_ newValue: TimeInterval) {
+        interval = newValue
+        defaults.set(newValue, forKey: Self.intervalDefaultsKey)
     }
 
     func status(for item: PostQueueItem) -> MegaphoneStatus {
@@ -145,10 +175,18 @@ final class PostQueue {
         items.removeAll()
     }
 
-    /// Pausa a fila — um item em andamento (incluindo o intervalo de espera logo depois dele)
-    /// termina normalmente; só o item seguinte, ainda não escolhido, fica esperando. Não afeta
-    /// `postSingle`, que continua funcionando mesmo com a fila pausada (é uma ação direta do
-    /// usuário numa linha específica, fora do laço automático).
+    /// Apaga o histórico salvo — não afeta a fila ativa (`items`), só o registro persistido de
+    /// ações já concluídas.
+    func clearHistory() {
+        history.removeAll()
+        historyPersistence.save(history)
+    }
+
+    /// Pausa a fila — um item em andamento (a chamada de rede já disparada) termina normalmente;
+    /// o intervalo de espera logo depois dele é interrompido na hora (ver `waitInterval`), e o item
+    /// seguinte, ainda não escolhido, fica esperando. Não afeta `postSingle`, que continua
+    /// funcionando mesmo com a fila pausada (é uma ação direta do usuário numa linha específica,
+    /// fora do laço automático).
     func pause() {
         guard !isPaused else { return }
         isPaused = true
@@ -228,8 +266,21 @@ final class PostQueue {
                 await activateAndTrack(item: item, account: source)
             }
             if items.contains(where: { status(for: $0) == .pending }) {
-                try? await Task.sleep(for: .seconds(interval))
+                await waitInterval()
             }
+        }
+    }
+
+    /// Espera o intervalo entre uma ação e a próxima, em pedaços curtos — pausar durante essa
+    /// espera larga ela na hora (dentro de um pedaço) em vez de deixar o resto do intervalo correr
+    /// escondido atrás da mesma UI de "pausado"; `waitWhilePaused`, logo na volta ao topo do laço,
+    /// é quem de fato prende até o `resume()`.
+    private func waitInterval() async {
+        var remaining = interval
+        while remaining > 0, !isPaused {
+            let chunk = min(0.2, remaining)
+            try? await Task.sleep(for: .seconds(chunk))
+            remaining -= chunk
         }
     }
 
@@ -257,6 +308,7 @@ final class PostQueue {
         if currentItem?.id == item.id {
             currentItem = nil
         }
+        recordHistory(item: item)
     }
 
     /// Delega a exclusão de verdade pro `MegaphoneRunner` da própria conta — ele já sabe renovar
@@ -268,6 +320,7 @@ final class PostQueue {
         if currentItem?.id == item.id {
             currentItem = nil
         }
+        recordHistory(item: item)
     }
 
     /// Mesma ideia de `deleteAndTrack`, delegando pro `MegaphoneRunner` da conta — ele já sabe ler
@@ -278,6 +331,7 @@ final class PostQueue {
         if currentItem?.id == item.id {
             currentItem = nil
         }
+        recordHistory(item: item)
     }
 
     /// Mesma ideia de `inactivateAndTrack`, delegando pro `MegaphoneRunner` da conta pra reenviar
@@ -288,5 +342,30 @@ final class PostQueue {
         if currentItem?.id == item.id {
             currentItem = nil
         }
+        recordHistory(item: item)
+    }
+
+    /// Guarda no histórico persistido, mais recente primeiro — chamado pelos quatro `xAndTrack`
+    /// logo depois que a chamada de rede de verdade termina. `status(for:)` ainda `.pending`/
+    /// `.megaphoning` (ex.: item substituído por outro com o mesmo id antes da rede responder) não
+    /// vira entrada nenhuma, defensivamente.
+    private func recordHistory(item: PostQueueItem) {
+        guard let outcome = PostHistoryEntry.Outcome(status: status(for: item)) else { return }
+        let entry = PostHistoryEntry(
+            id: item.id,
+            product: item.product,
+            kind: item.kind,
+            sourceAccountID: item.sourceAccountID,
+            sourceAccountName: item.sourceAccountName,
+            destinationAccountID: item.destinationAccountID,
+            destinationAccountName: item.destinationAccountName,
+            outcome: outcome,
+            completedAt: .now
+        )
+        history.insert(entry, at: 0)
+        if history.count > Self.maxHistoryEntries {
+            history.removeLast(history.count - Self.maxHistoryEntries)
+        }
+        historyPersistence.save(history)
     }
 }

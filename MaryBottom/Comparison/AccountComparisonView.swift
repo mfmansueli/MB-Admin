@@ -75,7 +75,7 @@ struct AccountComparisonView: View {
             }
         }
         .onAppear(perform: preselectAccounts)
-        .sheet(isPresented: $isShowingQueue) {
+        .macCatalystSizedSheet(isPresented: $isShowingQueue) {
             PostQueueView(postQueue: accountsStore.postQueue, poster: poster)
         }
     }
@@ -283,28 +283,8 @@ struct AccountComparisonView: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("buscar por nome", text: $searchText)
-                .textFieldStyle(.plain)
-                .focused($isSearchFocused)
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.quaternary, in: .rect(cornerRadius: 10))
-        .frame(maxWidth: .infinity)
-        .contentShape(.rect)
-        .onTapGesture { isSearchFocused = true }
+        SearchField(placeholder: "buscar por nome", text: $searchText, isFocused: $isSearchFocused)
+            .frame(maxWidth: .infinity)
     }
 
     private func resultFilterPicker(_ result: AccountComparisonResult) -> some View {

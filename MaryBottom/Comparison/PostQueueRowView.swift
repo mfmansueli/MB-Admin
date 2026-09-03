@@ -19,7 +19,7 @@ struct PostQueueRowView: View {
                 Text(item.product.title)
                     .font(.subheadline)
                     .lineLimit(2)
-                Text(originDestinationLine)
+                Text(item.originDestinationLine)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 statusText
@@ -46,25 +46,6 @@ struct PostQueueRowView: View {
             if case .failed(let message) = status {
                 MegaphoneErrorDetailSheet(product: item.product, message: message)
             }
-        }
-    }
-
-    /// Republicar na mesma conta (origem == destino) fica "republicando X" — "de X para X" é
-    /// tecnicamente certo, mas confuso de ler. Apagar/inativar/ativar só têm uma conta envolvida,
-    /// então nem entram nessa comparação.
-    private var originDestinationLine: String {
-        switch item.kind {
-        case .delete:
-            return "apagando de \(item.sourceAccountName)"
-        case .inactivate:
-            return "inativando de \(item.sourceAccountName)"
-        case .activate:
-            return "ativando de \(item.sourceAccountName)"
-        case .post:
-            if item.sourceAccountID == item.destinationAccountID {
-                return "republicando em \(item.sourceAccountName)"
-            }
-            return "de \(item.sourceAccountName) para \(item.destinationAccountName)"
         }
     }
 

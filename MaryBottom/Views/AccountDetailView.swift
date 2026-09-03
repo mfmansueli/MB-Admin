@@ -40,7 +40,7 @@ struct AccountDetailView: View {
 
     /// Ação escolhida pro botão de confirmar da seleção múltipla, no filtro "todos os anúncios" —
     /// "pede desconto" não usa isso, só tem uma ação possível ali (aplicar desconto).
-    private enum BulkAction: CaseIterable {
+    private enum BulkAction: BulkActionOption {
         case repost
         case inactivate
         case delete
@@ -219,28 +219,21 @@ struct AccountDetailView: View {
     @ViewBuilder
     private var selectionBar: some View {
         if !filteredItems.isEmpty {
-            HStack {
-                Button(isSelecting ? "cancelar seleção" : "selecionar") {
+            SelectionToggleBar(
+                isSelecting: $isSelecting,
+                hasItems: true,
+                isAllSelected: isAllFilteredSelected,
+                hasSelection: !selectedIDs.isEmpty,
+                onToggleSelecting: {
                     isSelecting.toggle()
                     if !isSelecting {
                         selectedIDs.removeAll()
                         bulkAction = .repost
                     }
-                }
-                .buttonStyle(.bordered)
-
-                if isSelecting {
-                    Button(isAllFilteredSelected ? "desmarcar todos" : "selecionar todos") {
-                        toggleSelectAllFiltered()
-                    }
-                    .buttonStyle(.bordered)
-                }
-
-                Spacer()
-
-                if isSelecting, !selectedIDs.isEmpty {
-                    bulkActionButton
-                }
+                },
+                onToggleSelectAll: { toggleSelectAllFiltered() }
+            ) {
+                bulkActionButton
             }
             .confirmationDialog(
                 "aplicar desconto e megafonar \(selectedIDs.count) produtos?",
@@ -297,47 +290,16 @@ struct AccountDetailView: View {
             .tint(.orange)
             .controlSize(.small)
         case .all:
-            bulkActionSelector
-        }
-    }
-
-    /// Seletor repostar/inativar/apagar + botão de confirmar, pro filtro "todos os anúncios" —
-    /// cada ação tem sua própria confirmação antes de entrar na fila (`isConfirmingBulkRepost`/
-    /// `isConfirmingBulkInactivate`/`isConfirmingBulkDelete`, todas na `selectionBar`).
-    private var bulkActionSelector: some View {
-        HStack(spacing: 6) {
-            Menu {
-                Picker("ação", selection: $bulkAction) {
-                    ForEach(BulkAction.allCases, id: \.self) { action in
-                        Text(action.label).tag(action)
-                    }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                HStack(spacing: 4) {
-                    Text(bulkAction.label)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
-                }
-                .foregroundStyle(.secondary)
-                .contentShape(.rect)
-            }
-
-            Button {
+            // Cada ação tem sua própria confirmação antes de entrar na fila
+            // (`isConfirmingBulkRepost`/`isConfirmingBulkInactivate`/`isConfirmingBulkDelete`,
+            // todas na `selectionBar`).
+            BulkActionSelector(selection: $bulkAction, selectedCount: selectedIDs.count) {
                 switch bulkAction {
                 case .repost: isConfirmingBulkRepost = true
                 case .inactivate: isConfirmingBulkInactivate = true
                 case .delete: isConfirmingBulkDelete = true
                 }
-            } label: {
-                Image(systemName: bulkAction.systemImage)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(bulkAction.tint, in: .circle)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(bulkAction.label) \(selectedIDs.count) produtos")
         }
     }
 
@@ -517,28 +479,8 @@ struct AccountDetailView: View {
     @ViewBuilder
     private var searchField: some View {
         if !runner.items.isEmpty {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("buscar por nome", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .focused($isSearchFocused)
-                if !searchText.isEmpty {
-                    Button {
-                        searchText = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .background(.quaternary, in: .rect(cornerRadius: 10))
-            .frame(maxWidth: .infinity)
-            .contentShape(.rect)
-            .onTapGesture { isSearchFocused = true }
+            SearchField(placeholder: "buscar por nome", text: $searchText, isFocused: $isSearchFocused)
+                .frame(maxWidth: .infinity)
         }
     }
 
@@ -553,8 +495,14 @@ struct AccountDetailView: View {
                 .pickerStyle(.inline)
             } label: {
                 HStack {
+                    // Tamanho mínimo fixo — sem isso, trocar pro texto mais longo (que quebra em
+                    // duas linhas) fazia o menu inteiro, e o campo de busca ao lado (que ocupa o
+                    // espaço sobrando), pularem de tamanho no meio da animação de seleção.
                     Text(filterLabel)
                         .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .frame(minWidth: 130, minHeight: 32)
                     Image(systemName: "chevron.up.chevron.down")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)

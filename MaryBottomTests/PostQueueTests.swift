@@ -142,6 +142,34 @@ struct PostQueueTests {
         #expect(queue.isPaused == false)
     }
 
+    @Test("pausar durante o intervalo entre itens não espera ele terminar pra valer")
+    func pausarDuranteOIntervaloInterrompeNaHora() async {
+        let sourceClient = StubEnjoeiClient(
+            templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)]
+        )
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        // Intervalo bem maior que a duração do teste — sem interromper por pausa, o segundo item
+        // não sairia da espera a tempo do teste terminar.
+        let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: 60)
+
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: source, destination: destination)
+
+        // Ainda dentro do intervalo de 60s entre o primeiro item e o segundo.
+        await waitUntil { poster.statuses[1] != nil && poster.statuses[1] != .megaphoning }
+        queue.pause()
+        // Tempo real (não só `Task.yield`) maior que o pedaço de 0.2s do laço de espera interno —
+        // sem isso, um `resume()` na sequência pode acontecer antes do laço sequer checar
+        // `isPaused`, e o teste não estaria testando nada.
+        try? await Task.sleep(for: .milliseconds(500))
+        queue.resume()
+
+        await waitUntil { poster.statuses[2] != nil && poster.statuses[2] != .megaphoning }
+        #expect(queue.items.allSatisfy { queue.status(for: $0) == .succeeded })
+    }
+
     @Test("apagar pela fila delega pro runner da conta e aparece como succeeded")
     func apagarPelaFilaDelegaProRunner() async {
         let client = StubEnjoeiClient()
@@ -170,6 +198,162 @@ struct PostQueueTests {
         #expect(account.runner.inactivateStatuses[1] == .succeeded)
         #expect(queue.status(for: queue.items[0]) == .succeeded)
         #expect(await client.updateProductStateCalls.map(\.productID) == [1])
+    }
+
+    @Test("ativar pela fila delega pro runner da conta e aparece como succeeded")
+    func ativarPelaFilaDelegaProRunner() async {
+        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let account = makeAccount(name: "conta", client: client)
+        let poster = CrossAccountPoster()
+        let queue = PostQueue(poster: poster, accountsProvider: { [account] }, interval: .zero)
+
+        queue.enqueueActivate(product: EnjoeiFixtures.product(id: 1), account: account)
+        await waitUntil { !queue.isRunning }
+
+        #expect(account.runner.activateStatuses[1] == .succeeded)
+        #expect(queue.status(for: queue.items[0]) == .succeeded)
+        #expect(await client.updateProductStateCalls.map(\.productID) == [1])
+    }
+
+    @Test("postagem bem-sucedida entra no histórico com os detalhes de origem e destino")
+    func postagemEntraNoHistorico() async throws {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let history = InMemoryPostHistoryPersistence()
+        let queue = PostQueue(
+            poster: poster,
+            accountsProvider: { [source, destination] },
+            interval: .zero,
+            historyPersistence: history
+        )
+
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        await waitUntil { !queue.isRunning }
+
+        #expect(queue.history.count == 1)
+        let entry = try #require(queue.history.first)
+        #expect(entry.product.id == 1)
+        #expect(entry.kind == .post)
+        #expect(entry.sourceAccountID == source.id)
+        #expect(entry.sourceAccountName == "origem")
+        #expect(entry.destinationAccountID == destination.id)
+        #expect(entry.destinationAccountName == "destino")
+        #expect(entry.outcome == .succeeded)
+        // Persistido de verdade, não só em memória na instância da fila.
+        #expect(history.loadEntries() == queue.history)
+    }
+
+    @Test("ação que falha também entra no histórico, com a mensagem de erro")
+    func falhaEntraNoHistorico() async throws {
+        let client = StubEnjoeiClient(deleteProductError: .http(status: 500, message: "o enjoei caiu"))
+        let account = makeAccount(name: "conta", client: client)
+        let poster = CrossAccountPoster()
+        let history = InMemoryPostHistoryPersistence()
+        let queue = PostQueue(
+            poster: poster,
+            accountsProvider: { [account] },
+            interval: .zero,
+            historyPersistence: history
+        )
+
+        queue.enqueueDelete(product: EnjoeiFixtures.product(id: 1), account: account)
+        await waitUntil { !queue.isRunning }
+
+        let entry = try #require(queue.history.first)
+        #expect(entry.kind == .delete)
+        #expect(entry.outcome == .failed("o enjoei caiu"))
+    }
+
+    @Test("histórico novo carrega o que já estava persistido")
+    func historicoCarregaOQueJaEstavaPersistido() async {
+        let poster = CrossAccountPoster()
+        let history = InMemoryPostHistoryPersistence()
+        let firstQueue = PostQueue(
+            poster: poster,
+            accountsProvider: { [] },
+            interval: .zero,
+            historyPersistence: history
+        )
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        firstQueue.accountsProvider = { [source, destination] }
+        firstQueue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        await waitUntil { !firstQueue.isRunning }
+
+        // Simula reabrir o app: uma fila nova, mesma persistência.
+        let secondQueue = PostQueue(poster: poster, accountsProvider: { [] }, historyPersistence: history)
+
+        #expect(secondQueue.history == firstQueue.history)
+    }
+
+    @Test("limpar o histórico apaga tudo, sem afetar a fila em andamento")
+    func limparHistoricoApagaTudo() async {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let history = InMemoryPostHistoryPersistence()
+        let queue = PostQueue(
+            poster: poster,
+            accountsProvider: { [source, destination] },
+            interval: .zero,
+            historyPersistence: history
+        )
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        await waitUntil { !queue.isRunning }
+        #expect(!queue.history.isEmpty)
+
+        queue.clearHistory()
+
+        #expect(queue.history.isEmpty)
+        #expect(history.loadEntries().isEmpty)
+        #expect(queue.items.isEmpty == false)
+    }
+
+    /// Suite efêmera própria por teste, pra `setInterval` não sujar (nem depender de) o
+    /// `UserDefaults.standard` da máquina rodando os testes.
+    private func makeIntervalDefaults() -> UserDefaults {
+        UserDefaults(suiteName: "PostQueueTests.interval.\(UUID().uuidString)")!
+    }
+
+    @Test("mudar o intervalo persiste a escolha")
+    func mudarIntervaloPersiste() {
+        let defaults = makeIntervalDefaults()
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
+
+        queue.setInterval(30)
+
+        #expect(queue.interval == 30)
+        #expect(defaults.double(forKey: "postQueue.interval") == 30)
+    }
+
+    @Test("fila nova recupera o intervalo persistido, sem cair no padrão do poster")
+    func filaNovaRecuperaIntervaloPersistido() {
+        let defaults = makeIntervalDefaults()
+        let firstQueue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
+        firstQueue.setInterval(30)
+
+        // Simula reabrir o app: uma fila nova, mesmo `UserDefaults`, sem `interval` explícito.
+        let secondQueue = PostQueue(
+            poster: CrossAccountPoster(cooldownDuration: 999),
+            accountsProvider: { [] },
+            defaults: defaults
+        )
+
+        #expect(secondQueue.interval == 30)
+    }
+
+    @Test("um interval explícito no init vale por cima de qualquer coisa persistida")
+    func intervalExplicitoIgnoraOPersistido() {
+        let defaults = makeIntervalDefaults()
+        defaults.set(TimeInterval(30), forKey: "postQueue.interval")
+
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, interval: .zero, defaults: defaults)
+
+        #expect(queue.interval == .zero)
     }
 
     @Test("conta que não existe mais no accountsProvider vira falha, sem travar o resto da fila")

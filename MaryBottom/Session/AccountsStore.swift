@@ -26,7 +26,8 @@ final class AccountsStore {
         dependenciesFactory: AccountDependenciesFactory? = nil,
         persistence: AccountsPersisting? = nil,
         megaphoneItemsPersistence: MegaphoneItemsPersisting? = nil,
-        inactiveProductsPersistence: InactiveProductsPersisting? = nil
+        inactiveProductsPersistence: InactiveProductsPersisting? = nil,
+        postHistoryPersistence: PostHistoryPersisting? = nil
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
@@ -34,7 +35,11 @@ final class AccountsStore {
         self.inactiveProductsPersistence = inactiveProductsPersistence ?? UserDefaultsInactiveProductsPersistence()
         // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
         // provider de verdade é ligado logo abaixo, já com `self` totalmente inicializado.
-        postQueue = PostQueue(poster: poster, accountsProvider: { [] })
+        postQueue = PostQueue(
+            poster: poster,
+            accountsProvider: { [] },
+            historyPersistence: postHistoryPersistence ?? UserDefaultsPostHistoryPersistence()
+        )
         postQueue.accountsProvider = { [weak self] in self?.accounts ?? [] }
     }
 

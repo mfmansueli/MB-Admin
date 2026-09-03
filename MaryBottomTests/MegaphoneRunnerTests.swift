@@ -855,6 +855,80 @@ struct MegaphoneRunnerTests {
         #expect(runner.items.first { $0.id == 1 }?.status != .succeeded)
     }
 
+    @Test("ativar um produto lê o template inteiro primeiro e reenvia com product_state active")
+    func ativarComSucesso() async {
+        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let runner = makeRunner(client: client)
+
+        runner.activateProduct(productID: 1)
+        await waitUntil { runner.activateStatuses[1] != .megaphoning && runner.activateStatuses[1] != nil }
+
+        #expect(runner.activateStatuses[1] == .succeeded)
+        #expect(await client.requestedTemplateIDs == [1])
+        let call = await client.updateProductStateCalls.first
+        #expect(call?.productID == 1)
+        #expect(call?.request.productState == .active)
+        #expect(call?.request.product.title == "produto 1")
+    }
+
+    @Test("erro ao ler o template antes de ativar vira falha, sem chegar a ativar")
+    func ativarFalhaAoLerTemplate() async {
+        let client = StubEnjoeiClient(templateError: .http(status: 500, message: "o enjoei caiu"))
+        let runner = makeRunner(client: client)
+
+        runner.activateProduct(productID: 1)
+        await waitUntil { runner.activateStatuses[1] != .megaphoning && runner.activateStatuses[1] != nil }
+
+        #expect(runner.activateStatuses[1] == .failed("o enjoei caiu"))
+        #expect(await client.updateProductStateCalls.isEmpty)
+    }
+
+    @Test("token CSRF recusado ao ativar é renovado e a ativação sai do mesmo jeito")
+    func ativarRenovaTokenRecusado() async {
+        let client = StubEnjoeiClient(
+            csrfRejectionsRemaining: 1,
+            templatesByProductID: [1: makeTemplate(productID: 1)]
+        )
+        let runner = makeRunner(client: client)
+
+        runner.activateProduct(productID: 1)
+        await waitUntil { runner.activateStatuses[1] != .megaphoning && runner.activateStatuses[1] != nil }
+
+        #expect(runner.activateStatuses[1] == .succeeded)
+        let tokens = await client.updateProductStateCalls.map(\.token)
+        #expect(tokens == ["token-1", "token-2"])
+    }
+
+    @Test("um segundo toque enquanto já está ativando não dispara outra chamada")
+    func ativarDuploToqueNaoDuplica() async {
+        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let runner = makeRunner(client: client)
+
+        runner.activateProduct(productID: 1)
+        runner.activateProduct(productID: 1)
+        await waitUntil { runner.activateStatuses[1] != .megaphoning && runner.activateStatuses[1] != nil }
+
+        #expect(await client.updateProductStateCalls.count == 1)
+    }
+
+    @Test("ativar não mexe na lista de publicados nem em inactivateStatuses")
+    func ativarNaoMexeNaListaDePublicados() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)],
+            templatesByProductID: [1: makeTemplate(productID: 1)]
+        )
+        let runner = makeRunner(client: client)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        runner.activateProduct(productID: 1)
+        await waitUntil { runner.activateStatuses[1] != .megaphoning && runner.activateStatuses[1] != nil }
+
+        #expect(runner.activateStatuses[1] == .succeeded)
+        #expect(runner.items.first { $0.id == 1 }?.status == .pending)
+        #expect(runner.inactivateStatuses[1] == nil)
+    }
+
     /// Espera uma condição do runner sem prender o teste para sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {

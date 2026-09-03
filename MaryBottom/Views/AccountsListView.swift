@@ -186,7 +186,7 @@ struct AccountsListView: View {
                 .environment(accountsStore)
         }
         #endif
-        .sheet(isPresented: $isShowingQueue) {
+        .macCatalystSizedSheet(isPresented: $isShowingQueue) {
             PostQueueView(postQueue: accountsStore.postQueue, poster: accountsStore.poster)
         }
     }

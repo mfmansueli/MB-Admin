@@ -20,7 +20,7 @@ struct InactiveProductsListView: View {
 
     /// Ação escolhida pro botão de confirmar da seleção múltipla — repostar (cria de novo, sem
     /// mexer no status de inativo) ou ativar (volta o mesmo anúncio pra vitrine de publicados).
-    private enum BulkAction: CaseIterable {
+    private enum BulkAction: BulkActionOption {
         case repost
         case activate
 
@@ -37,6 +37,8 @@ struct InactiveProductsListView: View {
             case .activate: "tray.and.arrow.up.fill"
             }
         }
+
+        var tint: Color { .accentColor }
     }
 
     var body: some View {
@@ -94,28 +96,8 @@ struct InactiveProductsListView: View {
     }
 
     private var searchField: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("buscar por título", text: $searchText)
-                .textFieldStyle(.plain)
-                .focused($isSearchFocused)
-            if !searchText.isEmpty {
-                Button {
-                    searchText = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(.quaternary, in: .rect(cornerRadius: 10))
-        .padding(.horizontal, 20)
-        .contentShape(.rect)
-        .onTapGesture { isSearchFocused = true }
+        SearchField(placeholder: "buscar por título", text: $searchText, isFocused: $isSearchFocused)
+            .padding(.horizontal, 20)
     }
 
     private var filteredItems: [InactiveProduct] {
@@ -125,27 +107,25 @@ struct InactiveProductsListView: View {
     }
 
     private var selectionBar: some View {
-        HStack(spacing: 6) {
-            Button(isSelecting ? "cancelar seleção" : "selecionar") {
+        SelectionToggleBar(
+            isSelecting: $isSelecting,
+            hasItems: !filteredItems.isEmpty,
+            isAllSelected: isAllFilteredSelected,
+            hasSelection: !selectedIDs.isEmpty,
+            onToggleSelecting: {
                 isSelecting.toggle()
                 if !isSelecting {
                     selectedIDs.removeAll()
                     bulkAction = .repost
                 }
-            }
-            .buttonStyle(.bordered)
-
-            if isSelecting, !filteredItems.isEmpty {
-                Button(isAllFilteredSelected ? "desmarcar todos" : "selecionar todos") {
-                    toggleSelectAll()
+            },
+            onToggleSelectAll: { toggleSelectAll() }
+        ) {
+            BulkActionSelector(selection: $bulkAction, selectedCount: selectedIDs.count) {
+                switch bulkAction {
+                case .repost: isConfirmingBulkRepost = true
+                case .activate: isConfirmingBulkActivate = true
                 }
-                .buttonStyle(.bordered)
-            }
-
-            Spacer()
-
-            if isSelecting, !selectedIDs.isEmpty {
-                bulkActionSelector
             }
         }
         .padding(.horizontal, 20)
@@ -168,44 +148,6 @@ struct InactiveProductsListView: View {
             Button("cancelar", role: .cancel) {}
         } message: {
             Text("cada anúncio selecionado entra na fila de ações e volta pra vitrine de publicados.")
-        }
-    }
-
-    /// Seletor repostar/ativar + botão de confirmar — mesmo padrão da seleção múltipla em
-    /// "publicados" (`AccountDetailView.bulkActionSelector`).
-    private var bulkActionSelector: some View {
-        HStack(spacing: 6) {
-            Menu {
-                Picker("ação", selection: $bulkAction) {
-                    ForEach(BulkAction.allCases, id: \.self) { action in
-                        Text(action.label).tag(action)
-                    }
-                }
-                .pickerStyle(.inline)
-            } label: {
-                HStack(spacing: 4) {
-                    Text(bulkAction.label)
-                    Image(systemName: "chevron.up.chevron.down")
-                        .font(.caption2)
-                }
-                .foregroundStyle(.secondary)
-                .contentShape(.rect)
-            }
-
-            Button {
-                switch bulkAction {
-                case .repost: isConfirmingBulkRepost = true
-                case .activate: isConfirmingBulkActivate = true
-                }
-            } label: {
-                Image(systemName: bulkAction.systemImage)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 32, height: 32)
-                    .background(Color.accentColor, in: .circle)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(bulkAction.label) \(selectedIDs.count) produtos")
         }
     }
 
