@@ -5,6 +5,9 @@ import Foundation
 actor StubEnjoeiClient: EnjoeiClientProtocol {
     var user: EnjoeiUser
     var currentUserError: EnjoeiError?
+    /// Espera artificial antes de responder `currentUser` — só para testar que restaurar várias
+    /// contas em paralelo publica na ordem persistida mesmo quando uma responde antes da outra.
+    var currentUserDelay: Duration = .zero
     var pages: [StoreProductsPage]
     /// Erro a lançar no megafone de um produto específico.
     var failuresByProductID: [Int: EnjoeiError]
@@ -66,10 +69,12 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         deleteProductError: EnjoeiError? = nil,
         updateProductStateError: EnjoeiError? = nil,
         inactivePagesByNumber: [Int: InactiveProductsPage] = [:],
-        inactiveProductsError: EnjoeiError? = nil
+        inactiveProductsError: EnjoeiError? = nil,
+        currentUserDelay: Duration = .zero
     ) {
         self.user = user
         self.currentUserError = currentUserError
+        self.currentUserDelay = currentUserDelay
         self.pages = pages
         self.failuresByProductID = failuresByProductID
         self.csrfRejectionsRemaining = csrfRejectionsRemaining
@@ -95,6 +100,7 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
 
     func currentUser(reloadingPage: Bool) async throws -> EnjoeiUser {
         reloadingPageCalls.append(reloadingPage)
+        if currentUserDelay > .zero { try? await Task.sleep(for: currentUserDelay) }
         if let currentUserError { throw currentUserError }
         return user
     }

@@ -38,6 +38,7 @@ struct PostQueueView: View {
                                 PostQueueRowView(
                                     item: item,
                                     status: postQueue.status(for: item),
+                                    failureDetail: postQueue.failureDetail(for: item),
                                     productURL: poster.postedProductURLs[item.product.id],
                                     onRemove: { postQueue.remove(id: item.id) }
                                 )

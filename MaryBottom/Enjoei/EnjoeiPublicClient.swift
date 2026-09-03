@@ -28,6 +28,12 @@ nonisolated final class EnjoeiPublicClient: EnjoeiPublicAPI {
         do {
             return try JSONDecoder().decode(StoreProductsPage.self, from: data)
         } catch {
+            // A API de busca responde 200 mesmo quando `EnjoeiAPI.searchQueryID` está
+            // desatualizado (persisted query desconhecida) — sem essa checagem, isso decodifica
+            // como `.unexpectedResponse`, indistinguível de qualquer outra resposta inesperada.
+            if EnjoeiError.isStalePersistedQuery(in: data) {
+                throw EnjoeiError.stalePersistedQuery
+            }
             throw EnjoeiError.unexpectedResponse
         }
     }

@@ -12,6 +12,9 @@ final class CrossAccountPoster {
     private(set) var statuses: [Int: MegaphoneStatus] = [:]
     /// Link do anúncio novo, quando a resposta da criação trouxer como identificar ele.
     private(set) var postedProductURLs: [Int: URL] = [:]
+    /// Diagnóstico completo da última falha ao postar cada produto — só em memória. Ver
+    /// `MegaphoneRunner.failureDetails`, mesmo raciocínio.
+    private(set) var failureDetails: [Int: MegaphoneFailureDetail] = [:]
 
     /// Intervalo mínimo entre uma postagem bem-sucedida e a próxima, pra não martelar a API do
     /// Enjoei — vale pra qualquer produto, não só pro que acabou de ser postado. Propriedade de
@@ -53,6 +56,7 @@ final class CrossAccountPoster {
             cooldownUntil = Date().addingTimeInterval(cooldownDuration)
         } catch {
             statuses[product.id] = .failed(error.localizedDescription)
+            failureDetails[product.id] = MegaphoneFailureDetail(action: .post, error: error)
         }
     }
 

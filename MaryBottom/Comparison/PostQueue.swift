@@ -37,9 +37,6 @@ final class PostQueue {
     /// Só mutável por aqui dentro — `setInterval` é quem persiste, então a UI nunca atribui direto.
     private(set) var interval: TimeInterval
 
-    /// Quantas entradas de histórico guardar no máximo — mais antiga que isso cai fora, pra não
-    /// crescer sem fim dentro de `UserDefaults` numa loja que fica meses sendo usada.
-    private static let maxHistoryEntries = 500
     private static let intervalDefaultsKey = "postQueue.interval"
 
     init(
@@ -92,6 +89,25 @@ final class PostQueue {
                 return .pending
             }
             return account.runner.activateStatuses[item.product.id] ?? .pending
+        }
+    }
+
+    /// Diagnóstico completo por trás de `status(for:)`, quando ela é `.failed` — mesma fonte por
+    /// trás de cada `case` (o `poster` compartilhado pra postar, o `runner` da própria conta pras
+    /// outras três ações). Uma conta que sumiu da lista (`failureOverrides`) não tem `Error` real
+    /// por trás, só a mensagem sintética.
+    func failureDetail(for item: PostQueueItem) -> MegaphoneFailureDetail? {
+        if let message = failureOverrides[item.id] {
+            return MegaphoneFailureDetail(action: MegaphoneFailureDetail.Action(kind: item.kind), syntheticMessage: message)
+        }
+        switch item.kind {
+        case .post:
+            return poster.failureDetails[item.product.id]
+        case .delete, .inactivate, .activate:
+            guard let account = accountsProvider().first(where: { $0.id == item.sourceAccountID }) else {
+                return nil
+            }
+            return account.runner.failureDetails[item.product.id]
         }
     }
 
@@ -179,7 +195,7 @@ final class PostQueue {
     /// ações já concluídas.
     func clearHistory() {
         history.removeAll()
-        historyPersistence.save(history)
+        historyPersistence.clear()
     }
 
     /// Pausa a fila — um item em andamento (a chamada de rede já disparada) termina normalmente;
@@ -348,7 +364,8 @@ final class PostQueue {
     /// Guarda no histórico persistido, mais recente primeiro — chamado pelos quatro `xAndTrack`
     /// logo depois que a chamada de rede de verdade termina. `status(for:)` ainda `.pending`/
     /// `.megaphoning` (ex.: item substituído por outro com o mesmo id antes da rede responder) não
-    /// vira entrada nenhuma, defensivamente.
+    /// vira entrada nenhuma, defensivamente. Grava só a entrada nova (`insert`, não reescreve o
+    /// histórico inteiro) — ver `PostHistoryPersisting`.
     private func recordHistory(item: PostQueueItem) {
         guard let outcome = PostHistoryEntry.Outcome(status: status(for: item)) else { return }
         let entry = PostHistoryEntry(
@@ -360,12 +377,10 @@ final class PostQueue {
             destinationAccountID: item.destinationAccountID,
             destinationAccountName: item.destinationAccountName,
             outcome: outcome,
-            completedAt: .now
+            completedAt: .now,
+            failureDetail: outcome == .succeeded ? nil : failureDetail(for: item)
         )
         history.insert(entry, at: 0)
-        if history.count > Self.maxHistoryEntries {
-            history.removeLast(history.count - Self.maxHistoryEntries)
-        }
-        historyPersistence.save(history)
+        historyPersistence.insert(entry)
     }
 }

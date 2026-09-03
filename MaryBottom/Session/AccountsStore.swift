@@ -38,7 +38,7 @@ final class AccountsStore {
         postQueue = PostQueue(
             poster: poster,
             accountsProvider: { [] },
-            historyPersistence: postHistoryPersistence ?? UserDefaultsPostHistoryPersistence()
+            historyPersistence: postHistoryPersistence ?? SwiftDataPostHistoryPersistence()
         )
         postQueue.accountsProvider = { [weak self] in self?.accounts ?? [] }
     }

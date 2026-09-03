@@ -6,8 +6,13 @@ import Observation
 @MainActor
 @Observable
 final class MegaphoneRunner {
-    private(set) var phase: MegaphonePhase = .idle
-    private(set) var items: [MegaphoneItem] = []
+    // `internal(set)` em vez de `private(set)` nas propriedades abaixo — sem isso, os métodos
+    // movidos pra `MegaphoneRunner+ProductLoading.swift`/`MegaphoneRunner+ProductActions.swift`
+    // (mesmo tipo, arquivos diferentes) não conseguiriam escrever aqui: `private` em Swift vale
+    // por arquivo, não por tipo. Continuam só de leitura pra fora do módulo (a UI só lê, nunca
+    // atribui direto).
+    internal(set) var phase: MegaphonePhase = .idle
+    internal(set) var items: [MegaphoneItem] = []
     /// Produto sendo megafonado agora — a lista rola até ele.
     private(set) var currentItemID: Int?
     /// Rodada em andamento e quantas foram pedidas.
@@ -16,19 +21,25 @@ final class MegaphoneRunner {
     /// Por que está parado, quando está. Uma pausa do usuário não é desfeita pela volta do app.
     private(set) var pauseReason: MegaphonePauseReason?
     /// Somatórios de todas as rodadas (os status em `items` valem só para a rodada atual).
-    private(set) var totalSucceeded = 0
-    private(set) var totalFailed = 0
+    internal(set) var totalSucceeded = 0
+    internal(set) var totalFailed = 0
     /// Andamento de apagar cada produto, por id — separado de `items[].status` de propósito:
     /// apagar não é megafonar, e reaproveitar o mesmo campo faria o laço automático pular um
     /// produto só porque ele está sendo apagado.
-    private(set) var deleteStatuses: [Int: MegaphoneStatus] = [:]
+    internal(set) var deleteStatuses: [Int: MegaphoneStatus] = [:]
     /// Andamento de inativar cada produto, por id — mesmo raciocínio de `deleteStatuses`: inativar
     /// não é megafonar, e reaproveitar `items[].status` faria o laço automático pular o produto só
     /// por causa disso.
-    private(set) var inactivateStatuses: [Int: MegaphoneStatus] = [:]
+    internal(set) var inactivateStatuses: [Int: MegaphoneStatus] = [:]
     /// Andamento de ativar cada produto, por id — separado de `inactivateStatuses` porque essa
     /// ação parte da aba "inativos" (produtos fora de `items`), não da lista de publicados.
-    private(set) var activateStatuses: [Int: MegaphoneStatus] = [:]
+    internal(set) var activateStatuses: [Int: MegaphoneStatus] = [:]
+    /// Diagnóstico completo da última falha de cada produto, qualquer que seja a ação (megafonar,
+    /// aplicar desconto, apagar, inativar ou ativar) — só em memória, ao contrário do que os
+    /// quatro dicionários de status acima guardam. Um produto só tem uma falha "visível" por vez
+    /// na tela (a row prioriza apagado > inativado > mensagem de erro do megafone), então um
+    /// dicionário só, sobrescrito a cada falha nova, já basta.
+    internal(set) var failureDetails: [Int: MegaphoneFailureDetail] = [:]
 
     /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei.
     var delayBetweenProducts: Duration = .milliseconds(900)
@@ -43,7 +54,9 @@ final class MegaphoneRunner {
     /// precisando logar de novo sem depender de a tela estar aberta observando `phase`.
     var onSessionExpired: (() -> Void)?
 
-    private let client: EnjoeiClientProtocol
+    // Também sem `private` — usado pelos métodos movidos pros arquivos de extensão (ver
+    // comentário acima, nas propriedades).
+    let client: EnjoeiClientProtocol
     private let accountID: EnjoeiAccountID
     private let itemsPersistence: MegaphoneItemsPersisting
     private var task: Task<Void, Never>?
@@ -240,46 +253,6 @@ final class MegaphoneRunner {
         )
     }
 
-    private func loadAllProducts(sellerID: Int) async throws -> [EnjoeiProduct] {
-        var products: [EnjoeiProduct] = []
-        var seenIDs: Set<Int> = []
-        var cursor: String?
-
-        while true {
-            try Task.checkCancellation()
-            let page = try await client.storeProductsPage(sellerID: sellerID, after: cursor)
-            let newProducts = page.products.filter { seenIDs.insert($0.id).inserted }
-            products.append(contentsOf: newProducts)
-            phase = .loadingProducts(loaded: products.count, total: max(page.total, products.count))
-
-            // Sem cursor novo, sem produto inédito, ou cursor repetido: acabou a loja.
-            guard let endCursor = page.endCursor, !newProducts.isEmpty, endCursor != cursor else {
-                return products
-            }
-            cursor = endCursor
-        }
-    }
-
-    private func loadExposures(productIDs: [Int]) async throws -> [Int: MegaphoneExposure] {
-        var exposuresByProductID: [Int: MegaphoneExposure] = [:]
-        var checked = 0
-
-        for batch in chunks(of: productIDs, size: exposureBatchSize) {
-            try Task.checkCancellation()
-            let exposures = try await client.megaphoneExposures(productIDs: batch)
-            for exposure in exposures { exposuresByProductID[exposure.productID] = exposure }
-            checked += batch.count
-            phase = .checkingExposure(checked: checked, total: productIDs.count)
-        }
-        return exposuresByProductID
-    }
-
-    private func chunks(of ids: [Int], size: Int) -> [[Int]] {
-        stride(from: 0, to: ids.count, by: size).map {
-            Array(ids[$0..<min($0 + size, ids.count)])
-        }
-    }
-
     /// Megafona a fila inteira uma vez. Devolve o token em uso ao final — ele pode ter sido
     /// renovado no caminho. Pula produtos já concluídos ou em andamento por fora — um desconto
     /// aplicado na mão (`applyDiscount`) enquanto a rodada corria não pode ser megafonado de novo
@@ -307,10 +280,12 @@ final class MegaphoneRunner {
                 totalSucceeded += 1
             } catch EnjoeiError.notAuthenticated {
                 items[index].status = .failed(EnjoeiError.notAuthenticated.localizedDescription)
+                failureDetails[items[index].id] = MegaphoneFailureDetail(action: .megaphone, error: EnjoeiError.notAuthenticated)
                 totalFailed += 1
                 throw EnjoeiError.notAuthenticated
             } catch {
                 items[index].status = .failed(error.localizedDescription)
+                failureDetails[items[index].id] = MegaphoneFailureDetail(action: .megaphone, error: error)
                 totalFailed += 1
             }
 
@@ -325,8 +300,9 @@ final class MegaphoneRunner {
     }
 
     /// Megafona um produto, renovando o token CSRF e tentando de novo quando o servidor recusa o
-    /// token — ele roda junto com a sessão. `newPrice` aplica o desconto sugerido junto.
-    private func megaphone(productID: Int, newPrice: Double?, token: String) async throws -> String {
+    /// token — ele roda junto com a sessão. `newPrice` aplica o desconto sugerido junto. Sem
+    /// `private`: reaproveitado por `performApplyDiscount`, em `MegaphoneRunner+ProductActions.swift`.
+    func megaphone(productID: Int, newPrice: Double?, token: String) async throws -> String {
         do {
             try await client.megaphone(productID: productID, csrfToken: token, newPrice: newPrice)
             return token
@@ -334,155 +310,6 @@ final class MegaphoneRunner {
             let refreshed = try await client.csrfToken()
             try await client.megaphone(productID: productID, csrfToken: refreshed, newPrice: newPrice)
             return refreshed
-        }
-    }
-
-    /// Aplica o desconto sugerido pelo megafone num produto específico e o megafona. Funciona
-    /// mesmo com a rodada automática rodando — o item marcado `.succeeded` na hora é pulado por
-    /// `megaphoneAll` quando o laço chegar nele.
-    func applyDiscount(for productID: Int) {
-        guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
-        guard deleteStatuses[productID] != .succeeded else { return }
-        guard inactivateStatuses[productID] != .succeeded else { return }
-        // Pendente ou falhou antes (retry): tudo bem. Já rodando ou já feito: um segundo toque não
-        // dispara outra chamada.
-        guard items[index].status != .megaphoning, items[index].status != .succeeded else { return }
-        let newPrice = items[index].exposure?.priceToIncreaseExposure
-        items[index].status = .megaphoning
-        Task { [weak self] in
-            await self?.performApplyDiscount(productID: productID, newPrice: newPrice)
-        }
-    }
-
-    private func performApplyDiscount(productID: Int, newPrice: Double?) async {
-        do {
-            let token = try await client.csrfToken()
-            _ = try await megaphone(productID: productID, newPrice: newPrice, token: token)
-            setStatus(.succeeded, for: productID)
-            totalSucceeded += 1
-        } catch {
-            setStatus(.failed(error.localizedDescription), for: productID)
-            totalFailed += 1
-        }
-    }
-
-    /// Procura de novo o índice em vez de guardar o de antes do `await`: uma rodada nova
-    /// (`start`) recria `items` do zero enquanto isso estava em andamento.
-    private func setStatus(_ status: MegaphoneStatus, for productID: Int) {
-        guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
-        items[index].status = status
-    }
-
-    /// Apaga um produto de vez. Ação destrutiva e provavelmente irreversível — a confirmação fica
-    /// por conta de quem chama (a tela). O item continua na lista, só marcado como excluído: tirar
-    /// ele de `items` na hora derrubaria a linha (e o que estiver mostrando o resultado) da tela.
-    func deleteProduct(productID: Int) {
-        guard deleteStatuses[productID] != .megaphoning, deleteStatuses[productID] != .succeeded else { return }
-        deleteStatuses[productID] = .megaphoning
-        Task { [weak self] in
-            await self?.performDelete(productID: productID)
-        }
-    }
-
-    /// Mesma exclusão de `deleteProduct(productID:)`, mas esperando terminar em vez de disparar e
-    /// seguir — usado pela fila de ações, que precisa saber quando pode passar pro próximo item.
-    func deleteProductAndWait(productID: Int) async {
-        guard deleteStatuses[productID] != .megaphoning, deleteStatuses[productID] != .succeeded else { return }
-        deleteStatuses[productID] = .megaphoning
-        await performDelete(productID: productID)
-    }
-
-    private func performDelete(productID: Int) async {
-        do {
-            let token = try await client.csrfToken()
-            try await deleteProduct(productID: productID, token: token)
-            deleteStatuses[productID] = .succeeded
-        } catch {
-            deleteStatuses[productID] = .failed(error.localizedDescription)
-        }
-    }
-
-    /// Apaga o produto, renovando o token CSRF e tentando de novo quando o servidor recusa o token
-    /// — mesmo laço do `megaphone`.
-    private func deleteProduct(productID: Int, token: String) async throws {
-        do {
-            try await client.deleteProduct(productID: productID, csrfToken: token)
-        } catch let error as EnjoeiError where error.isCSRFRejection {
-            let refreshed = try await client.csrfToken()
-            try await client.deleteProduct(productID: productID, csrfToken: refreshed)
-        }
-    }
-
-    /// Inativa um produto — sai da vitrine de publicados sem apagar de vez (ao contrário de
-    /// `deleteProduct`, dá pra reverter mais tarde direto no Enjoei, com `activateProduct`). A
-    /// confirmação fica por conta de quem chama. O item continua em `items`, só marcado como
-    /// inativado.
-    func inactivateProduct(productID: Int) {
-        guard inactivateStatuses[productID] != .megaphoning, inactivateStatuses[productID] != .succeeded else { return }
-        inactivateStatuses[productID] = .megaphoning
-        Task { [weak self] in
-            await self?.performInactivate(productID: productID)
-        }
-    }
-
-    /// Mesma inativação de `inactivateProduct(productID:)`, mas esperando terminar em vez de
-    /// disparar e seguir — usado pela fila de ações.
-    func inactivateProductAndWait(productID: Int) async {
-        guard inactivateStatuses[productID] != .megaphoning, inactivateStatuses[productID] != .succeeded else { return }
-        inactivateStatuses[productID] = .megaphoning
-        await performInactivate(productID: productID)
-    }
-
-    private func performInactivate(productID: Int) async {
-        do {
-            try await sendProductStateUpdate(productID: productID, state: .disable)
-            inactivateStatuses[productID] = .succeeded
-        } catch {
-            inactivateStatuses[productID] = .failed(error.localizedDescription)
-        }
-    }
-
-    /// Ativa de novo um produto inativado — usado a partir da aba "inativos", não da lista de
-    /// publicados (por isso não mexe em `items`/`inactivateStatuses`, que são sobre a loja
-    /// publicada). A confirmação fica por conta de quem chama.
-    func activateProduct(productID: Int) {
-        guard activateStatuses[productID] != .megaphoning, activateStatuses[productID] != .succeeded else { return }
-        activateStatuses[productID] = .megaphoning
-        Task { [weak self] in
-            await self?.performActivate(productID: productID)
-        }
-    }
-
-    /// Mesma ativação de `activateProduct(productID:)`, mas esperando terminar em vez de disparar
-    /// e seguir — usado pela fila de ações.
-    func activateProductAndWait(productID: Int) async {
-        guard activateStatuses[productID] != .megaphoning, activateStatuses[productID] != .succeeded else { return }
-        activateStatuses[productID] = .megaphoning
-        await performActivate(productID: productID)
-    }
-
-    private func performActivate(productID: Int) async {
-        do {
-            try await sendProductStateUpdate(productID: productID, state: .active)
-            activateStatuses[productID] = .succeeded
-        } catch {
-            activateStatuses[productID] = .failed(error.localizedDescription)
-        }
-    }
-
-    /// Lê o produto inteiro primeiro (mesma rota de "duplicar" que o repost usa, só pra leitura —
-    /// nunca cria nada aqui) e reenvia com o `product_state` pedido, porque a rota não aceita um
-    /// update parcial (ver `ProductStateUpdateRequest`). Renova o token CSRF e tenta de novo
-    /// quando o servidor recusa — mesmo laço do `megaphone`/`deleteProduct`.
-    private func sendProductStateUpdate(productID: Int, state: ProductStateUpdateRequest.ProductState) async throws {
-        let template = try await client.productTemplate(productID: productID)
-        let request = ProductStateUpdateRequest(template: template, state: state)
-        let token = try await client.csrfToken()
-        do {
-            try await client.updateProductState(request, productID: productID, csrfToken: token)
-        } catch let error as EnjoeiError where error.isCSRFRejection {
-            let refreshed = try await client.csrfToken()
-            try await client.updateProductState(request, productID: productID, csrfToken: refreshed)
         }
     }
 

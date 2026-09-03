@@ -127,7 +127,7 @@ struct MegaphoneRowView: View {
         }
         .sheet(isPresented: $isShowingErrorDetail) {
             if let message = item.status.failureMessage {
-                MegaphoneErrorDetailSheet(product: item.product, message: message)
+                MegaphoneErrorDetailSheet(product: item.product, message: message, detail: runner.failureDetails[item.id])
             }
         }
         .opacity(isDeleted || isInactivated ? 0.4 : 1)

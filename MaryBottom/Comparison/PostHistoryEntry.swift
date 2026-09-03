@@ -19,6 +19,34 @@ nonisolated struct PostHistoryEntry: Identifiable, Equatable, Sendable, Codable,
     let destinationAccountName: String
     let outcome: Outcome
     let completedAt: Date
+    /// Diagnóstico completo, quando `outcome` é `.failed` — `nil` pra `.succeeded`, e também `nil`
+    /// em qualquer entrada gravada antes dessa propriedade existir (decodifica como `nil` de
+    /// propósito, pra não quebrar leitura de histórico já persistido). Ver `MegaphoneFailureDetail`.
+    let failureDetail: MegaphoneFailureDetail?
+
+    init(
+        id: UUID,
+        product: EnjoeiProduct,
+        kind: PostQueueItem.Kind,
+        sourceAccountID: EnjoeiAccountID,
+        sourceAccountName: String,
+        destinationAccountID: EnjoeiAccountID,
+        destinationAccountName: String,
+        outcome: Outcome,
+        completedAt: Date,
+        failureDetail: MegaphoneFailureDetail? = nil
+    ) {
+        self.id = id
+        self.product = product
+        self.kind = kind
+        self.sourceAccountID = sourceAccountID
+        self.sourceAccountName = sourceAccountName
+        self.destinationAccountID = destinationAccountID
+        self.destinationAccountName = destinationAccountName
+        self.outcome = outcome
+        self.completedAt = completedAt
+        self.failureDetail = failureDetail
+    }
 }
 
 extension PostHistoryEntry.Outcome {

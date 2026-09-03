@@ -264,6 +264,31 @@ struct PostQueueTests {
         let entry = try #require(queue.history.first)
         #expect(entry.kind == .delete)
         #expect(entry.outcome == .failed("o enjoei caiu"))
+        #expect(entry.failureDetail?.action == .delete)
+        #expect(entry.failureDetail?.httpStatus == 500)
+        #expect(entry.failureDetail?.serverMessage == "o enjoei caiu")
+    }
+
+    @Test("postagem que falha também grava o diagnóstico completo, não só a mensagem curta")
+    func postagemQueFalhaGravaDiagnostico() async throws {
+        let sourceClient = StubEnjoeiClient(templateError: .unexpectedResponse)
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destination = makeAccount(name: "destino", client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let history = InMemoryPostHistoryPersistence()
+        let queue = PostQueue(
+            poster: poster,
+            accountsProvider: { [source, destination] },
+            interval: .zero,
+            historyPersistence: history
+        )
+
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        await waitUntil { !queue.isRunning }
+
+        let entry = try #require(queue.history.first)
+        #expect(entry.failureDetail?.action == .post)
+        #expect(entry.failureDetail?.technicalDescription == EnjoeiError.unexpectedResponse.diagnosticDescription)
     }
 
     @Test("histórico novo carrega o que já estava persistido")
@@ -385,6 +410,10 @@ struct PostQueueTests {
         #expect(queue.status(for: queue.items[0]) == .failed("conta não está mais logada"))
         #expect(queue.status(for: queue.items[1]) == .succeeded)
         #expect(await stableDestinationClient.createProductCalls.count == 1)
+        // Sem `Error` de verdade por trás (a fila nem chega a tentar a chamada de rede) — o
+        // diagnóstico sintético repete a mensagem, em vez de vir vazio.
+        #expect(queue.failureDetail(for: queue.items[0])?.action == .post)
+        #expect(queue.failureDetail(for: queue.items[0])?.technicalDescription == "conta não está mais logada")
     }
 
     @Test("produto já postado no poster compartilhado não dispara outra chamada pela fila")

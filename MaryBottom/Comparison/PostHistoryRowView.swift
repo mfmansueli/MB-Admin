@@ -26,7 +26,7 @@ struct PostHistoryRowView: View {
         .padding(.vertical, 2)
         .sheet(isPresented: $isShowingErrorDetail) {
             if case .failed(let message) = entry.outcome {
-                MegaphoneErrorDetailSheet(product: entry.product, message: message)
+                MegaphoneErrorDetailSheet(product: entry.product, message: message, detail: entry.failureDetail)
             }
         }
     }

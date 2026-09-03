@@ -78,6 +78,32 @@ struct AccountsStoreTests {
         #expect(store.accounts.count == 2)
     }
 
+    @Test("restaura contas em paralelo, publicando na ordem persistida mesmo quando a mais lenta é a primeira")
+    func restauraContasForaDeOrdemDeConclusao() async {
+        let idA = EnjoeiAccountID()
+        let idB = EnjoeiAccountID()
+        let idC = EnjoeiAccountID()
+        let persistence = InMemoryAccountsPersistence(stored: [
+            AccountRecord(id: idA, user: .stub, lastRoundSummary: nil),
+            AccountRecord(id: idB, user: otherUser, lastRoundSummary: nil),
+            AccountRecord(id: idC, user: .stub, lastRoundSummary: nil)
+        ])
+        // A primeira conta persistida é de propósito a mais lenta a responder — sem a reordenação
+        // por índice original em `restoreAccounts`, ela apareceria por último na lista publicada.
+        let store = makeStore(
+            clientsByID: [
+                idA: StubEnjoeiClient(user: .stub, currentUserDelay: .milliseconds(60)),
+                idB: StubEnjoeiClient(user: otherUser),
+                idC: StubEnjoeiClient(user: .stub)
+            ],
+            persistence: persistence
+        )
+
+        await store.restoreAccounts()
+
+        #expect(store.accounts.map(\.id) == [idA, idB, idC])
+    }
+
     @Test("erro que não é sessão vencida vira checkFailed, sem tirar a conta da lista")
     func erroTransitorioViraCheckFailed() async {
         let id = EnjoeiAccountID()

@@ -5,6 +5,9 @@ import SwiftUI
 struct PostQueueRowView: View {
     let item: PostQueueItem
     let status: MegaphoneStatus
+    /// Diagnóstico completo por trás de `status`, quando ela é `.failed` — `nil` em qualquer
+    /// outro status. Ver `PostQueue.failureDetail(for:)`.
+    let failureDetail: MegaphoneFailureDetail?
     /// Link do anúncio novo, quando a resposta da criação trouxer como identificar ele.
     let productURL: URL?
     let onRemove: () -> Void
@@ -44,7 +47,7 @@ struct PostQueueRowView: View {
         .padding(.vertical, 2)
         .sheet(isPresented: $isShowingErrorDetail) {
             if case .failed(let message) = status {
-                MegaphoneErrorDetailSheet(product: item.product, message: message)
+                MegaphoneErrorDetailSheet(product: item.product, message: message, detail: failureDetail)
             }
         }
     }
@@ -108,6 +111,7 @@ struct PostQueueRowView: View {
             destinationAccountName: "loja B"
         ),
         status: .pending,
+        failureDetail: nil,
         productURL: nil,
         onRemove: {}
     )
