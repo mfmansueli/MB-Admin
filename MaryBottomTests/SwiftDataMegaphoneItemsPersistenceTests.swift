@@ -32,22 +32,21 @@ struct SwiftDataMegaphoneItemsPersistenceTests {
 
     @Test("sem nada salvo ainda, devolve lista vazia")
     func semNadaSalvo() {
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
-        #expect(persistence.loadItems(accountID: EnjoeiAccountID()).isEmpty)
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        #expect(persistence.loadItems().isEmpty)
     }
 
     @Test("guarda e lê de volta produto e exposição, na mesma ordem")
     func salvaELeDeVolta() {
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
         let exposure = MegaphoneExposure(
             productID: 2, kind: .maximumAfterDiscount, priceToIncreaseExposure: 90, discountLabel: "- 40%"
         )
         let items = [makeItem(id: 1), makeItem(id: 2, exposure: exposure)]
 
-        persistence.saveItems(items, accountID: accountID)
+        persistence.saveItems(items)
 
-        #expect(persistence.loadItems(accountID: accountID) == items)
+        #expect(persistence.loadItems() == items)
     }
 
     /// `status` nunca é persistido de verdade — no momento em que `saveItems` roda (logo depois de
@@ -57,112 +56,98 @@ struct SwiftDataMegaphoneItemsPersistenceTests {
     /// salvo, mesmo que quem chamou `saveItems` tenha passado um status diferente.
     @Test("status não sobrevive ao salvar e reler — sempre volta pending")
     func statusNaoSobreviveAoSalvarERelerSempreVoltaPending() {
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
-        persistence.saveItems(
-            [makeItem(id: 1, status: .succeeded), makeItem(id: 2, status: .failed("erro"))],
-            accountID: accountID
-        )
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([makeItem(id: 1, status: .succeeded), makeItem(id: 2, status: .failed("erro"))])
 
-        let reloaded = persistence.loadItems(accountID: accountID)
+        let reloaded = persistence.loadItems()
 
         #expect(reloaded.map(\.status) == [.pending, .pending])
     }
 
-    @Test("salvar de novo substitui a lista anterior da conta, não acumula")
+    @Test("salvar de novo substitui a lista anterior, não acumula")
     func salvarDeNovoSubstitui() {
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
-        persistence.saveItems([makeItem(id: 1), makeItem(id: 2)], accountID: accountID)
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([makeItem(id: 1), makeItem(id: 2)])
 
-        persistence.saveItems([makeItem(id: 3)], accountID: accountID)
+        persistence.saveItems([makeItem(id: 3)])
 
-        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [3])
+        #expect(persistence.loadItems().map(\.id) == [3])
     }
 
-    @Test("cada conta tem seus próprios registros, sem vazar pra outra")
-    func registrosSeparadosPorConta() {
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountA = EnjoeiAccountID()
-        let accountB = EnjoeiAccountID()
-        persistence.saveItems([makeItem(id: 1)], accountID: accountA)
+    @Test("duas contas com containers separados não compartilham nada")
+    func duasContasComContainersSeparadosNaoCompartilhamNada() {
+        let persistenceA = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        let persistenceB = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistenceA.saveItems([makeItem(id: 1)])
 
-        #expect(persistence.loadItems(accountID: accountB).isEmpty)
+        #expect(persistenceB.loadItems().isEmpty)
     }
 
-    @Test("clearItems apaga só a lista da conta pedida")
-    func clearItemsApagaSoAConta() {
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountA = EnjoeiAccountID()
-        let accountB = EnjoeiAccountID()
-        persistence.saveItems([makeItem(id: 1)], accountID: accountA)
-        persistence.saveItems([makeItem(id: 2)], accountID: accountB)
+    @Test("clearItems apaga tudo")
+    func clearItemsApagaTudo() {
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([makeItem(id: 1)])
 
-        persistence.clearItems(accountID: accountA)
+        persistence.clearItems()
 
-        #expect(persistence.loadItems(accountID: accountA).isEmpty)
-        #expect(persistence.loadItems(accountID: accountB).map(\.id) == [2])
+        #expect(persistence.loadItems().isEmpty)
     }
 
     @Test("searchProductIDs encontra por título, sem diferenciar maiúsculas/minúsculas, respeitando o fetchLimit")
     func searchProductIDsEncontraPorTitulo() {
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
-        persistence.saveItems(
-            [
-                MegaphoneItem(product: EnjoeiProduct(id: 1, title: "Brinco Argola", path: "p1", photoPublicID: nil, currentPrice: 100, originalPrice: 100)),
-                MegaphoneItem(product: EnjoeiProduct(id: 2, title: "colar prata", path: "p2", photoPublicID: nil, currentPrice: 100, originalPrice: 100))
-            ],
-            accountID: accountID
-        )
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([
+            MegaphoneItem(product: EnjoeiProduct(id: 1, title: "Brinco Argola", path: "p1", photoPublicID: nil, currentPrice: 100, originalPrice: 100)),
+            MegaphoneItem(product: EnjoeiProduct(id: 2, title: "colar prata", path: "p2", photoPublicID: nil, currentPrice: 100, originalPrice: 100))
+        ])
 
-        #expect(persistence.searchProductIDs(matching: "argola", accountID: accountID, limit: 500) == [1])
-        #expect(persistence.searchProductIDs(matching: "PRATA", accountID: accountID, limit: 500) == [2])
-        #expect(persistence.searchProductIDs(matching: "inexistente", accountID: accountID, limit: 500).isEmpty)
-        #expect(persistence.searchProductIDs(matching: "", accountID: accountID, limit: 1).count == 1)
+        #expect(persistence.searchProductIDs(matching: "argola", limit: 500) == [1])
+        #expect(persistence.searchProductIDs(matching: "PRATA", limit: 500) == [2])
+        #expect(persistence.searchProductIDs(matching: "inexistente", limit: 500).isEmpty)
+        #expect(persistence.searchProductIDs(matching: "", limit: 1).count == 1)
     }
 
     @Test("descarta registros existentes quando a versão de esquema salva está desatualizada")
     func descartaRegistrosComVersaoDesatualizada() {
+        let accountID = EnjoeiAccountID()
         let container = makeContainer()
         let defaults = makeDefaults()
-        let accountID = EnjoeiAccountID()
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
-        persistence.saveItems([makeItem(id: 1)], accountID: accountID)
-        defaults.set(0, forKey: "megaphone.schemaVersion")
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: accountID, container: container, defaults: defaults)
+        persistence.saveItems([makeItem(id: 1)])
+        defaults.set(0, forKey: "megaphone.schemaVersion.\(accountID)")
 
-        let migratedPersistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
+        let migratedPersistence = SwiftDataMegaphoneItemsPersistence(accountID: accountID, container: container, defaults: defaults)
 
-        #expect(migratedPersistence.loadItems(accountID: accountID).isEmpty)
+        #expect(migratedPersistence.loadItems().isEmpty)
     }
 
     @Test("não descarta de novo quando a versão de esquema já está atualizada")
     func naoDescartaDeNovoQuandoVersaoJaAtualizada() {
+        let accountID = EnjoeiAccountID()
         let container = makeContainer()
         let defaults = makeDefaults()
-        let accountID = EnjoeiAccountID()
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
-        persistence.saveItems([makeItem(id: 1)], accountID: accountID)
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: accountID, container: container, defaults: defaults)
+        persistence.saveItems([makeItem(id: 1)])
 
-        let secondPersistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
+        let secondPersistence = SwiftDataMegaphoneItemsPersistence(accountID: accountID, container: container, defaults: defaults)
 
-        #expect(secondPersistence.loadItems(accountID: accountID).map(\.id) == [1])
+        #expect(secondPersistence.loadItems().map(\.id) == [1])
     }
 
-    @Test("migra a lista salva pela versão antiga (UserDefaults) uma única vez, só da conta lida")
+    @Test("migra a lista salva pela versão antiga (UserDefaults) uma única vez")
     func migraListaLegada() {
-        let defaults = makeDefaults()
         let accountID = EnjoeiAccountID()
+        let defaults = makeDefaults()
         let legacyItems = [makeItem(id: 1), makeItem(id: 2)]
         defaults.set(try! JSONEncoder().encode(legacyItems), forKey: "megaphone.items.\(accountID)")
         let container = makeContainer()
 
-        let persistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: accountID, container: container, defaults: defaults)
 
-        #expect(persistence.loadItems(accountID: accountID) == legacyItems)
+        #expect(persistence.loadItems() == legacyItems)
         #expect(defaults.object(forKey: "megaphone.items.\(accountID)") == nil)
 
-        let secondPersistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
-        #expect(secondPersistence.loadItems(accountID: accountID).count == 2)
+        let secondPersistence = SwiftDataMegaphoneItemsPersistence(accountID: accountID, container: container, defaults: defaults)
+        #expect(secondPersistence.loadItems().count == 2)
     }
 }

@@ -87,6 +87,26 @@ struct AccountProductMatcherTests {
         #expect(result.onlyInB.isEmpty)
     }
 
+    /// Cobre o índice invertido usado pra achar candidatos (ver `AccountProductMatcher.compare`):
+    /// produtos que não compartilham palavra nenhuma com nada do outro lado não podem aparecer
+    /// como candidato de jeito nenhum, mesmo num catálogo com vários produtos e várias palavras
+    /// repetidas entre eles.
+    @Test("catálogo com produtos sem nenhuma palavra em comum não casa nada entre grupos, só dentro")
+    func catalogoComGruposDisjuntosNaoCasaEntreGrupos() {
+        let joias = (1...5).map { EnjoeiFixtures.product(id: $0, title: "colar prata 925 modelo \($0)") }
+        let roupas = (6...10).map { EnjoeiFixtures.product(id: $0, title: "camiseta algodão tamanho \($0)") }
+        let joiasIguais = (11...15).map { EnjoeiFixtures.product(id: $0, title: "colar prata 925 modelo \($0 - 10)") }
+
+        let result = AccountProductMatcher.compare(productsA: joias + roupas, productsB: joiasIguais, threshold: 0.5)
+
+        // Cada joia de A casa com a joia correspondente de B (mesmo "modelo N"); nenhuma roupa casa
+        // com nada, já que B só tem joias.
+        #expect(result.matches.count == 5)
+        #expect(Set(result.matches.map(\.productA.id)) == Set(1...5))
+        #expect(Set(result.onlyInA.map(\.id)) == Set(6...10))
+        #expect(result.onlyInB.isEmpty)
+    }
+
     @Test("threshold customizado muda o resultado")
     func thresholdCustomizado() {
         let a = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925 zircônia branca clássico")

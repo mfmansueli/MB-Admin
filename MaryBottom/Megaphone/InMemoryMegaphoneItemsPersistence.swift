@@ -6,27 +6,26 @@ import Foundation
 /// `SwiftDataMegaphoneItemsPersistence` explicitamente.
 @MainActor
 final class InMemoryMegaphoneItemsPersistence: MegaphoneItemsPersisting {
-    private var itemsByAccountID: [EnjoeiAccountID: [MegaphoneItem]] = [:]
+    private var items: [MegaphoneItem] = []
 
     // Default-argument expressions em `MegaphoneRunner.init` são avaliados fora do MainActor —
     // sem isso, o compilador recusa construir o valor padrão inline.
     nonisolated init() {}
 
-    func loadItems(accountID: EnjoeiAccountID) -> [MegaphoneItem] {
-        itemsByAccountID[accountID] ?? []
+    func loadItems() -> [MegaphoneItem] {
+        items
     }
 
-    func saveItems(_ items: [MegaphoneItem], accountID: EnjoeiAccountID) {
-        itemsByAccountID[accountID] = items
+    func saveItems(_ items: [MegaphoneItem]) {
+        self.items = items
     }
 
-    func searchProductIDs(matching query: String, accountID: EnjoeiAccountID, limit: Int) -> [Int] {
-        let items = itemsByAccountID[accountID] ?? []
+    func searchProductIDs(matching query: String, limit: Int) -> [Int] {
         let matched = query.isEmpty ? items : items.filter { $0.product.title.localizedCaseInsensitiveContains(query) }
         return Array(matched.prefix(limit).map(\.id))
     }
 
-    func clearItems(accountID: EnjoeiAccountID) {
-        itemsByAccountID[accountID] = nil
+    func clearItems() {
+        items = []
     }
 }

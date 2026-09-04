@@ -3,6 +3,8 @@ import SwiftData
 
 /// Registro SwiftData de um produto sem preço esperto — cada campo de `SmartPriceProduct` vira sua
 /// própria coluna (nada de JSON codificado num blob), mesmo raciocínio de `InactiveProductRecord`.
+/// Sem `accountID` pelo mesmo motivo: mora num `ModelContainer` próprio da conta (ver
+/// `PerAccountModelContainer`), não numa tabela compartilhada entre contas.
 ///
 /// `title` é a exceção: **não** é um campo nativo de `SmartPriceProduct` (a API de preço esperto só
 /// devolve id e preço) — quem resolve o nome é sempre uma fonte externa (a aba "publicados"), então
@@ -14,12 +16,6 @@ import SwiftData
 /// de verdade. Ver `SwiftDataSmartPriceProductsPersistence.wipeStaleSchemaIfNeeded()`.
 @Model
 final class SmartPriceProductRecord {
-    // Mesmo raciocínio de `InactiveProductRecord` — índice composto pra várias contas de 1500+
-    // itens não brigarem pela mesma varredura de tabela.
-    @available(iOS 18, macOS 15, *)
-    #Index<SmartPriceProductRecord>([\.accountID, \.title])
-
-    var accountID: EnjoeiAccountID
     var sortIndex: Int
     var productID: Int = 0
     var title: String = ""
@@ -32,8 +28,7 @@ final class SmartPriceProductRecord {
     var statusColor: String?
     var photoPublicID: String?
 
-    init(accountID: EnjoeiAccountID, sortIndex: Int, title: String, product: SmartPriceProduct) {
-        self.accountID = accountID
+    init(sortIndex: Int, title: String, product: SmartPriceProduct) {
         self.sortIndex = sortIndex
         self.productID = product.id
         self.title = title

@@ -7,10 +7,9 @@ struct SmartPriceProductsLoaderTests {
     /// Sem espera entre páginas nem entre ativações, os testes não ficam presos ao ritmo real do app.
     private func makeLoader(
         client: StubEnjoeiClient,
-        accountID: EnjoeiAccountID = UUID(),
         itemsPersistence: SmartPriceProductsPersisting = InMemorySmartPriceProductsPersistence()
     ) -> SmartPriceProductsLoader {
-        let loader = SmartPriceProductsLoader(client: client, accountID: accountID, itemsPersistence: itemsPersistence)
+        let loader = SmartPriceProductsLoader(client: client, itemsPersistence: itemsPersistence)
         loader.delayBetweenPages = .zero
         loader.delayBetweenActivations = .zero
         return loader
@@ -85,18 +84,17 @@ struct SmartPriceProductsLoaderTests {
 
     @Test("guarda a lista carregada na persistência, e um loader novo recupera sem buscar de novo")
     func guardaEPersisteEntreAberturas() async {
-        let accountID = EnjoeiAccountID()
         let persistence = InMemorySmartPriceProductsPersistence()
         let client = StubEnjoeiClient(smartPricePagesByNumber: [
             1: SmartPriceProductsPage(products: [makeProduct(id: 1)], currentPage: 1, totalPages: 1)
         ])
-        let firstLoader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+        let firstLoader = makeLoader(client: client, itemsPersistence: persistence)
         firstLoader.load()
         await waitUntil { firstLoader.phase == .finished }
 
-        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1])
+        #expect(persistence.loadItems().map(\.id) == [1])
 
-        let secondLoader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+        let secondLoader = makeLoader(client: client, itemsPersistence: persistence)
 
         #expect(secondLoader.items.map(\.id) == [1])
         #expect(await client.requestedSmartPricePages.count == 1)
@@ -104,28 +102,26 @@ struct SmartPriceProductsLoaderTests {
 
     @Test("grava cada página assim que ela chega, não só no final")
     func gravaCadaPaginaAssimQueChega() async {
-        let accountID = EnjoeiAccountID()
         let persistence = InMemorySmartPriceProductsPersistence()
         let client = StubEnjoeiClient(smartPricePagesByNumber: [
             1: SmartPriceProductsPage(products: [makeProduct(id: 1)], currentPage: 1, totalPages: 2),
             2: SmartPriceProductsPage(products: [makeProduct(id: 2)], currentPage: 2, totalPages: 2)
         ])
-        let loader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+        let loader = makeLoader(client: client, itemsPersistence: persistence)
 
         loader.load()
-        await waitUntil { persistence.loadItems(accountID: accountID).map(\.id) == [1] }
+        await waitUntil { persistence.loadItems().map(\.id) == [1] }
         await waitUntil { loader.phase == .finished }
 
-        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1, 2])
+        #expect(persistence.loadItems().map(\.id) == [1, 2])
     }
 
     @Test("falha logo na primeira página não apaga o cache persistido de um carregamento anterior")
     func falhaNaPrimeiraPaginaNaoApagaCacheAntigo() async {
-        let accountID = EnjoeiAccountID()
         let persistence = InMemorySmartPriceProductsPersistence()
-        persistence.saveItems([makeProduct(id: 1)], accountID: accountID)
+        persistence.saveItems([makeProduct(id: 1)])
         let client = StubEnjoeiClient(smartPriceProductsError: .http(status: 500, message: "o enjoei caiu"))
-        let loader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+        let loader = makeLoader(client: client, itemsPersistence: persistence)
 
         loader.load()
         await waitUntil {
@@ -133,17 +129,16 @@ struct SmartPriceProductsLoaderTests {
             return false
         }
 
-        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1])
+        #expect(persistence.loadItems().map(\.id) == [1])
     }
 
     @Test("titleResolver grava o título persistido, e search encontra por ele")
     func titleResolverGravaTituloEBuscaEncontra() async {
-        let accountID = EnjoeiAccountID()
         let persistence = InMemorySmartPriceProductsPersistence()
         let client = StubEnjoeiClient(smartPricePagesByNumber: [
             1: SmartPriceProductsPage(products: [makeProduct(id: 1), makeProduct(id: 2)], currentPage: 1, totalPages: 1)
         ])
-        let loader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+        let loader = makeLoader(client: client, itemsPersistence: persistence)
         loader.titleResolver = { $0 == 1 ? "brinco argola" : "colar prata" }
 
         loader.load()
@@ -154,12 +149,11 @@ struct SmartPriceProductsLoaderTests {
 
     @Test("refreshPersistedTitles conserta produtos que foram gravados antes do resolvedor responder")
     func refreshPersistedTitlesConsertaRegistros() async {
-        let accountID = EnjoeiAccountID()
         let persistence = InMemorySmartPriceProductsPersistence()
         let client = StubEnjoeiClient(smartPricePagesByNumber: [
             1: SmartPriceProductsPage(products: [makeProduct(id: 1)], currentPage: 1, totalPages: 1)
         ])
-        let loader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+        let loader = makeLoader(client: client, itemsPersistence: persistence)
         // Sem resolvedor ainda — mesmo cenário de abrir a aba "preço esperto" antes de "publicados"
         // terminar de carregar.
         loader.load()

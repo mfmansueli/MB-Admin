@@ -20,11 +20,31 @@ nonisolated enum AccountProductMatcher {
         let tokensA = productsA.map { ($0, ProductSimilarity.tokenize($0.title)) }
         let tokensB = productsB.map { ($0, ProductSimilarity.tokenize($0.title)) }
 
+        // Índice invertido — cada palavra de B aponta pros índices dos produtos que a contêm.
+        // Sem isso, o laço abaixo calculava interseção/união pra TODO par (A×B) só pra descartar a
+        // esmagadora maioria por não compartilhar palavra nenhuma (`intersection > 0`) — numa loja
+        // variada, isso é praticamente todos os pares. Com o índice, só os pares que já sabemos
+        // compartilhar pelo menos uma palavra chegam a calcular interseção/união de verdade; o
+        // resultado final é idêntico (mesmos pares passavam pelo `guard intersection > 0` de
+        // qualquer jeito), só sem o trabalho descartado.
+        var indexByWord: [String: [Int]] = [:]
+        for (indexB, (_, wordsB)) in tokensB.enumerated() {
+            for word in wordsB {
+                indexByWord[word, default: []].append(indexB)
+            }
+        }
+
         var candidates: [(indexA: Int, indexB: Int, score: Double)] = []
         for (indexA, (_, wordsA)) in tokensA.enumerated() {
             guard !wordsA.isEmpty else { continue }
-            for (indexB, (_, wordsB)) in tokensB.enumerated() {
-                guard !wordsB.isEmpty else { continue }
+            var candidateIndicesB: Set<Int> = []
+            for word in wordsA {
+                if let matches = indexByWord[word] {
+                    candidateIndicesB.formUnion(matches)
+                }
+            }
+            for indexB in candidateIndicesB {
+                let wordsB = tokensB[indexB].1
                 let intersection = wordsA.intersection(wordsB).count
                 guard intersection > 0 else { continue }
                 let union = wordsA.union(wordsB).count

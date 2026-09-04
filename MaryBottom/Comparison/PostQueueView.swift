@@ -13,27 +13,30 @@ struct PostQueueView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if postQueue.items.isEmpty {
-                    ContentUnavailableView(
-                        "nenhuma ação na fila",
-                        systemImage: "list.bullet.rectangle",
-                        description: Text("reposte, apague ou poste produtos em outra conta — o andamento de cada ação aparece aqui.")
-                    )
-                } else {
-                    List {
-                        if postQueue.isPaused {
-                            Section {
-                                Label("fila pausada — toque em continuar quando quiser.", systemImage: "pause.circle")
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                            }
-                        } else if postQueue.isRunning {
-                            Section {
-                                cooldownStatus
-                            }
-                        }
-                        Section {
+            VStack(spacing: 0) {
+                // `cooldownStatus` fica fora do `List` de propósito — o `TimelineView` de dentro
+                // dele tica a cada segundo, e o `List` por trás é um `UICollectionView` de verdade;
+                // ticar dentro dele (mesmo só numa `Section`) parecia disparar, junto com o mesmo
+                // `NavigationStack` que carrega `.toolbar`, o aviso "Unable to simultaneously
+                // satisfy constraints" nos botões da toolbar a cada tick, com travamento percebido
+                // durante a fila rodando de verdade. Como view irmã, fora do `List`, o tick de cada
+                // segundo só invalida essa view pequena, sem tocar a maquinaria do `List`.
+                if postQueue.isPaused {
+                    pausedBanner
+                } else if postQueue.isRunning {
+                    cooldownStatus
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                }
+                Group {
+                    if postQueue.items.isEmpty {
+                        ContentUnavailableView(
+                            "nenhuma ação na fila",
+                            systemImage: "list.bullet.rectangle",
+                            description: Text("reposte, apague ou poste produtos em outra conta — o andamento de cada ação aparece aqui.")
+                        )
+                    } else {
+                        List {
                             ForEach(postQueue.items) { item in
                                 PostQueueRowView(
                                     item: item,
@@ -44,8 +47,8 @@ struct PostQueueView: View {
                                 )
                             }
                         }
+                        .listStyle(.plain)
                     }
-                    .listStyle(.plain)
                 }
             }
             .navigationTitle("fila de ações")
@@ -63,7 +66,15 @@ struct PostQueueView: View {
                         Button(postQueue.isPaused ? "continuar" : "pausar fila") {
                             postQueue.isPaused ? postQueue.resume() : postQueue.pause()
                         }
-                        .fixedSize()
+                        // `.fixedSize()` (sem argumentos) força tamanho ideal nas duas direções —
+                        // como o texto deste botão muda sozinho enquanto a fila roda em segundo
+                        // plano ("pausar fila" ↔ "continuar"), a largura ideal muda a cada troca, o
+                        // que parece brigar com o dimensionamento vertical/de colapso que o
+                        // `_UIButtonBarButton` por trás do item de toolbar já faz sozinho (visto
+                        // como "Unable to simultaneously satisfy constraints" no console, correlato
+                        // com travamentos percebidos). Fixar só a horizontal evita reintroduzir o
+                        // truncamento de texto original sem competir com a dimensão vertical.
+                        .fixedSize(horizontal: true, vertical: false)
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("limpar fila", role: .destructive) {
@@ -108,6 +119,14 @@ struct PostQueueView: View {
                 PostHistoryView(postQueue: postQueue)
             }
         }
+    }
+
+    private var pausedBanner: some View {
+        Label("fila pausada — toque em continuar quando quiser.", systemImage: "pause.circle")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 8)
     }
 
     /// Contagem regressiva até a próxima ação da fila poder começar — as quatro (postar, apagar,

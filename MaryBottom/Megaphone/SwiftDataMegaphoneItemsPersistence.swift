@@ -1,39 +1,40 @@
 import Foundation
 import SwiftData
 
-/// Guarda a lista de produtos carregada por um megafone com SwiftData — mesmo raciocínio de
-/// `SwiftDataInactiveProductsPersistence`: cada produto vira seu próprio registro em disco, campo
-/// por campo, sem JSON envolvido depois que o dado sai da rede (ver `MegaphoneItemRecord`).
+/// Guarda a lista de produtos carregada por um megafone de uma conta com SwiftData — mesmo
+/// raciocínio de `SwiftDataInactiveProductsPersistence`: cada produto vira seu próprio registro,
+/// campo por campo, num `ModelContainer` próprio dessa conta (ver `PerAccountModelContainer`).
 @MainActor
 final class SwiftDataMegaphoneItemsPersistence: MegaphoneItemsPersisting {
-    /// Mesmo raciocínio de `SwiftDataInactiveProductsPersistence.schemaVersion` — bump quando
-    /// `MegaphoneItemRecord` muda de forma incompatível com registros já salvos.
-    private static let schemaVersion = 2
-    private static let schemaVersionDefaultsKey = "megaphone.schemaVersion"
+    /// Mesmo raciocínio de `SwiftDataInactiveProductsPersistence.schemaVersion`.
+    private static let schemaVersion = 3
+    private static let schemaVersionDefaultsKeyPrefix = "megaphone.schemaVersion."
 
     private let context: ModelContext
     private let defaults: UserDefaults
+    private let accountID: EnjoeiAccountID
 
-    init(container: ModelContainer = SharedModelContainer.shared, defaults: UserDefaults = .standard) {
-        context = ModelContext(container)
+    /// `container`: `nil` em produção usa o container próprio dessa conta (ver
+    /// `PerAccountModelContainer`); testes passam um container em memória explícito, isolado do
+    /// disco de verdade.
+    init(accountID: EnjoeiAccountID, container: ModelContainer? = nil, defaults: UserDefaults = .standard) {
+        self.accountID = accountID
+        context = ModelContext(container ?? PerAccountModelContainer.shared(for: accountID))
         self.defaults = defaults
         wipeStaleSchemaIfNeeded()
     }
 
-    func loadItems(accountID: EnjoeiAccountID) -> [MegaphoneItem] {
-        migrateLegacyItemsIfNeeded(accountID: accountID)
-        let descriptor = FetchDescriptor<MegaphoneItemRecord>(
-            predicate: #Predicate { $0.accountID == accountID },
-            sortBy: [SortDescriptor(\.sortIndex)]
-        )
+    func loadItems() -> [MegaphoneItem] {
+        migrateLegacyItemsIfNeeded()
+        let descriptor = FetchDescriptor<MegaphoneItemRecord>(sortBy: [SortDescriptor(\.sortIndex)])
         guard let records = try? context.fetch(descriptor) else { return [] }
         return records.map(\.asMegaphoneItem)
     }
 
-    func saveItems(_ items: [MegaphoneItem], accountID: EnjoeiAccountID) {
-        deleteRecords(accountID: accountID)
+    func saveItems(_ items: [MegaphoneItem]) {
+        deleteRecords()
         for (index, item) in items.enumerated() {
-            context.insert(MegaphoneItemRecord(accountID: accountID, sortIndex: index, item: item))
+            context.insert(MegaphoneItemRecord(sortIndex: index, item: item))
         }
         try? context.save()
     }
@@ -42,16 +43,13 @@ final class SwiftDataMegaphoneItemsPersistence: MegaphoneItemsPersisting {
     /// o resultado. Devolve só os ids — o `status`/exposição salvos aqui nunca refletem uma
     /// megafonagem em andamento, então não tem por que reconstruir o `MegaphoneItem` inteiro aqui
     /// só pra quem chama jogar fora e recruzar com a lista ao vivo de qualquer jeito.
-    func searchProductIDs(matching query: String, accountID: EnjoeiAccountID, limit: Int) -> [Int] {
+    func searchProductIDs(matching query: String, limit: Int) -> [Int] {
         var descriptor: FetchDescriptor<MegaphoneItemRecord>
         if query.isEmpty {
-            descriptor = FetchDescriptor<MegaphoneItemRecord>(
-                predicate: #Predicate { $0.accountID == accountID },
-                sortBy: [SortDescriptor(\.sortIndex)]
-            )
+            descriptor = FetchDescriptor<MegaphoneItemRecord>(sortBy: [SortDescriptor(\.sortIndex)])
         } else {
             descriptor = FetchDescriptor<MegaphoneItemRecord>(
-                predicate: #Predicate { $0.accountID == accountID && $0.title.localizedStandardContains(query) },
+                predicate: #Predicate { $0.title.localizedStandardContains(query) },
                 sortBy: [SortDescriptor(\.sortIndex)]
             )
         }
@@ -60,30 +58,35 @@ final class SwiftDataMegaphoneItemsPersistence: MegaphoneItemsPersisting {
         return records.map(\.productID)
     }
 
-    func clearItems(accountID: EnjoeiAccountID) {
-        deleteRecords(accountID: accountID)
+    func clearItems() {
+        deleteRecords()
         try? context.save()
     }
 
-    private func deleteRecords(accountID: EnjoeiAccountID) {
-        try? context.delete(model: MegaphoneItemRecord.self, where: #Predicate { $0.accountID == accountID })
+    private func deleteRecords() {
+        try? context.delete(model: MegaphoneItemRecord.self)
     }
 
     /// Uma vez por conta: quem tinha lista salva pelo `UserDefaultsMegaphoneItemsPersistence`
     /// antigo não perde o cache na atualização.
-    private func migrateLegacyItemsIfNeeded(accountID: EnjoeiAccountID) {
+    private func migrateLegacyItemsIfNeeded() {
         let key = "megaphone.items.\(accountID)"
         guard let data = defaults.data(forKey: key) else { return }
         defer { defaults.removeObject(forKey: key) }
         guard let legacyItems = try? JSONDecoder().decode([MegaphoneItem].self, from: data) else { return }
-        saveItems(legacyItems, accountID: accountID)
+        saveItems(legacyItems)
     }
 
     /// Mesmo raciocínio de `SwiftDataInactiveProductsPersistence.wipeStaleSchemaIfNeeded()`.
     private func wipeStaleSchemaIfNeeded() {
-        guard defaults.integer(forKey: Self.schemaVersionDefaultsKey) < Self.schemaVersion else { return }
-        try? context.delete(model: MegaphoneItemRecord.self)
+        let key = schemaVersionDefaultsKey
+        guard defaults.integer(forKey: key) < Self.schemaVersion else { return }
+        deleteRecords()
         try? context.save()
-        defaults.set(Self.schemaVersion, forKey: Self.schemaVersionDefaultsKey)
+        defaults.set(Self.schemaVersion, forKey: key)
+    }
+
+    private var schemaVersionDefaultsKey: String {
+        "\(Self.schemaVersionDefaultsKeyPrefix)\(accountID)"
     }
 }

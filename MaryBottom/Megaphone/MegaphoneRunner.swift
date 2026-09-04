@@ -57,23 +57,20 @@ final class MegaphoneRunner {
     // Também sem `private` — usado pelos métodos movidos pros arquivos de extensão (ver
     // comentário acima, nas propriedades).
     let client: EnjoeiClientProtocol
-    private let accountID: EnjoeiAccountID
     private let itemsPersistence: MegaphoneItemsPersisting
     private var task: Task<Void, Never>?
     private var pauseGate: CheckedContinuation<Void, Never>?
 
     /// - Parameter itemsPersistence: em memória por padrão, pra um runner criado sem pensar em
-    ///   disco (testes, previews) nunca escrever em `UserDefaults` por acidente — a produção passa
-    ///   `UserDefaultsMegaphoneItemsPersistence` explicitamente.
+    ///   disco (testes, previews) nunca escrever em disco por acidente — a produção passa
+    ///   `SwiftDataMegaphoneItemsPersistence` explicitamente.
     init(
         client: EnjoeiClientProtocol,
-        accountID: EnjoeiAccountID = UUID(),
         itemsPersistence: MegaphoneItemsPersisting = InMemoryMegaphoneItemsPersistence()
     ) {
         self.client = client
-        self.accountID = accountID
         self.itemsPersistence = itemsPersistence
-        items = itemsPersistence.loadItems(accountID: accountID)
+        items = itemsPersistence.loadItems()
     }
 
     var isRunning: Bool { task != nil }
@@ -110,7 +107,7 @@ final class MegaphoneRunner {
     /// corretos — o que fica persistido nunca reflete uma megafonagem em andamento) — ver
     /// `AccountPublishedTabView.recomputeFilteredItems()`.
     func searchProductIDs(matching query: String, limit: Int = 500) -> [Int] {
-        itemsPersistence.searchProductIDs(matching: query, accountID: accountID, limit: limit)
+        itemsPersistence.searchProductIDs(matching: query, limit: limit)
     }
 
     /// Descarta a lista carregada e busca a loja de novo do zero — pro botão de recarregar, quando
@@ -122,7 +119,7 @@ final class MegaphoneRunner {
         items = []
         // Descartada aqui mesmo, sem esperar a busca nova: se o app fechar no meio do reload, a
         // próxima abertura não deve voltar a mostrar a lista antiga como se nada tivesse pedido.
-        itemsPersistence.clearItems(accountID: accountID)
+        itemsPersistence.clearItems()
         load(sellerID: sellerID)
     }
 
@@ -130,7 +127,7 @@ final class MegaphoneRunner {
     /// não precisar buscar a loja de novo na próxima abertura do app.
     private func setLoadedItems(_ items: [MegaphoneItem]) {
         self.items = items
-        itemsPersistence.saveItems(items, accountID: accountID)
+        itemsPersistence.saveItems(items)
     }
 
     /// Só carrega os produtos da loja e confere a exposição — não começa a megafonar. Serve pra

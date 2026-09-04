@@ -38,7 +38,6 @@ final class SmartPriceProductsLoader {
 
     // Também sem `private` — usado pelos métodos de ativação movidos pro arquivo de extensão.
     let client: EnjoeiClientProtocol
-    private let accountID: EnjoeiAccountID
     private let itemsPersistence: SmartPriceProductsPersisting
 
     /// Resolve o título de um produto pra indexação de busca no SwiftData — a API de preço esperto
@@ -51,13 +50,11 @@ final class SmartPriceProductsLoader {
 
     init(
         client: EnjoeiClientProtocol,
-        accountID: EnjoeiAccountID = UUID(),
         itemsPersistence: SmartPriceProductsPersisting = InMemorySmartPriceProductsPersistence()
     ) {
         self.client = client
-        self.accountID = accountID
         self.itemsPersistence = itemsPersistence
-        items = itemsPersistence.loadItems(accountID: accountID)
+        items = itemsPersistence.loadItems()
     }
 
     func load() {
@@ -73,14 +70,14 @@ final class SmartPriceProductsLoader {
     /// mudou) — chamar quando `titleResolver` passar a responder mais coisas (ex.: a aba
     /// "publicados" termina de carregar depois da de preço esperto).
     func refreshPersistedTitles() {
-        itemsPersistence.backfillTitles(resolver: titleResolver, accountID: accountID)
+        itemsPersistence.backfillTitles(resolver: titleResolver)
     }
 
     /// Busca por título direto na persistência (SwiftData em produção — ver
     /// `SwiftDataSmartPriceProductsPersistence.search(matching:)`), em vez de filtrar `items` em
     /// memória. Fachada pra `SmartPriceProductsListView` não precisar conhecer `itemsPersistence`.
     func search(matching query: String, limit: Int = 500) -> [SmartPriceProduct] {
-        itemsPersistence.search(matching: query, accountID: accountID, limit: limit)
+        itemsPersistence.search(matching: query, limit: limit)
     }
 
     private func run() async {
@@ -96,15 +93,10 @@ final class SmartPriceProductsLoader {
                 phase = .loadingPage(page, of: totalPages)
                 let result = try await client.smartPriceProductsPage(page: page, tab: false)
                 if !hasClearedPersistedCache {
-                    itemsPersistence.clearItems(accountID: accountID)
+                    itemsPersistence.clearItems()
                     hasClearedPersistedCache = true
                 }
-                itemsPersistence.appendPage(
-                    result.products,
-                    startingAt: collected.count,
-                    accountID: accountID,
-                    titleResolver: titleResolver
-                )
+                itemsPersistence.appendPage(result.products, startingAt: collected.count, titleResolver: titleResolver)
                 collected += result.products
                 totalPages = result.totalPages
                 items = collected

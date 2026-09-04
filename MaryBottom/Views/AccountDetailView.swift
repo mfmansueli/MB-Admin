@@ -100,13 +100,18 @@ struct AccountDetailView: View {
                     account.inactiveProductsLoader.load()
                     account.smartPriceProductsLoader.load()
                 } label: {
-                    // Círculo com tamanho fixo (em vez do bezel padrão de toolbar, que no Mac
+                    // Círculo com tamanho mínimo (em vez do bezel padrão de toolbar, que no Mac
                     // idiom otimizado saía pequeno e num "squircle" em vez de redondo) — largura e
-                    // altura iguais garantem o círculo perfeito independente da fonte do sistema.
+                    // altura mínimas iguais garantem o círculo perfeito independente da fonte do
+                    // sistema, sem impor um frame fixo que brigue com o dimensionamento próprio do
+                    // `_UIButtonBarButton` por trás do item de toolbar no Mac Catalyst (`.frame`
+                    // fixo aqui gerava "Unable to simultaneously satisfy constraints" toda vez que
+                    // este botão re-renderizava — coisa frequente durante o megafone, já que o
+                    // corpo da view lê `runner.totalSucceeded`/`totalFailed`/`items.count`).
                     Label("recarregar produtos", systemImage: "arrow.clockwise")
                         .labelStyle(.iconOnly)
                         .font(.body.weight(.semibold))
-                        .frame(width: 34, height: 34)
+                        .frame(minWidth: 34, minHeight: 34)
                         .background(.quaternary, in: .circle)
                 }
                 .buttonStyle(.plain)

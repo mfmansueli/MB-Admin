@@ -1,31 +1,32 @@
 import Foundation
 import SwiftData
 
-/// Guarda a lista de produtos sem preço esperto com SwiftData — mesmo raciocínio de
-/// `SwiftDataInactiveProductsPersistence`: cada produto vira seu próprio registro em disco, campo
-/// por campo, sem JSON envolvido depois que o dado sai da rede (ver `SmartPriceProductRecord`).
+/// Guarda a lista de produtos sem preço esperto de uma conta com SwiftData — mesmo raciocínio de
+/// `SwiftDataInactiveProductsPersistence`: cada produto vira seu próprio registro, campo por campo,
+/// num `ModelContainer` próprio dessa conta (ver `PerAccountModelContainer`).
 @MainActor
 final class SwiftDataSmartPriceProductsPersistence: SmartPriceProductsPersisting {
-    /// Mesmo raciocínio de `SwiftDataInactiveProductsPersistence.schemaVersion` — bump quando
-    /// `SmartPriceProductRecord` muda de forma incompatível com registros já salvos.
-    private static let schemaVersion = 2
-    private static let schemaVersionDefaultsKey = "smartPrice.schemaVersion"
+    /// Mesmo raciocínio de `SwiftDataInactiveProductsPersistence.schemaVersion`.
+    private static let schemaVersion = 3
+    private static let schemaVersionDefaultsKeyPrefix = "smartPrice.schemaVersion."
 
     private let context: ModelContext
     private let defaults: UserDefaults
+    private let accountID: EnjoeiAccountID
 
-    init(container: ModelContainer = SharedModelContainer.shared, defaults: UserDefaults = .standard) {
-        context = ModelContext(container)
+    /// `container`: `nil` em produção usa o container próprio dessa conta (ver
+    /// `PerAccountModelContainer`); testes passam um container em memória explícito, isolado do
+    /// disco de verdade.
+    init(accountID: EnjoeiAccountID, container: ModelContainer? = nil, defaults: UserDefaults = .standard) {
+        self.accountID = accountID
+        context = ModelContext(container ?? PerAccountModelContainer.shared(for: accountID))
         self.defaults = defaults
         wipeStaleSchemaIfNeeded()
     }
 
-    func loadItems(accountID: EnjoeiAccountID) -> [SmartPriceProduct] {
-        migrateLegacyItemsIfNeeded(accountID: accountID)
-        let descriptor = FetchDescriptor<SmartPriceProductRecord>(
-            predicate: #Predicate { $0.accountID == accountID },
-            sortBy: [SortDescriptor(\.sortIndex)]
-        )
+    func loadItems() -> [SmartPriceProduct] {
+        migrateLegacyItemsIfNeeded()
+        let descriptor = FetchDescriptor<SmartPriceProductRecord>(sortBy: [SortDescriptor(\.sortIndex)])
         guard let records = try? context.fetch(descriptor) else { return [] }
         return records.map(\.asSmartPriceProduct)
     }
@@ -34,22 +35,17 @@ final class SwiftDataSmartPriceProductsPersistence: SmartPriceProductsPersisting
     /// `SmartPriceProductsLoader.run()`), pra a busca já enxergar cada página assim que ela chega.
     /// Sem título resolvido aqui (a migração não tem acesso à aba "publicados") — `backfillTitles`
     /// conserta assim que o loader tiver um resolvedor de verdade.
-    func saveItems(_ items: [SmartPriceProduct], accountID: EnjoeiAccountID) {
-        deleteRecords(accountID: accountID)
-        insert(items, startingAt: 0, accountID: accountID, titleResolver: { _ in nil })
+    func saveItems(_ items: [SmartPriceProduct]) {
+        deleteRecords()
+        insert(items, startingAt: 0, titleResolver: { _ in nil })
     }
 
-    func appendPage(
-        _ items: [SmartPriceProduct],
-        startingAt offset: Int,
-        accountID: EnjoeiAccountID,
-        titleResolver: (Int) -> String?
-    ) {
-        insert(items, startingAt: offset, accountID: accountID, titleResolver: titleResolver)
+    func appendPage(_ items: [SmartPriceProduct], startingAt offset: Int, titleResolver: (Int) -> String?) {
+        insert(items, startingAt: offset, titleResolver: titleResolver)
     }
 
-    func backfillTitles(resolver: (Int) -> String?, accountID: EnjoeiAccountID) {
-        let descriptor = FetchDescriptor<SmartPriceProductRecord>(predicate: #Predicate { $0.accountID == accountID })
+    func backfillTitles(resolver: (Int) -> String?) {
+        let descriptor = FetchDescriptor<SmartPriceProductRecord>()
         guard let records = try? context.fetch(descriptor) else { return }
         var changed = false
         for record in records {
@@ -62,16 +58,13 @@ final class SwiftDataSmartPriceProductsPersistence: SmartPriceProductsPersisting
 
     /// Busca por `title` direto no SwiftData: `#Predicate` filtra pela coluna e `fetchLimit` corta
     /// o resultado — sem `JSONDecoder` nenhum, os campos já são colunas nativas do registro.
-    func search(matching query: String, accountID: EnjoeiAccountID, limit: Int) -> [SmartPriceProduct] {
+    func search(matching query: String, limit: Int) -> [SmartPriceProduct] {
         var descriptor: FetchDescriptor<SmartPriceProductRecord>
         if query.isEmpty {
-            descriptor = FetchDescriptor<SmartPriceProductRecord>(
-                predicate: #Predicate { $0.accountID == accountID },
-                sortBy: [SortDescriptor(\.sortIndex)]
-            )
+            descriptor = FetchDescriptor<SmartPriceProductRecord>(sortBy: [SortDescriptor(\.sortIndex)])
         } else {
             descriptor = FetchDescriptor<SmartPriceProductRecord>(
-                predicate: #Predicate { $0.accountID == accountID && $0.title.localizedStandardContains(query) },
+                predicate: #Predicate { $0.title.localizedStandardContains(query) },
                 sortBy: [SortDescriptor(\.sortIndex)]
             )
         }
@@ -80,20 +73,14 @@ final class SwiftDataSmartPriceProductsPersistence: SmartPriceProductsPersisting
         return records.map(\.asSmartPriceProduct)
     }
 
-    func clearItems(accountID: EnjoeiAccountID) {
-        deleteRecords(accountID: accountID)
+    func clearItems() {
+        deleteRecords()
         try? context.save()
     }
 
-    private func insert(
-        _ items: [SmartPriceProduct],
-        startingAt offset: Int,
-        accountID: EnjoeiAccountID,
-        titleResolver: (Int) -> String?
-    ) {
+    private func insert(_ items: [SmartPriceProduct], startingAt offset: Int, titleResolver: (Int) -> String?) {
         for (index, item) in items.enumerated() {
             let record = SmartPriceProductRecord(
-                accountID: accountID,
                 sortIndex: offset + index,
                 title: titleResolver(item.id) ?? "",
                 product: item
@@ -103,25 +90,30 @@ final class SwiftDataSmartPriceProductsPersistence: SmartPriceProductsPersisting
         try? context.save()
     }
 
-    private func deleteRecords(accountID: EnjoeiAccountID) {
-        try? context.delete(model: SmartPriceProductRecord.self, where: #Predicate { $0.accountID == accountID })
+    private func deleteRecords() {
+        try? context.delete(model: SmartPriceProductRecord.self)
     }
 
     /// Uma vez por conta: quem tinha lista salva pelo `UserDefaultsSmartPriceProductsPersistence`
     /// antigo não perde o cache na atualização.
-    private func migrateLegacyItemsIfNeeded(accountID: EnjoeiAccountID) {
+    private func migrateLegacyItemsIfNeeded() {
         let key = "smartPrice.items.\(accountID)"
         guard let data = defaults.data(forKey: key) else { return }
         defer { defaults.removeObject(forKey: key) }
         guard let legacyItems = try? JSONDecoder().decode([SmartPriceProduct].self, from: data) else { return }
-        saveItems(legacyItems, accountID: accountID)
+        saveItems(legacyItems)
     }
 
     /// Mesmo raciocínio de `SwiftDataInactiveProductsPersistence.wipeStaleSchemaIfNeeded()`.
     private func wipeStaleSchemaIfNeeded() {
-        guard defaults.integer(forKey: Self.schemaVersionDefaultsKey) < Self.schemaVersion else { return }
-        try? context.delete(model: SmartPriceProductRecord.self)
+        let key = schemaVersionDefaultsKey
+        guard defaults.integer(forKey: key) < Self.schemaVersion else { return }
+        deleteRecords()
         try? context.save()
-        defaults.set(Self.schemaVersion, forKey: Self.schemaVersionDefaultsKey)
+        defaults.set(Self.schemaVersion, forKey: key)
+    }
+
+    private var schemaVersionDefaultsKey: String {
+        "\(Self.schemaVersionDefaultsKeyPrefix)\(accountID)"
     }
 }

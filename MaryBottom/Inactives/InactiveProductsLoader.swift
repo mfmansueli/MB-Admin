@@ -22,18 +22,15 @@ final class InactiveProductsLoader {
     var delayBetweenPages: Duration = .milliseconds(300)
 
     private let client: EnjoeiClientProtocol
-    private let accountID: EnjoeiAccountID
     private let itemsPersistence: InactiveProductsPersisting
 
     init(
         client: EnjoeiClientProtocol,
-        accountID: EnjoeiAccountID = UUID(),
         itemsPersistence: InactiveProductsPersisting = InMemoryInactiveProductsPersistence()
     ) {
         self.client = client
-        self.accountID = accountID
         self.itemsPersistence = itemsPersistence
-        items = itemsPersistence.loadItems(accountID: accountID)
+        items = itemsPersistence.loadItems()
     }
 
     func load() {
@@ -49,7 +46,7 @@ final class InactiveProductsLoader {
     /// `SwiftDataInactiveProductsPersistence.search(matching:)`), em vez de filtrar `items` em
     /// memória. Fachada pra `InactiveProductsListView` não precisar conhecer `itemsPersistence`.
     func search(matching query: String, limit: Int = 500) -> [InactiveProduct] {
-        itemsPersistence.search(matching: query, accountID: accountID, limit: limit)
+        itemsPersistence.search(matching: query, limit: limit)
     }
 
     private func run() async {
@@ -68,10 +65,10 @@ final class InactiveProductsLoader {
                 phase = .loadingPage(page, of: maxPage)
                 let result = try await client.inactiveProductsPage(page: page)
                 if !hasClearedPersistedCache {
-                    itemsPersistence.clearItems(accountID: accountID)
+                    itemsPersistence.clearItems()
                     hasClearedPersistedCache = true
                 }
-                itemsPersistence.appendPage(result.products, startingAt: collected.count, accountID: accountID)
+                itemsPersistence.appendPage(result.products, startingAt: collected.count)
                 collected += result.products
                 maxPage = result.maxPage
                 items = collected

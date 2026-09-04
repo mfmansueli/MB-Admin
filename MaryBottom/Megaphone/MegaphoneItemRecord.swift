@@ -4,7 +4,8 @@ import SwiftData
 /// Registro SwiftData de um produto carregado pelo megafone — cada campo de `EnjoeiProduct` vira
 /// sua própria coluna (nada de JSON codificado num blob), mesmo raciocínio de
 /// `InactiveProductRecord`/`SmartPriceProductRecord`. `sortIndex` preserva a ordem original da
-/// vitrine.
+/// vitrine. Sem `accountID` pelo mesmo motivo dos outros dois: mora num `ModelContainer` próprio da
+/// conta (ver `PerAccountModelContainer`).
 ///
 /// `status`/`exposure` do `MegaphoneItem` original **não** viram colunas — `status` é sempre
 /// `.pending` no momento em que `MegaphoneRunner.setLoadedItems` persiste (a lista é gravada logo
@@ -20,10 +21,6 @@ import SwiftData
 /// de verdade. Ver `SwiftDataMegaphoneItemsPersistence.wipeStaleSchemaIfNeeded()`.
 @Model
 final class MegaphoneItemRecord {
-    @available(iOS 18, macOS 15, *)
-    #Index<MegaphoneItemRecord>([\.accountID, \.title])
-
-    var accountID: EnjoeiAccountID
     var sortIndex: Int
     var productID: Int = 0
     var title: String = ""
@@ -33,8 +30,7 @@ final class MegaphoneItemRecord {
     var originalPrice: Double?
     var exposurePayload: Data?
 
-    init(accountID: EnjoeiAccountID, sortIndex: Int, item: MegaphoneItem) {
-        self.accountID = accountID
+    init(sortIndex: Int, item: MegaphoneItem) {
         self.sortIndex = sortIndex
         self.productID = item.product.id
         self.title = item.product.title

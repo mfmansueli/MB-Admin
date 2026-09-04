@@ -168,8 +168,16 @@ struct ComparisonResultView: View {
             .pickerStyle(.inline)
         } label: {
             HStack {
+                // Tamanho mínimo fixo — mesmo raciocínio de `AccountPublishedTabView.filterPicker`/
+                // `SmartPriceProductsListView.statusFilterPicker`: sem isso, trocar entre rótulos de
+                // tamanhos bem diferentes ("todos (150)" vs. "não encontrados em fulano de tal
+                // (23)") fazia o menu pular de tamanho de um jeito feio no meio da animação de
+                // seleção, mais visível no iPad (mais espaço horizontal pro texto esticar).
                 Text(resultFilterLabel)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
+                    .frame(minWidth: 130, minHeight: 32, alignment: .trailing)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

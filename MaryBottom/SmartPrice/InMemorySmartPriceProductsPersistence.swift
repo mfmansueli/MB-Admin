@@ -6,51 +6,44 @@ import Foundation
 /// produção passa `SwiftDataSmartPriceProductsPersistence` explicitamente.
 @MainActor
 final class InMemorySmartPriceProductsPersistence: SmartPriceProductsPersisting {
-    private var itemsByAccountID: [EnjoeiAccountID: [SmartPriceProduct]] = [:]
-    private var titlesByAccountID: [EnjoeiAccountID: [Int: String]] = [:]
+    private var items: [SmartPriceProduct] = []
+    private var titlesByID: [Int: String] = [:]
 
     // Default-argument expressions em `SmartPriceProductsLoader.init` são avaliados fora do
     // MainActor — sem isso, o compilador recusa construir o valor padrão inline.
     nonisolated init() {}
 
-    func loadItems(accountID: EnjoeiAccountID) -> [SmartPriceProduct] {
-        itemsByAccountID[accountID] ?? []
+    func loadItems() -> [SmartPriceProduct] {
+        items
     }
 
-    func saveItems(_ items: [SmartPriceProduct], accountID: EnjoeiAccountID) {
-        itemsByAccountID[accountID] = items
+    func saveItems(_ items: [SmartPriceProduct]) {
+        self.items = items
     }
 
-    func appendPage(
-        _ items: [SmartPriceProduct],
-        startingAt offset: Int,
-        accountID: EnjoeiAccountID,
-        titleResolver: (Int) -> String?
-    ) {
-        itemsByAccountID[accountID, default: []].append(contentsOf: items)
+    func appendPage(_ items: [SmartPriceProduct], startingAt offset: Int, titleResolver: (Int) -> String?) {
+        self.items.append(contentsOf: items)
         for item in items {
-            titlesByAccountID[accountID, default: [:]][item.id] = titleResolver(item.id) ?? ""
+            titlesByID[item.id] = titleResolver(item.id) ?? ""
         }
     }
 
-    func backfillTitles(resolver: (Int) -> String?, accountID: EnjoeiAccountID) {
-        for item in itemsByAccountID[accountID] ?? [] {
+    func backfillTitles(resolver: (Int) -> String?) {
+        for item in items {
             guard let resolved = resolver(item.id) else { continue }
-            titlesByAccountID[accountID, default: [:]][item.id] = resolved
+            titlesByID[item.id] = resolved
         }
     }
 
-    func search(matching query: String, accountID: EnjoeiAccountID, limit: Int) -> [SmartPriceProduct] {
-        let items = itemsByAccountID[accountID] ?? []
-        let titles = titlesByAccountID[accountID] ?? [:]
+    func search(matching query: String, limit: Int) -> [SmartPriceProduct] {
         let matched = query.isEmpty
             ? items
-            : items.filter { (titles[$0.id] ?? "").localizedCaseInsensitiveContains(query) }
+            : items.filter { (titlesByID[$0.id] ?? "").localizedCaseInsensitiveContains(query) }
         return Array(matched.prefix(limit))
     }
 
-    func clearItems(accountID: EnjoeiAccountID) {
-        itemsByAccountID[accountID] = nil
-        titlesByAccountID[accountID] = nil
+    func clearItems() {
+        items = []
+        titlesByID = [:]
     }
 }

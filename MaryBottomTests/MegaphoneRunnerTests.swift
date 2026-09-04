@@ -7,10 +7,9 @@ struct MegaphoneRunnerTests {
     /// Sem espera entre produtos, os testes não ficam presos ao ritmo real do app.
     private func makeRunner(
         client: StubEnjoeiClient,
-        accountID: EnjoeiAccountID = UUID(),
         itemsPersistence: MegaphoneItemsPersisting = InMemoryMegaphoneItemsPersistence()
     ) -> MegaphoneRunner {
-        let runner = MegaphoneRunner(client: client, accountID: accountID, itemsPersistence: itemsPersistence)
+        let runner = MegaphoneRunner(client: client, itemsPersistence: itemsPersistence)
         runner.delayBetweenProducts = .zero
         return runner
     }
@@ -644,33 +643,31 @@ struct MegaphoneRunnerTests {
     @Test("load bem sucedido guarda a lista carregada na persistência")
     func loadGuardaListaNaPersistencia() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
-        let accountID = EnjoeiAccountID()
         let persistence = InMemoryMegaphoneItemsPersistence()
-        let runner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+        let runner = makeRunner(client: client, itemsPersistence: persistence)
 
         runner.load(sellerID: 1)
         await runner.waitUntilFinished()
 
-        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1, 2])
+        #expect(persistence.loadItems().map(\.id) == [1, 2])
     }
 
     @Test("um runner novo com a mesma persistência recupera a lista sem buscar a loja de novo")
     func runnerNovoRecuperaListaPersistida() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
-        let accountID = EnjoeiAccountID()
         let persistence = InMemoryMegaphoneItemsPersistence()
-        let firstRunner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+        let firstRunner = makeRunner(client: client, itemsPersistence: persistence)
         firstRunner.load(sellerID: 1)
         await firstRunner.waitUntilFinished()
 
         // Simula reabrir o app: um runner novo, mesma conta, mesma persistência.
-        let secondRunner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+        let secondRunner = makeRunner(client: client, itemsPersistence: persistence)
 
         #expect(secondRunner.items.map(\.id) == [1, 2])
         #expect(await client.requestedCursors.count == 1)
     }
 
-    @Test("searchProductIDs delega pra persistência, por conta")
+    @Test("searchProductIDs delega pra persistência")
     func searchProductIDsDelegaParaPersistencia() async {
         let page = StoreProductsPage(
             products: [
@@ -681,9 +678,8 @@ struct MegaphoneRunnerTests {
             endCursor: nil
         )
         let client = StubEnjoeiClient(pages: [page])
-        let accountID = EnjoeiAccountID()
         let persistence = InMemoryMegaphoneItemsPersistence()
-        let runner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+        let runner = makeRunner(client: client, itemsPersistence: persistence)
         runner.load(sellerID: 1)
         await runner.waitUntilFinished()
 
@@ -693,16 +689,15 @@ struct MegaphoneRunnerTests {
     @Test("reload descarta a lista persistida na hora, antes mesmo da busca nova terminar")
     func reloadDescartaListaPersistidaNaHora() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
-        let accountID = EnjoeiAccountID()
         let persistence = InMemoryMegaphoneItemsPersistence()
-        let runner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+        let runner = makeRunner(client: client, itemsPersistence: persistence)
         runner.load(sellerID: 1)
         await runner.waitUntilFinished()
-        #expect(persistence.loadItems(accountID: accountID).isEmpty == false)
+        #expect(persistence.loadItems().isEmpty == false)
 
         runner.reload(sellerID: 1)
 
-        #expect(persistence.loadItems(accountID: accountID).isEmpty)
+        #expect(persistence.loadItems().isEmpty)
         await runner.waitUntilFinished()
     }
 

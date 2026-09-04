@@ -6,31 +6,30 @@ import Foundation
 /// produção passa `SwiftDataInactiveProductsPersistence` explicitamente.
 @MainActor
 final class InMemoryInactiveProductsPersistence: InactiveProductsPersisting {
-    private var itemsByAccountID: [EnjoeiAccountID: [InactiveProduct]] = [:]
+    private var items: [InactiveProduct] = []
 
     // Default-argument expressions em `InactiveProductsLoader.init` são avaliados fora do
     // MainActor — sem isso, o compilador recusa construir o valor padrão inline.
     nonisolated init() {}
 
-    func loadItems(accountID: EnjoeiAccountID) -> [InactiveProduct] {
-        itemsByAccountID[accountID] ?? []
+    func loadItems() -> [InactiveProduct] {
+        items
     }
 
-    func saveItems(_ items: [InactiveProduct], accountID: EnjoeiAccountID) {
-        itemsByAccountID[accountID] = items
+    func saveItems(_ items: [InactiveProduct]) {
+        self.items = items
     }
 
-    func appendPage(_ items: [InactiveProduct], startingAt offset: Int, accountID: EnjoeiAccountID) {
-        itemsByAccountID[accountID, default: []].append(contentsOf: items)
+    func appendPage(_ items: [InactiveProduct], startingAt offset: Int) {
+        self.items.append(contentsOf: items)
     }
 
-    func search(matching query: String, accountID: EnjoeiAccountID, limit: Int) -> [InactiveProduct] {
-        let items = itemsByAccountID[accountID] ?? []
+    func search(matching query: String, limit: Int) -> [InactiveProduct] {
         let matched = query.isEmpty ? items : items.filter { $0.title.localizedCaseInsensitiveContains(query) }
         return Array(matched.prefix(limit))
     }
 
-    func clearItems(accountID: EnjoeiAccountID) {
-        itemsByAccountID[accountID] = nil
+    func clearItems() {
+        items = []
     }
 }

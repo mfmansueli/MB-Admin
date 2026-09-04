@@ -24,145 +24,131 @@ struct SwiftDataSmartPriceProductsPersistenceTests {
 
     @Test("sem nada salvo ainda, devolve lista vazia")
     func semNadaSalvo() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        #expect(persistence.loadItems(accountID: EnjoeiAccountID()).isEmpty)
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        #expect(persistence.loadItems().isEmpty)
     }
 
     @Test("guarda e lê de volta a lista inteira, na mesma ordem")
     func salvaELeDeVolta() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
         let items = [makeProduct(id: 1), makeProduct(id: 2)]
 
-        persistence.saveItems(items, accountID: accountID)
+        persistence.saveItems(items)
 
-        #expect(persistence.loadItems(accountID: accountID) == items)
+        #expect(persistence.loadItems() == items)
     }
 
-    @Test("salvar de novo substitui a lista anterior da conta, não acumula")
+    @Test("salvar de novo substitui a lista anterior, não acumula")
     func salvarDeNovoSubstitui() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
-        persistence.saveItems([makeProduct(id: 1), makeProduct(id: 2)], accountID: accountID)
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([makeProduct(id: 1), makeProduct(id: 2)])
 
-        persistence.saveItems([makeProduct(id: 3)], accountID: accountID)
+        persistence.saveItems([makeProduct(id: 3)])
 
-        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [3])
+        #expect(persistence.loadItems().map(\.id) == [3])
     }
 
-    @Test("cada conta tem seus próprios registros, sem vazar pra outra")
-    func registrosSeparadosPorConta() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountA = EnjoeiAccountID()
-        let accountB = EnjoeiAccountID()
-        persistence.saveItems([makeProduct(id: 1)], accountID: accountA)
+    @Test("duas contas com containers separados não compartilham nada")
+    func duasContasComContainersSeparadosNaoCompartilhamNada() {
+        let persistenceA = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        let persistenceB = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistenceA.saveItems([makeProduct(id: 1)])
 
-        #expect(persistence.loadItems(accountID: accountB).isEmpty)
+        #expect(persistenceB.loadItems().isEmpty)
     }
 
-    @Test("clearItems apaga só a lista da conta pedida")
-    func clearItemsApagaSoAConta() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountA = EnjoeiAccountID()
-        let accountB = EnjoeiAccountID()
-        persistence.saveItems([makeProduct(id: 1)], accountID: accountA)
-        persistence.saveItems([makeProduct(id: 2)], accountID: accountB)
+    @Test("clearItems apaga tudo")
+    func clearItemsApagaTudo() {
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([makeProduct(id: 1)])
 
-        persistence.clearItems(accountID: accountA)
+        persistence.clearItems()
 
-        #expect(persistence.loadItems(accountID: accountA).isEmpty)
-        #expect(persistence.loadItems(accountID: accountB).map(\.id) == [2])
+        #expect(persistence.loadItems().isEmpty)
     }
 
     @Test("appendPage acrescenta sem apagar o que já tinha, gravando o título resolvido")
     func appendPageGravaTituloResolvido() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
         let titles = [1: "brinco argola", 2: "colar prata"]
 
-        persistence.appendPage([makeProduct(id: 1)], startingAt: 0, accountID: accountID) { titles[$0] }
-        persistence.appendPage([makeProduct(id: 2)], startingAt: 1, accountID: accountID) { titles[$0] }
+        persistence.appendPage([makeProduct(id: 1)], startingAt: 0) { titles[$0] }
+        persistence.appendPage([makeProduct(id: 2)], startingAt: 1) { titles[$0] }
 
-        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1, 2])
-        #expect(persistence.search(matching: "argola", accountID: accountID, limit: 500).map(\.id) == [1])
+        #expect(persistence.loadItems().map(\.id) == [1, 2])
+        #expect(persistence.search(matching: "argola", limit: 500).map(\.id) == [1])
     }
 
     @Test("sem título resolvido ainda, appendPage grava vazio — não trava, só não é encontrado pela busca")
     func appendPageSemResolverGravaVazio() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
 
-        persistence.appendPage([makeProduct(id: 1)], startingAt: 0, accountID: accountID) { _ in nil }
+        persistence.appendPage([makeProduct(id: 1)], startingAt: 0) { _ in nil }
 
-        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1])
-        #expect(persistence.search(matching: "qualquer coisa", accountID: accountID, limit: 500).isEmpty)
+        #expect(persistence.loadItems().map(\.id) == [1])
+        #expect(persistence.search(matching: "qualquer coisa", limit: 500).isEmpty)
     }
 
     @Test("backfillTitles conserta registros gravados sem título, quando o resolvedor passa a responder")
     func backfillTitlesConsertaRegistros() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountID = EnjoeiAccountID()
-        persistence.appendPage([makeProduct(id: 1)], startingAt: 0, accountID: accountID) { _ in nil }
-        #expect(persistence.search(matching: "argola", accountID: accountID, limit: 500).isEmpty)
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.appendPage([makeProduct(id: 1)], startingAt: 0) { _ in nil }
+        #expect(persistence.search(matching: "argola", limit: 500).isEmpty)
 
-        persistence.backfillTitles(resolver: { $0 == 1 ? "brinco argola" : nil }, accountID: accountID)
+        persistence.backfillTitles(resolver: { $0 == 1 ? "brinco argola" : nil })
 
-        #expect(persistence.search(matching: "argola", accountID: accountID, limit: 500).map(\.id) == [1])
+        #expect(persistence.search(matching: "argola", limit: 500).map(\.id) == [1])
     }
 
-    @Test("search não vaza entre contas e respeita o fetchLimit")
-    func searchNaoVazaERespeitaLimite() {
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
-        let accountA = EnjoeiAccountID()
-        let accountB = EnjoeiAccountID()
-        persistence.appendPage((1...5).map { makeProduct(id: $0) }, startingAt: 0, accountID: accountA) { "produto \($0)" }
-        persistence.appendPage([makeProduct(id: 99)], startingAt: 0, accountID: accountB) { "produto \($0)" }
+    @Test("search respeita o fetchLimit")
+    func searchRespeitaOFetchLimit() {
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.appendPage((1...5).map { makeProduct(id: $0) }, startingAt: 0) { "produto \($0)" }
 
-        #expect(persistence.search(matching: "", accountID: accountA, limit: 3).count == 3)
-        #expect(persistence.search(matching: "produto", accountID: accountB, limit: 500).map(\.id) == [99])
+        #expect(persistence.search(matching: "", limit: 3).count == 3)
     }
 
     @Test("descarta registros existentes quando a versão de esquema salva está desatualizada")
     func descartaRegistrosComVersaoDesatualizada() {
+        let accountID = EnjoeiAccountID()
         let container = makeContainer()
         let defaults = makeDefaults()
-        let accountID = EnjoeiAccountID()
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
-        persistence.saveItems([makeProduct(id: 1)], accountID: accountID)
-        defaults.set(0, forKey: "smartPrice.schemaVersion")
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: accountID, container: container, defaults: defaults)
+        persistence.saveItems([makeProduct(id: 1)])
+        defaults.set(0, forKey: "smartPrice.schemaVersion.\(accountID)")
 
-        let migratedPersistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
+        let migratedPersistence = SwiftDataSmartPriceProductsPersistence(accountID: accountID, container: container, defaults: defaults)
 
-        #expect(migratedPersistence.loadItems(accountID: accountID).isEmpty)
+        #expect(migratedPersistence.loadItems().isEmpty)
     }
 
     @Test("não descarta de novo quando a versão de esquema já está atualizada")
     func naoDescartaDeNovoQuandoVersaoJaAtualizada() {
+        let accountID = EnjoeiAccountID()
         let container = makeContainer()
         let defaults = makeDefaults()
-        let accountID = EnjoeiAccountID()
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
-        persistence.saveItems([makeProduct(id: 1)], accountID: accountID)
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: accountID, container: container, defaults: defaults)
+        persistence.saveItems([makeProduct(id: 1)])
 
-        let secondPersistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
+        let secondPersistence = SwiftDataSmartPriceProductsPersistence(accountID: accountID, container: container, defaults: defaults)
 
-        #expect(secondPersistence.loadItems(accountID: accountID).map(\.id) == [1])
+        #expect(secondPersistence.loadItems().map(\.id) == [1])
     }
 
-    @Test("migra a lista salva pela versão antiga (UserDefaults) uma única vez, só da conta lida")
+    @Test("migra a lista salva pela versão antiga (UserDefaults) uma única vez")
     func migraListaLegada() {
-        let defaults = makeDefaults()
         let accountID = EnjoeiAccountID()
+        let defaults = makeDefaults()
         let legacyItems = [makeProduct(id: 1), makeProduct(id: 2)]
         defaults.set(try! JSONEncoder().encode(legacyItems), forKey: "smartPrice.items.\(accountID)")
         let container = makeContainer()
 
-        let persistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
+        let persistence = SwiftDataSmartPriceProductsPersistence(accountID: accountID, container: container, defaults: defaults)
 
-        #expect(persistence.loadItems(accountID: accountID) == legacyItems)
+        #expect(persistence.loadItems() == legacyItems)
         #expect(defaults.object(forKey: "smartPrice.items.\(accountID)") == nil)
 
-        let secondPersistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
-        #expect(secondPersistence.loadItems(accountID: accountID).count == 2)
+        let secondPersistence = SwiftDataSmartPriceProductsPersistence(accountID: accountID, container: container, defaults: defaults)
+        #expect(secondPersistence.loadItems().count == 2)
     }
 }

@@ -19,24 +19,15 @@ final class AccountsStore {
 
     private let dependenciesFactory: AccountDependenciesFactory
     private let persistence: AccountsPersisting
-    private let megaphoneItemsPersistence: MegaphoneItemsPersisting
-    private let inactiveProductsPersistence: InactiveProductsPersisting
-    private let smartPriceProductsPersistence: SmartPriceProductsPersisting
 
     init(
         dependenciesFactory: AccountDependenciesFactory? = nil,
         persistence: AccountsPersisting? = nil,
-        megaphoneItemsPersistence: MegaphoneItemsPersisting? = nil,
-        inactiveProductsPersistence: InactiveProductsPersisting? = nil,
-        smartPriceProductsPersistence: SmartPriceProductsPersisting? = nil,
         postHistoryPersistence: PostHistoryPersisting? = nil,
         postQueueItemsPersistence: PostQueueItemsPersisting? = nil
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
-        self.megaphoneItemsPersistence = megaphoneItemsPersistence ?? SwiftDataMegaphoneItemsPersistence()
-        self.inactiveProductsPersistence = inactiveProductsPersistence ?? SwiftDataInactiveProductsPersistence()
-        self.smartPriceProductsPersistence = smartPriceProductsPersistence ?? SwiftDataSmartPriceProductsPersistence()
         // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
         // provider de verdade é ligado logo abaixo, já com `self` totalmente inicializado. Se
         // houver itens pendentes restaurados, `PostQueue.init` já começa a fila (pausada, esperando
@@ -150,12 +141,12 @@ final class AccountsStore {
     }
 
     /// Sem isso, a lista de publicados, a de inativos e as preferências de rodada/intervalo/aba/
-    /// filtro da conta ficam órfãs em `UserDefaults` pra sempre — o id nunca mais aparece em
-    /// `accounts` pra alguém vir apagar depois.
+    /// filtro da conta ficam órfãs em disco pra sempre — o id nunca mais aparece em `accounts` pra
+    /// alguém vir apagar depois. `PerAccountModelContainer.destroy` apaga o arquivo inteiro das
+    /// três listas de uma vez (elas moram juntas no container dessa conta — ver esse tipo), não
+    /// precisa mais zerar uma por uma.
     private func clearLocalData(accountID: EnjoeiAccountID) {
-        megaphoneItemsPersistence.clearItems(accountID: accountID)
-        inactiveProductsPersistence.clearItems(accountID: accountID)
-        smartPriceProductsPersistence.clearItems(accountID: accountID)
+        PerAccountModelContainer.destroy(for: accountID)
         // Mesmas chaves que `AccountPublishedTabView`/`AccountDetailView` montam em `@AppStorage`
         // — não tem como reusar a property wrapper daqui, só reconstruir a mesma string.
         UserDefaults.standard.removeObject(forKey: "megaphone.rounds.\(accountID)")

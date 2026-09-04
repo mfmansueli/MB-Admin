@@ -38,20 +38,17 @@ final class AccountSession: Identifiable {
 
         let runner = MegaphoneRunner(
             client: dependencies.client,
-            accountID: id,
-            itemsPersistence: SwiftDataMegaphoneItemsPersistence()
+            itemsPersistence: SwiftDataMegaphoneItemsPersistence(accountID: id)
         )
         self.runner = runner
         keepAlive = MegaphoneKeepAlive(runner: runner)
         inactiveProductsLoader = InactiveProductsLoader(
             client: dependencies.client,
-            accountID: id,
-            itemsPersistence: SwiftDataInactiveProductsPersistence()
+            itemsPersistence: SwiftDataInactiveProductsPersistence(accountID: id)
         )
         smartPriceProductsLoader = SmartPriceProductsLoader(
             client: dependencies.client,
-            accountID: id,
-            itemsPersistence: SwiftDataSmartPriceProductsPersistence()
+            itemsPersistence: SwiftDataSmartPriceProductsPersistence(accountID: id)
         )
         // A API de preço esperto não devolve título (só id/preço) — quem sabe o nome é a aba
         // "publicados" (`runner.items`). `weak`: o closure não precisa manter o runner vivo, ele já
