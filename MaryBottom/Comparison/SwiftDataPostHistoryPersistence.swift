@@ -12,6 +12,11 @@ final class SwiftDataPostHistoryPersistence: PostHistoryPersisting {
     /// `ModelContainer` na primeira execução depois do update, e removida na sequência.
     private static let legacyDefaultsKey = "postHistory.v1"
 
+    /// Teto de entradas trazidas pra memória em `loadEntries()` — sem isso, um histórico de uso
+    /// real (meses de uso, várias contas) deixa o boot do app cada vez mais lento porque decodifica
+    /// o JSON de toda entrada já registrada, mesmo as que ninguém vai rolar até ver.
+    private static let maxLoadedEntries = 300
+
     private let context: ModelContext
     private let defaults: UserDefaults
 
@@ -37,9 +42,10 @@ final class SwiftDataPostHistoryPersistence: PostHistoryPersisting {
     }()
 
     func loadEntries() -> [PostHistoryEntry] {
-        let descriptor = FetchDescriptor<PostHistoryRecord>(
+        var descriptor = FetchDescriptor<PostHistoryRecord>(
             sortBy: [SortDescriptor(\.completedAt, order: .reverse)]
         )
+        descriptor.fetchLimit = Self.maxLoadedEntries
         guard let records = try? context.fetch(descriptor) else { return [] }
         let decoder = JSONDecoder()
         return records.compactMap { try? decoder.decode(PostHistoryEntry.self, from: $0.payload) }

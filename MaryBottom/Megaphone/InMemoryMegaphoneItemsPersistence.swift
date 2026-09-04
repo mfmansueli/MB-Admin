@@ -2,8 +2,8 @@ import Foundation
 
 /// Persistência que não persiste nada de verdade — some quando o processo termina. É o valor
 /// padrão de `MegaphoneRunner.init`, pra um runner construído sem pensar em disco (testes,
-/// previews) nunca escrever em `UserDefaults` por acidente. A produção passa
-/// `UserDefaultsMegaphoneItemsPersistence` explicitamente.
+/// previews) nunca escrever em disco por acidente. A produção passa
+/// `SwiftDataMegaphoneItemsPersistence` explicitamente.
 @MainActor
 final class InMemoryMegaphoneItemsPersistence: MegaphoneItemsPersisting {
     private var itemsByAccountID: [EnjoeiAccountID: [MegaphoneItem]] = [:]

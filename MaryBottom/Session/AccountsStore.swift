@@ -34,9 +34,9 @@ final class AccountsStore {
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
-        self.megaphoneItemsPersistence = megaphoneItemsPersistence ?? UserDefaultsMegaphoneItemsPersistence()
-        self.inactiveProductsPersistence = inactiveProductsPersistence ?? UserDefaultsInactiveProductsPersistence()
-        self.smartPriceProductsPersistence = smartPriceProductsPersistence ?? UserDefaultsSmartPriceProductsPersistence()
+        self.megaphoneItemsPersistence = megaphoneItemsPersistence ?? SwiftDataMegaphoneItemsPersistence()
+        self.inactiveProductsPersistence = inactiveProductsPersistence ?? SwiftDataInactiveProductsPersistence()
+        self.smartPriceProductsPersistence = smartPriceProductsPersistence ?? SwiftDataSmartPriceProductsPersistence()
         // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
         // provider de verdade é ligado logo abaixo, já com `self` totalmente inicializado. Se
         // houver itens pendentes restaurados, `PostQueue.init` já começa a fila (pausada, esperando

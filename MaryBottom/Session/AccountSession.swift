@@ -39,19 +39,19 @@ final class AccountSession: Identifiable {
         let runner = MegaphoneRunner(
             client: dependencies.client,
             accountID: id,
-            itemsPersistence: UserDefaultsMegaphoneItemsPersistence()
+            itemsPersistence: SwiftDataMegaphoneItemsPersistence()
         )
         self.runner = runner
         keepAlive = MegaphoneKeepAlive(runner: runner)
         inactiveProductsLoader = InactiveProductsLoader(
             client: dependencies.client,
             accountID: id,
-            itemsPersistence: UserDefaultsInactiveProductsPersistence()
+            itemsPersistence: SwiftDataInactiveProductsPersistence()
         )
         smartPriceProductsLoader = SmartPriceProductsLoader(
             client: dependencies.client,
             accountID: id,
-            itemsPersistence: UserDefaultsSmartPriceProductsPersistence()
+            itemsPersistence: SwiftDataSmartPriceProductsPersistence()
         )
     }
 

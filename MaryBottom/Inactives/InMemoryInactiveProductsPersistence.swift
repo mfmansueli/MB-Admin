@@ -2,8 +2,8 @@ import Foundation
 
 /// Persistência que não persiste nada de verdade — some quando o processo termina. Valor padrão de
 /// `InactiveProductsLoader.init`, mesmo raciocínio de `InMemoryMegaphoneItemsPersistence`: um
-/// loader construído sem pensar em disco (testes, previews) nunca escreve em `UserDefaults` por
-/// acidente. A produção passa `UserDefaultsInactiveProductsPersistence` explicitamente.
+/// loader construído sem pensar em disco (testes, previews) nunca escreve em disco por acidente. A
+/// produção passa `SwiftDataInactiveProductsPersistence` explicitamente.
 @MainActor
 final class InMemoryInactiveProductsPersistence: InactiveProductsPersisting {
     private var itemsByAccountID: [EnjoeiAccountID: [InactiveProduct]] = [:]

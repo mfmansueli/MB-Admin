@@ -2,8 +2,8 @@ import Foundation
 
 /// Persistência que não persiste nada de verdade — some quando o processo termina. Valor padrão de
 /// `SmartPriceProductsLoader.init`, mesmo raciocínio de `InMemoryInactiveProductsPersistence`: um
-/// loader construído sem pensar em disco (testes, previews) nunca escreve em `UserDefaults` por
-/// acidente. A produção passa `UserDefaultsSmartPriceProductsPersistence` explicitamente.
+/// loader construído sem pensar em disco (testes, previews) nunca escreve em disco por acidente. A
+/// produção passa `SwiftDataSmartPriceProductsPersistence` explicitamente.
 @MainActor
 final class InMemorySmartPriceProductsPersistence: SmartPriceProductsPersisting {
     private var itemsByAccountID: [EnjoeiAccountID: [SmartPriceProduct]] = [:]

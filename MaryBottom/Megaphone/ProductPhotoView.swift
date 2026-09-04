@@ -12,7 +12,7 @@ struct ProductPhotoView: View {
     @State private var isShowingFullSize = false
 
     var body: some View {
-        AsyncImage(url: photoURL) { image in
+        CachedAsyncImage(url: photoURL) { image in
             image.resizable().scaledToFill()
         } placeholder: {
             RoundedRectangle(cornerRadius: 10).fill(.quaternary)
