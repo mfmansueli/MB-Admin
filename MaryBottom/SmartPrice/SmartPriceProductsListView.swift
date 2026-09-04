@@ -218,16 +218,25 @@ struct SmartPriceProductsListView: View {
                     .frame(maxHeight: .infinity)
             }
         } else {
-            List(filteredItems) { item in
-                SmartPriceProductRowView(
-                    item: item,
-                    loader: loader,
-                    isSelecting: isSelecting,
-                    isSelected: selectedIDs.contains(item.id),
-                    onToggleSelection: { toggleSelection(item: item) }
-                )
+            // `LazyVStack` em vez de `List`: mesmo raciocínio de `AccountPublishedTabView.productList`
+            // — no idiom otimizado do Mac Catalyst, `List` vira `NSTableView`, caro pra reconstruir
+            // do zero a cada troca de conta.
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(filteredItems) { item in
+                        SmartPriceProductRowView(
+                            item: item,
+                            loader: loader,
+                            isSelecting: isSelecting,
+                            isSelected: selectedIDs.contains(item.id),
+                            onToggleSelection: { toggleSelection(item: item) }
+                        )
+                        if item.id != filteredItems.last?.id {
+                            Divider()
+                        }
+                    }
+                }
             }
-            .listStyle(.plain)
         }
     }
 

@@ -195,16 +195,25 @@ struct InactiveProductsListView: View {
             ContentUnavailableView.search(text: searchText)
                 .frame(maxHeight: .infinity)
         } else {
-            List(filteredItems) { product in
-                InactiveProductRowView(
-                    product: product,
-                    account: account,
-                    isSelecting: isSelecting,
-                    isSelected: selectedIDs.contains(product.id),
-                    onToggleSelection: { toggleSelection(productID: product.id) }
-                )
+            // `LazyVStack` em vez de `List`: mesmo raciocínio de `AccountPublishedTabView.productList`
+            // — no idiom otimizado do Mac Catalyst, `List` vira `NSTableView`, caro pra reconstruir
+            // do zero a cada troca de conta.
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(filteredItems) { product in
+                        InactiveProductRowView(
+                            product: product,
+                            account: account,
+                            isSelecting: isSelecting,
+                            isSelected: selectedIDs.contains(product.id),
+                            onToggleSelection: { toggleSelection(productID: product.id) }
+                        )
+                        if product.id != filteredItems.last?.id {
+                            Divider()
+                        }
+                    }
+                }
             }
-            .listStyle(.plain)
         }
     }
 

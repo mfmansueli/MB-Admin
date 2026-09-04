@@ -16,6 +16,12 @@ final class AccountsStore {
     /// precisam respeitar o mesmo bloqueio entre uma postagem e a próxima.
     let poster = CrossAccountPoster()
     let postQueue: PostQueue
+    /// Compartilhada entre todas as contas (ver `MegaphoneQueue`) — sem limite de propósito: agora
+    /// que a listagem de produtos não passa mais por `List`/`NSTableView` (ver
+    /// `AccountPublishedTabView.productList`), o gargalo que motivava travar tudo numa conta de cada
+    /// vez deixou de existir. Se voltar a travar com várias contas megafonando juntas, é só baixar
+    /// esse número de novo.
+    let megaphoneQueue = MegaphoneQueue(concurrencyLimit: .max)
 
     private let dependenciesFactory: AccountDependenciesFactory
     private let persistence: AccountsPersisting
@@ -205,7 +211,8 @@ final class AccountsStore {
             id: id,
             user: user,
             lastRoundSummary: lastRoundSummary,
-            dependencies: dependencies
+            dependencies: dependencies,
+            megaphoneQueue: megaphoneQueue
         )
         account.runner.onRoundFinished = { [weak self, weak account] summary in
             account?.applyRoundFinished(summary)

@@ -58,18 +58,27 @@ final class MegaphoneRunner {
     // comentário acima, nas propriedades).
     let client: EnjoeiClientProtocol
     private let itemsPersistence: MegaphoneItemsPersisting
+    /// Compartilhada entre todas as contas — decide quando `start()` pode de fato começar a rodar
+    /// (ver `MegaphoneQueue`). Uma fila só pra este runner por padrão: sozinho nela, nunca espera —
+    /// testes/previews não precisam pensar em concorrência entre contas pra funcionar.
+    private let megaphoneQueue: MegaphoneQueue
     private var task: Task<Void, Never>?
     private var pauseGate: CheckedContinuation<Void, Never>?
 
     /// - Parameter itemsPersistence: em memória por padrão, pra um runner criado sem pensar em
     ///   disco (testes, previews) nunca escrever em disco por acidente — a produção passa
     ///   `SwiftDataMegaphoneItemsPersistence` explicitamente.
+    /// - Parameter megaphoneQueue: a fila compartilhada de verdade vem de `AccountsStore` — a
+    ///   produção sempre passa a mesma instância pras contas restantes; testes/previews recebem
+    ///   uma fila só sua por padrão.
     init(
         client: EnjoeiClientProtocol,
-        itemsPersistence: MegaphoneItemsPersisting = InMemoryMegaphoneItemsPersistence()
+        itemsPersistence: MegaphoneItemsPersisting = InMemoryMegaphoneItemsPersistence(),
+        megaphoneQueue: MegaphoneQueue = MegaphoneQueue()
     ) {
         self.client = client
         self.itemsPersistence = itemsPersistence
+        self.megaphoneQueue = megaphoneQueue
         items = itemsPersistence.loadItems()
     }
 
@@ -94,10 +103,25 @@ final class MegaphoneRunner {
         // aplicado na mão antes de tocar em megafonar) em vez de zerar e subcontar.
         totalSucceeded = items.filter { $0.status == .succeeded }.count
         totalFailed = items.filter { $0.status.failureMessage != nil }.count
-        if items.isEmpty { phase = .loadingProducts(loaded: 0, total: 0) }
+        // Sempre passa por `.waitingInQueue` primeiro, mesmo quando a vaga está livre na hora (o
+        // `Task` abaixo sempre tem pelo menos um agendamento antes de rodar de verdade) — troca pra
+        // `.loadingProducts`/o que já estava rodando assim que `megaphoneQueue.acquire` devolver.
+        phase = .waitingInQueue
         task = Task { [weak self] in
-            await self?.run(sellerID: sellerID)
-            self?.task = nil
+            guard let self else { return }
+            await self.megaphoneQueue.acquire(self)
+            defer { self.megaphoneQueue.release(self) }
+            guard !Task.isCancelled else {
+                // Mesmo tratamento de `run()` quando cancelado em pleno andamento — sem isso,
+                // `phase` ficaria travada em `.waitingInQueue` pra sempre (o `cancel()` que
+                // interrompeu a espera não passa por `run()`, que é quem normalmente cuida disso).
+                self.finish(.cancelled)
+                self.task = nil
+                return
+            }
+            if self.items.isEmpty { self.phase = .loadingProducts(loaded: 0, total: 0) }
+            await self.run(sellerID: sellerID)
+            self.task = nil
         }
     }
 

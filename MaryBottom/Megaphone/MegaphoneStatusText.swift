@@ -40,6 +40,8 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
         switch phase {
         case .idle:
             "pronto para megafonar."
+        case .waitingInQueue:
+            "esperando a vez pra megafonar…"
         case .loadingProducts(let loaded, let total):
             total > 0 ? "buscando seus produtos… \(loaded) de \(total)" : "buscando seus produtos…"
         case .checkingExposure(let checked, let total):
@@ -71,7 +73,7 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
             }
             let done = Double((round - 1) * itemsCount + processedCount)
             return done / Double(itemsCount * rounds.rawValue)
-        case .idle, .finished, .cancelled, .failed:
+        case .idle, .waitingInQueue, .finished, .cancelled, .failed:
             return nil
         }
     }

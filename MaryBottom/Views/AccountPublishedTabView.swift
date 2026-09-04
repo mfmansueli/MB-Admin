@@ -315,7 +315,7 @@ struct AccountPublishedTabView: View {
     private var isMegaphoning: Bool {
         switch runner.phase {
         case .megaphoning, .paused: true
-        case .idle, .loadingProducts, .checkingExposure, .finished, .cancelled, .failed: false
+        case .idle, .waitingInQueue, .loadingProducts, .checkingExposure, .finished, .cancelled, .failed: false
         }
     }
 
@@ -455,18 +455,29 @@ struct AccountPublishedTabView: View {
             }
         } else {
             ScrollViewReader { proxy in
-                List(filteredItems) { item in
-                    MegaphoneRowView(
-                        item: item,
-                        runner: runner,
-                        account: account,
-                        isSelecting: isSelecting,
-                        isSelected: selectedIDs.contains(item.id),
-                        onToggleSelection: { toggleSelection(itemID: item.id) }
-                    )
-                    .id(item.id)
+                ScrollView {
+                    // `LazyVStack` em vez de `List`: no idiom otimizado do Mac Catalyst, `List` vira
+                    // `NSTableView` por baixo, que é caro pra reconstruir do zero — e a troca de
+                    // conta reconstrói esta lista inteira sempre (ver `.id(account.id)` em
+                    // `AccountsListView`). `LazyVStack` não passa por essa ponte e ainda mantém a
+                    // virtualização (só monta as linhas visíveis).
+                    LazyVStack(spacing: 0) {
+                        ForEach(filteredItems) { item in
+                            MegaphoneRowView(
+                                item: item,
+                                runner: runner,
+                                account: account,
+                                isSelecting: isSelecting,
+                                isSelected: selectedIDs.contains(item.id),
+                                onToggleSelection: { toggleSelection(itemID: item.id) }
+                            )
+                            .id(item.id)
+                            if item.id != filteredItems.last?.id {
+                                Divider()
+                            }
+                        }
+                    }
                 }
-                .listStyle(.plain)
                 .onChange(of: runner.currentItemID) { _, newValue in
                     guard isFollowing, let newValue else { return }
                     withAnimation { proxy.scrollTo(newValue, anchor: .center) }

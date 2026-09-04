@@ -61,7 +61,9 @@ struct AccountRowView: View {
     private var isMegaphoneRunning: Bool {
         switch account.runner.phase {
         case .loadingProducts, .checkingExposure, .megaphoning: true
-        case .idle, .paused, .finished, .cancelled, .failed: false
+        // `.waitingInQueue` fica junto de `.paused` de propósito: nenhum dos dois tem trabalho de
+        // verdade acontecendo agora, só uma rodada em aberto esperando a vez de continuar.
+        case .idle, .waitingInQueue, .paused, .finished, .cancelled, .failed: false
         }
     }
 

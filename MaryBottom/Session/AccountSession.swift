@@ -23,11 +23,15 @@ final class AccountSession: Identifiable {
 
     private let sessionClearer: EnjoeiSessionClearing
 
+    /// - Parameter megaphoneQueue: a fila compartilhada de verdade vem de `AccountsStore.megaphoneQueue`
+    ///   — a produção sempre passa a mesma instância pras contas restantes; testes/previews recebem
+    ///   uma fila só sua por padrão (nunca espera, já que está sozinha nela).
     init(
         id: EnjoeiAccountID,
         user: EnjoeiUser,
         lastRoundSummary: MegaphoneRoundSummary? = nil,
-        dependencies: AccountDependencies
+        dependencies: AccountDependencies,
+        megaphoneQueue: MegaphoneQueue = MegaphoneQueue()
     ) {
         self.id = id
         self.user = user
@@ -38,7 +42,8 @@ final class AccountSession: Identifiable {
 
         let runner = MegaphoneRunner(
             client: dependencies.client,
-            itemsPersistence: SwiftDataMegaphoneItemsPersistence(accountID: id)
+            itemsPersistence: SwiftDataMegaphoneItemsPersistence(accountID: id),
+            megaphoneQueue: megaphoneQueue
         )
         self.runner = runner
         keepAlive = MegaphoneKeepAlive(runner: runner)

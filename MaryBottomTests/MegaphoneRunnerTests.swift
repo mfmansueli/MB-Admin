@@ -7,11 +7,57 @@ struct MegaphoneRunnerTests {
     /// Sem espera entre produtos, os testes não ficam presos ao ritmo real do app.
     private func makeRunner(
         client: StubEnjoeiClient,
-        itemsPersistence: MegaphoneItemsPersisting = InMemoryMegaphoneItemsPersistence()
+        itemsPersistence: MegaphoneItemsPersisting = InMemoryMegaphoneItemsPersistence(),
+        megaphoneQueue: MegaphoneQueue = MegaphoneQueue()
     ) -> MegaphoneRunner {
-        let runner = MegaphoneRunner(client: client, itemsPersistence: itemsPersistence)
+        let runner = MegaphoneRunner(client: client, itemsPersistence: itemsPersistence, megaphoneQueue: megaphoneQueue)
         runner.delayBetweenProducts = .zero
         return runner
+    }
+
+    // MARK: - fila de concorrência entre contas
+
+    @Test("com a fila compartilhada cheia, a segunda conta fica esperando até a primeira liberar")
+    func filaCompartilhadaSegundaContaEsperaAPrimeira() async {
+        let sharedQueue = MegaphoneQueue(concurrencyLimit: 1)
+        let clientA = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)])
+        let clientB = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)])
+        let runnerA = makeRunner(client: clientA, megaphoneQueue: sharedQueue)
+        let runnerB = makeRunner(client: clientB, megaphoneQueue: sharedQueue)
+
+        // A trava a única vaga por conta própria (sem carregar produtos, só segurando a fila) —
+        // simula A já estar megafonando de verdade quando B tenta começar.
+        await sharedQueue.acquire(runnerA)
+
+        runnerB.start(sellerID: 2)
+        await waitUntil { runnerB.phase == .waitingInQueue }
+        #expect(runnerB.phase == .waitingInQueue)
+        #expect(await clientB.requestedCursors.isEmpty)
+
+        sharedQueue.release(runnerA)
+        await runnerB.waitUntilFinished()
+
+        #expect(runnerB.items.map(\.id) == [2])
+        #expect(await clientB.requestedCursors.count == 1)
+    }
+
+    @Test("cancelar enquanto espera na fila termina como cancelado, não trava em waitingInQueue")
+    func cancelarEnquantoEsperaNaFilaTerminaComoCancelado() async {
+        let sharedQueue = MegaphoneQueue(concurrencyLimit: 1)
+        let clientA = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)])
+        let clientB = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)])
+        let runnerA = makeRunner(client: clientA, megaphoneQueue: sharedQueue)
+        let runnerB = makeRunner(client: clientB, megaphoneQueue: sharedQueue)
+        await sharedQueue.acquire(runnerA)
+
+        runnerB.start(sellerID: 2)
+        await waitUntil { runnerB.phase == .waitingInQueue }
+
+        runnerB.cancel()
+        await runnerB.waitUntilFinished()
+
+        #expect(runnerB.phase == .cancelled)
+        #expect(await clientB.requestedCursors.isEmpty)
     }
 
     @Test("megafona todos os produtos da loja e termina")
