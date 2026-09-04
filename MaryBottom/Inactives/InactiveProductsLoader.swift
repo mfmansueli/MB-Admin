@@ -45,14 +45,33 @@ final class InactiveProductsLoader {
         }
     }
 
+    /// Busca por título direto na persistência (SwiftData em produção — ver
+    /// `SwiftDataInactiveProductsPersistence.search(matching:)`), em vez de filtrar `items` em
+    /// memória. Fachada pra `InactiveProductsListView` não precisar conhecer `itemsPersistence`.
+    func search(matching query: String, limit: Int = 500) -> [InactiveProduct] {
+        itemsPersistence.search(matching: query, accountID: accountID, limit: limit)
+    }
+
     private func run() async {
         do {
             var page = 1
             var maxPage = 1
             var collected: [InactiveProduct] = []
+            // Só limpa o que essa conta tinha persistido quando a primeira página chega de
+            // verdade — se a rede falhar logo na página 1 (`catch` abaixo), o cache antigo em disco
+            // continua intacto, igual antes desta mudança. Da página 1 em diante, o carregamento
+            // grava incrementalmente com `appendPage` (não tudo de uma vez no final), pra a busca
+            // (que consulta o SwiftData direto, ver `InactiveProductsListView`) já enxergar cada
+            // página assim que ela chega.
+            var hasClearedPersistedCache = false
             repeat {
                 phase = .loadingPage(page, of: maxPage)
                 let result = try await client.inactiveProductsPage(page: page)
+                if !hasClearedPersistedCache {
+                    itemsPersistence.clearItems(accountID: accountID)
+                    hasClearedPersistedCache = true
+                }
+                itemsPersistence.appendPage(result.products, startingAt: collected.count, accountID: accountID)
                 collected += result.products
                 maxPage = result.maxPage
                 items = collected
@@ -61,7 +80,6 @@ final class InactiveProductsLoader {
                     try await Task.sleep(for: delayBetweenPages)
                 }
             } while page <= maxPage
-            itemsPersistence.saveItems(items, accountID: accountID)
             phase = .finished
         } catch {
             phase = .failed(error.localizedDescription)

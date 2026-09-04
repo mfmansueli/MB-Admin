@@ -53,6 +53,12 @@ final class AccountSession: Identifiable {
             accountID: id,
             itemsPersistence: SwiftDataSmartPriceProductsPersistence()
         )
+        // A API de preço esperto não devolve título (só id/preço) — quem sabe o nome é a aba
+        // "publicados" (`runner.items`). `weak`: o closure não precisa manter o runner vivo, ele já
+        // vive tanto quanto esta `AccountSession` de qualquer forma.
+        smartPriceProductsLoader.titleResolver = { [weak runner] productID in
+            runner?.items.first { $0.product.id == productID }?.product.title
+        }
     }
 
     var record: AccountRecord {

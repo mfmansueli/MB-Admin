@@ -82,6 +82,75 @@ struct SwiftDataInactiveProductsPersistenceTests {
         #expect(persistence.loadItems(accountID: accountB).map(\.id) == [2])
     }
 
+    @Test("appendPage acrescenta sem apagar o que já tinha, respeitando o offset")
+    func appendPageAcrescentaRespeitandoOffset() {
+        let persistence = SwiftDataInactiveProductsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountID = EnjoeiAccountID()
+
+        persistence.appendPage([makeProduct(id: 1), makeProduct(id: 2)], startingAt: 0, accountID: accountID)
+        persistence.appendPage([makeProduct(id: 3)], startingAt: 2, accountID: accountID)
+
+        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1, 2, 3])
+    }
+
+    @Test("search encontra por título, sem diferenciar maiúsculas/minúsculas")
+    func searchEncontraPorTitulo() {
+        let persistence = SwiftDataInactiveProductsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountID = EnjoeiAccountID()
+        persistence.saveItems(
+            [
+                InactiveProduct(id: 1, path: "p1", title: "Brinco Argola", price: 100, photoPublicID: nil, inactiveSince: nil),
+                InactiveProduct(id: 2, path: "p2", title: "colar prata", price: 100, photoPublicID: nil, inactiveSince: nil)
+            ],
+            accountID: accountID
+        )
+
+        #expect(persistence.search(matching: "argola", accountID: accountID, limit: 500).map(\.id) == [1])
+        #expect(persistence.search(matching: "PRATA", accountID: accountID, limit: 500).map(\.id) == [2])
+        #expect(persistence.search(matching: "inexistente", accountID: accountID, limit: 500).isEmpty)
+    }
+
+    @Test("search respeita o fetchLimit e não vaza entre contas")
+    func searchRespeitaLimiteENaoVazaEntreContas() {
+        let persistence = SwiftDataInactiveProductsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountA = EnjoeiAccountID()
+        let accountB = EnjoeiAccountID()
+        persistence.saveItems((1...5).map { makeProduct(id: $0) }, accountID: accountA)
+        persistence.saveItems([makeProduct(id: 99)], accountID: accountB)
+
+        #expect(persistence.search(matching: "", accountID: accountA, limit: 3).count == 3)
+        #expect(persistence.search(matching: "produto", accountID: accountB, limit: 500).map(\.id) == [99])
+    }
+
+    @Test("descarta registros existentes quando a versão de esquema salva está desatualizada")
+    func descartaRegistrosComVersaoDesatualizada() {
+        let container = makeContainer()
+        let defaults = makeDefaults()
+        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataInactiveProductsPersistence(container: container, defaults: defaults)
+        persistence.saveItems([makeProduct(id: 1)], accountID: accountID)
+        // Força a versão salva de volta pra trás — simula quem tinha registros de antes dessa
+        // migração de esquema existir (`payload` codificado virando colunas nativas).
+        defaults.set(0, forKey: "inactive.schemaVersion")
+
+        let migratedPersistence = SwiftDataInactiveProductsPersistence(container: container, defaults: defaults)
+
+        #expect(migratedPersistence.loadItems(accountID: accountID).isEmpty)
+    }
+
+    @Test("não descarta de novo quando a versão de esquema já está atualizada")
+    func naoDescartaDeNovoQuandoVersaoJaAtualizada() {
+        let container = makeContainer()
+        let defaults = makeDefaults()
+        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataInactiveProductsPersistence(container: container, defaults: defaults)
+        persistence.saveItems([makeProduct(id: 1)], accountID: accountID)
+
+        let secondPersistence = SwiftDataInactiveProductsPersistence(container: container, defaults: defaults)
+
+        #expect(secondPersistence.loadItems(accountID: accountID).map(\.id) == [1])
+    }
+
     @Test("migra a lista salva pela versão antiga (UserDefaults) uma única vez, só da conta lida")
     func migraListaLegada() {
         let defaults = makeDefaults()

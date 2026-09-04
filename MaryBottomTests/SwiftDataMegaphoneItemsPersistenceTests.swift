@@ -36,24 +36,37 @@ struct SwiftDataMegaphoneItemsPersistenceTests {
         #expect(persistence.loadItems(accountID: EnjoeiAccountID()).isEmpty)
     }
 
-    @Test("guarda e lê de volta a lista inteira, inclusive status falho e exposição, na mesma ordem")
+    @Test("guarda e lê de volta produto e exposição, na mesma ordem")
     func salvaELeDeVolta() {
         let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
         let accountID = EnjoeiAccountID()
-        let items = [
-            makeItem(id: 1, status: .succeeded),
-            makeItem(
-                id: 2,
-                status: .failed("preço mínimo não atingido"),
-                exposure: MegaphoneExposure(
-                    productID: 2, kind: .maximumAfterDiscount, priceToIncreaseExposure: 90, discountLabel: "- 40%"
-                )
-            )
-        ]
+        let exposure = MegaphoneExposure(
+            productID: 2, kind: .maximumAfterDiscount, priceToIncreaseExposure: 90, discountLabel: "- 40%"
+        )
+        let items = [makeItem(id: 1), makeItem(id: 2, exposure: exposure)]
 
         persistence.saveItems(items, accountID: accountID)
 
         #expect(persistence.loadItems(accountID: accountID) == items)
+    }
+
+    /// `status` nunca é persistido de verdade — no momento em que `saveItems` roda (logo depois de
+    /// carregar a loja, ver `MegaphoneRunner.setLoadedItems`), nenhum produto já foi megafonado
+    /// ainda, e nenhuma megafonagem em andamento chega a ser salva (só existe ao vivo em
+    /// `MegaphoneRunner.items`) — então reconstruir sempre como `.pending` é fiel ao que sempre foi
+    /// salvo, mesmo que quem chamou `saveItems` tenha passado um status diferente.
+    @Test("status não sobrevive ao salvar e reler — sempre volta pending")
+    func statusNaoSobreviveAoSalvarERelerSempreVoltaPending() {
+        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountID = EnjoeiAccountID()
+        persistence.saveItems(
+            [makeItem(id: 1, status: .succeeded), makeItem(id: 2, status: .failed("erro"))],
+            accountID: accountID
+        )
+
+        let reloaded = persistence.loadItems(accountID: accountID)
+
+        #expect(reloaded.map(\.status) == [.pending, .pending])
     }
 
     @Test("salvar de novo substitui a lista anterior da conta, não acumula")
@@ -89,6 +102,51 @@ struct SwiftDataMegaphoneItemsPersistenceTests {
 
         #expect(persistence.loadItems(accountID: accountA).isEmpty)
         #expect(persistence.loadItems(accountID: accountB).map(\.id) == [2])
+    }
+
+    @Test("searchProductIDs encontra por título, sem diferenciar maiúsculas/minúsculas, respeitando o fetchLimit")
+    func searchProductIDsEncontraPorTitulo() {
+        let persistence = SwiftDataMegaphoneItemsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountID = EnjoeiAccountID()
+        persistence.saveItems(
+            [
+                MegaphoneItem(product: EnjoeiProduct(id: 1, title: "Brinco Argola", path: "p1", photoPublicID: nil, currentPrice: 100, originalPrice: 100)),
+                MegaphoneItem(product: EnjoeiProduct(id: 2, title: "colar prata", path: "p2", photoPublicID: nil, currentPrice: 100, originalPrice: 100))
+            ],
+            accountID: accountID
+        )
+
+        #expect(persistence.searchProductIDs(matching: "argola", accountID: accountID, limit: 500) == [1])
+        #expect(persistence.searchProductIDs(matching: "PRATA", accountID: accountID, limit: 500) == [2])
+        #expect(persistence.searchProductIDs(matching: "inexistente", accountID: accountID, limit: 500).isEmpty)
+        #expect(persistence.searchProductIDs(matching: "", accountID: accountID, limit: 1).count == 1)
+    }
+
+    @Test("descarta registros existentes quando a versão de esquema salva está desatualizada")
+    func descartaRegistrosComVersaoDesatualizada() {
+        let container = makeContainer()
+        let defaults = makeDefaults()
+        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
+        persistence.saveItems([makeItem(id: 1)], accountID: accountID)
+        defaults.set(0, forKey: "megaphone.schemaVersion")
+
+        let migratedPersistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
+
+        #expect(migratedPersistence.loadItems(accountID: accountID).isEmpty)
+    }
+
+    @Test("não descarta de novo quando a versão de esquema já está atualizada")
+    func naoDescartaDeNovoQuandoVersaoJaAtualizada() {
+        let container = makeContainer()
+        let defaults = makeDefaults()
+        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
+        persistence.saveItems([makeItem(id: 1)], accountID: accountID)
+
+        let secondPersistence = SwiftDataMegaphoneItemsPersistence(container: container, defaults: defaults)
+
+        #expect(secondPersistence.loadItems(accountID: accountID).map(\.id) == [1])
     }
 
     @Test("migra a lista salva pela versão antiga (UserDefaults) uma única vez, só da conta lida")

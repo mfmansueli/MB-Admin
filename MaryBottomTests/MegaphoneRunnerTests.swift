@@ -670,6 +670,26 @@ struct MegaphoneRunnerTests {
         #expect(await client.requestedCursors.count == 1)
     }
 
+    @Test("searchProductIDs delega pra persistência, por conta")
+    func searchProductIDsDelegaParaPersistencia() async {
+        let page = StoreProductsPage(
+            products: [
+                EnjoeiFixtures.product(id: 1, title: "brinco argola"),
+                EnjoeiFixtures.product(id: 2, title: "colar prata")
+            ],
+            total: 2,
+            endCursor: nil
+        )
+        let client = StubEnjoeiClient(pages: [page])
+        let accountID = EnjoeiAccountID()
+        let persistence = InMemoryMegaphoneItemsPersistence()
+        let runner = makeRunner(client: client, accountID: accountID, itemsPersistence: persistence)
+        runner.load(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.searchProductIDs(matching: "argola") == [1])
+    }
+
     @Test("reload descarta a lista persistida na hora, antes mesmo da busca nova terminar")
     func reloadDescartaListaPersistidaNaHora() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])

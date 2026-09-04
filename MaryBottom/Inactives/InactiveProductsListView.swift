@@ -13,6 +13,11 @@ struct InactiveProductsListView: View {
     @State private var isConfirmingBulkRepost = false
     @State private var isConfirmingBulkActivate = false
     @State private var searchText = ""
+    /// Cache de `filteredItems` (ver `recomputeFilteredItems`) — sem isso, cada leitura (lista,
+    /// "selecionar todos", contagem) refiltrava a lista inteira do zero, várias vezes por
+    /// digitação, numa loja com muitos produtos inativos.
+    @State private var filteredItems: [InactiveProduct] = []
+    @State private var searchDebounceTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
     @Environment(AccountsStore.self) private var accountsStore
 
@@ -90,20 +95,38 @@ struct InactiveProductsListView: View {
         // abertura anterior do app — e só quando essa aba é de fato exibida (a view nem é
         // construída enquanto "publicados" estiver selecionado).
         .task {
-            guard loader.items.isEmpty, loader.phase == .idle else { return }
-            loader.load()
+            if loader.items.isEmpty, loader.phase == .idle {
+                loader.load()
+            }
+            recomputeFilteredItems()
         }
+        // `loader.items` muda várias vezes durante o carregamento (uma página de cada vez) — cada
+        // mudança recalcula o filtro uma vez só, em vez de a cada leitura de `filteredItems`.
+        .onChange(of: loader.items) { _, _ in recomputeFilteredItems() }
+        // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer o
+        // filtro (potencialmente sobre centenas de produtos) a cada tecla.
+        .onChange(of: searchText) { _, _ in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                recomputeFilteredItems()
+            }
+        }
+    }
+
+    /// Sem busca, mostra `loader.items` direto (já está em memória, completo — sem motivo pra
+    /// consultar o SwiftData de novo). Com busca, delega pro loader (que consulta o SwiftData com
+    /// `#Predicate` + `fetchLimit` — ver `InactiveProductsLoader.search(matching:)`), em vez de
+    /// filtrar `loader.items` inteiro em Swift a cada tecla.
+    private func recomputeFilteredItems() {
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        filteredItems = trimmed.isEmpty ? loader.items : loader.search(matching: trimmed)
     }
 
     private var searchField: some View {
         SearchField(placeholder: "buscar por título", text: $searchText, isFocused: $isSearchFocused)
             .padding(.horizontal, 20)
-    }
-
-    private var filteredItems: [InactiveProduct] {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return loader.items }
-        return loader.items.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
     }
 
     private var selectionBar: some View {

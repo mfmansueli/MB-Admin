@@ -20,6 +20,16 @@ final class InMemoryInactiveProductsPersistence: InactiveProductsPersisting {
         itemsByAccountID[accountID] = items
     }
 
+    func appendPage(_ items: [InactiveProduct], startingAt offset: Int, accountID: EnjoeiAccountID) {
+        itemsByAccountID[accountID, default: []].append(contentsOf: items)
+    }
+
+    func search(matching query: String, accountID: EnjoeiAccountID, limit: Int) -> [InactiveProduct] {
+        let items = itemsByAccountID[accountID] ?? []
+        let matched = query.isEmpty ? items : items.filter { $0.title.localizedCaseInsensitiveContains(query) }
+        return Array(matched.prefix(limit))
+    }
+
     func clearItems(accountID: EnjoeiAccountID) {
         itemsByAccountID[accountID] = nil
     }

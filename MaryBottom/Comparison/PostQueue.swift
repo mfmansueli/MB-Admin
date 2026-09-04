@@ -345,14 +345,12 @@ final class PostQueue {
         pauseGate = nil
     }
 
-    /// Núcleo compartilhado entre fila e avulso: marca `currentItem`, dispara `poster.post` e só
-    /// libera `currentItem` quando aquele status sair de `.megaphoning`.
+    /// Núcleo compartilhado entre fila e avulso: marca `currentItem`, posta e espera terminar de
+    /// verdade (`poster.postAndWait`, não um laço checando `statuses` — `run(...)` por trás já
+    /// deixa o status resolvido antes de voltar).
     private func postAndTrack(item: PostQueueItem, source: AccountSession, destination: AccountSession) async {
         currentItem = item
-        poster.post(product: item.product, from: source, to: destination)
-        while poster.statuses[item.postTarget] == .megaphoning {
-            await Task.yield()
-        }
+        await poster.postAndWait(product: item.product, from: source, to: destination)
         if currentItem?.id == item.id {
             currentItem = nil
         }

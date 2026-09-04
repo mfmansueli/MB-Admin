@@ -74,6 +74,81 @@ struct SwiftDataSmartPriceProductsPersistenceTests {
         #expect(persistence.loadItems(accountID: accountB).map(\.id) == [2])
     }
 
+    @Test("appendPage acrescenta sem apagar o que já tinha, gravando o título resolvido")
+    func appendPageGravaTituloResolvido() {
+        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountID = EnjoeiAccountID()
+        let titles = [1: "brinco argola", 2: "colar prata"]
+
+        persistence.appendPage([makeProduct(id: 1)], startingAt: 0, accountID: accountID) { titles[$0] }
+        persistence.appendPage([makeProduct(id: 2)], startingAt: 1, accountID: accountID) { titles[$0] }
+
+        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1, 2])
+        #expect(persistence.search(matching: "argola", accountID: accountID, limit: 500).map(\.id) == [1])
+    }
+
+    @Test("sem título resolvido ainda, appendPage grava vazio — não trava, só não é encontrado pela busca")
+    func appendPageSemResolverGravaVazio() {
+        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountID = EnjoeiAccountID()
+
+        persistence.appendPage([makeProduct(id: 1)], startingAt: 0, accountID: accountID) { _ in nil }
+
+        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1])
+        #expect(persistence.search(matching: "qualquer coisa", accountID: accountID, limit: 500).isEmpty)
+    }
+
+    @Test("backfillTitles conserta registros gravados sem título, quando o resolvedor passa a responder")
+    func backfillTitlesConsertaRegistros() {
+        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountID = EnjoeiAccountID()
+        persistence.appendPage([makeProduct(id: 1)], startingAt: 0, accountID: accountID) { _ in nil }
+        #expect(persistence.search(matching: "argola", accountID: accountID, limit: 500).isEmpty)
+
+        persistence.backfillTitles(resolver: { $0 == 1 ? "brinco argola" : nil }, accountID: accountID)
+
+        #expect(persistence.search(matching: "argola", accountID: accountID, limit: 500).map(\.id) == [1])
+    }
+
+    @Test("search não vaza entre contas e respeita o fetchLimit")
+    func searchNaoVazaERespeitaLimite() {
+        let persistence = SwiftDataSmartPriceProductsPersistence(container: makeContainer(), defaults: makeDefaults())
+        let accountA = EnjoeiAccountID()
+        let accountB = EnjoeiAccountID()
+        persistence.appendPage((1...5).map { makeProduct(id: $0) }, startingAt: 0, accountID: accountA) { "produto \($0)" }
+        persistence.appendPage([makeProduct(id: 99)], startingAt: 0, accountID: accountB) { "produto \($0)" }
+
+        #expect(persistence.search(matching: "", accountID: accountA, limit: 3).count == 3)
+        #expect(persistence.search(matching: "produto", accountID: accountB, limit: 500).map(\.id) == [99])
+    }
+
+    @Test("descarta registros existentes quando a versão de esquema salva está desatualizada")
+    func descartaRegistrosComVersaoDesatualizada() {
+        let container = makeContainer()
+        let defaults = makeDefaults()
+        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
+        persistence.saveItems([makeProduct(id: 1)], accountID: accountID)
+        defaults.set(0, forKey: "smartPrice.schemaVersion")
+
+        let migratedPersistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
+
+        #expect(migratedPersistence.loadItems(accountID: accountID).isEmpty)
+    }
+
+    @Test("não descarta de novo quando a versão de esquema já está atualizada")
+    func naoDescartaDeNovoQuandoVersaoJaAtualizada() {
+        let container = makeContainer()
+        let defaults = makeDefaults()
+        let accountID = EnjoeiAccountID()
+        let persistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
+        persistence.saveItems([makeProduct(id: 1)], accountID: accountID)
+
+        let secondPersistence = SwiftDataSmartPriceProductsPersistence(container: container, defaults: defaults)
+
+        #expect(secondPersistence.loadItems(accountID: accountID).map(\.id) == [1])
+    }
+
     @Test("migra a lista salva pela versão antiga (UserDefaults) uma única vez, só da conta lida")
     func migraListaLegada() {
         let defaults = makeDefaults()

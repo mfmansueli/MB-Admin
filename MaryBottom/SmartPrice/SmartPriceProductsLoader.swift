@@ -41,6 +41,14 @@ final class SmartPriceProductsLoader {
     private let accountID: EnjoeiAccountID
     private let itemsPersistence: SmartPriceProductsPersisting
 
+    /// Resolve o título de um produto pra indexação de busca no SwiftData — a API de preço esperto
+    /// não devolve título (só id e preço), então quem sabe o nome é sempre outra fonte externa (a
+    /// aba "publicados", ver `AccountSession.init`). `nil` por padrão (testes/preview não precisam
+    /// disso pra funcionar; sem título resolvido ainda, o produto continua aparecendo na lista
+    /// normal — só não é encontrado pela busca até `refreshPersistedTitles()` rodar de novo com o
+    /// resolvedor já respondendo).
+    var titleResolver: (Int) -> String? = { _ in nil }
+
     init(
         client: EnjoeiClientProtocol,
         accountID: EnjoeiAccountID = UUID(),
@@ -61,14 +69,42 @@ final class SmartPriceProductsLoader {
         }
     }
 
+    /// Regrava o título dos produtos já persistidos cujo nome ainda não tinha sido resolvido (ou
+    /// mudou) — chamar quando `titleResolver` passar a responder mais coisas (ex.: a aba
+    /// "publicados" termina de carregar depois da de preço esperto).
+    func refreshPersistedTitles() {
+        itemsPersistence.backfillTitles(resolver: titleResolver, accountID: accountID)
+    }
+
+    /// Busca por título direto na persistência (SwiftData em produção — ver
+    /// `SwiftDataSmartPriceProductsPersistence.search(matching:)`), em vez de filtrar `items` em
+    /// memória. Fachada pra `SmartPriceProductsListView` não precisar conhecer `itemsPersistence`.
+    func search(matching query: String, limit: Int = 500) -> [SmartPriceProduct] {
+        itemsPersistence.search(matching: query, accountID: accountID, limit: limit)
+    }
+
     private func run() async {
         do {
             var page = 1
             var totalPages = 1
             var collected: [SmartPriceProduct] = []
+            // Só limpa o que essa conta tinha persistido quando a primeira página chega de
+            // verdade — mesmo raciocínio de `InactiveProductsLoader.run()`: se a rede falhar logo
+            // na página 1, o cache antigo em disco continua intacto.
+            var hasClearedPersistedCache = false
             repeat {
                 phase = .loadingPage(page, of: totalPages)
                 let result = try await client.smartPriceProductsPage(page: page, tab: false)
+                if !hasClearedPersistedCache {
+                    itemsPersistence.clearItems(accountID: accountID)
+                    hasClearedPersistedCache = true
+                }
+                itemsPersistence.appendPage(
+                    result.products,
+                    startingAt: collected.count,
+                    accountID: accountID,
+                    titleResolver: titleResolver
+                )
                 collected += result.products
                 totalPages = result.totalPages
                 items = collected
@@ -77,7 +113,6 @@ final class SmartPriceProductsLoader {
                     try await Task.sleep(for: delayBetweenPages)
                 }
             } while page <= totalPages
-            itemsPersistence.saveItems(items, accountID: accountID)
             phase = .finished
         } catch {
             phase = .failed(error.localizedDescription)

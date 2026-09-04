@@ -111,6 +111,55 @@ struct InactiveProductsLoaderTests {
         #expect(await client.requestedInactivePages.count == 1)
     }
 
+    @Test("grava cada página assim que ela chega, não só no final")
+    func gravaCadaPaginaAssimQueChega() async {
+        let accountID = EnjoeiAccountID()
+        let persistence = InMemoryInactiveProductsPersistence()
+        let client = StubEnjoeiClient(inactivePagesByNumber: [
+            1: InactiveProductsPage(products: [makeProduct(id: 1)], maxPage: 2),
+            2: InactiveProductsPage(products: [makeProduct(id: 2)], maxPage: 2)
+        ])
+        let loader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+
+        loader.load()
+        await waitUntil { persistence.loadItems(accountID: accountID).map(\.id) == [1] }
+        await waitUntil { loader.phase == .finished }
+
+        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1, 2])
+    }
+
+    @Test("falha logo na primeira página não apaga o cache persistido de um carregamento anterior")
+    func falhaNaPrimeiraPaginaNaoApagaCacheAntigo() async {
+        let accountID = EnjoeiAccountID()
+        let persistence = InMemoryInactiveProductsPersistence()
+        persistence.saveItems([makeProduct(id: 1)], accountID: accountID)
+        let client = StubEnjoeiClient(inactiveProductsError: .http(status: 500, message: "o enjoei caiu"))
+        let loader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+
+        loader.load()
+        await waitUntil {
+            if case .failed = loader.phase { return true }
+            return false
+        }
+
+        #expect(persistence.loadItems(accountID: accountID).map(\.id) == [1])
+    }
+
+    @Test("search delega pra persistência, por conta")
+    func searchDelegaParaPersistencia() async {
+        let accountID = EnjoeiAccountID()
+        let persistence = InMemoryInactiveProductsPersistence()
+        let client = StubEnjoeiClient(inactivePagesByNumber: [
+            1: InactiveProductsPage(products: [makeProduct(id: 1), makeProduct(id: 2)], maxPage: 1)
+        ])
+        let loader = makeLoader(client: client, accountID: accountID, itemsPersistence: persistence)
+
+        loader.load()
+        await waitUntil { loader.phase == .finished }
+
+        #expect(loader.search(matching: "produto 1").map(\.id) == [1])
+    }
+
     /// Espera uma condição sem prender o teste pra sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {

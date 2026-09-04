@@ -31,6 +31,11 @@ struct AccountPublishedTabView: View {
     @State private var isConfirmingBulkRepost = false
     @State private var isConfirmingBulkDelete = false
     @State private var isConfirmingBulkInactivate = false
+    /// Cache de `filteredItems` (ver `recomputeFilteredItems`) — sem isso, cada leitura (lista,
+    /// "selecionar todos", contagem) refiltrava/reordenava a lista inteira de publicados do zero,
+    /// várias vezes por digitação.
+    @State private var filteredItems: [MegaphoneItem] = []
+    @State private var searchDebounceTask: Task<Void, Never>?
 
     private var runner: MegaphoneRunner { account.runner }
 
@@ -90,6 +95,19 @@ struct AccountPublishedTabView: View {
             selectedIDs.removeAll()
             bulkAction = .repost
             discountBulkAction = .applyDiscount
+            recomputeFilteredItems()
+        }
+        .task { recomputeFilteredItems() }
+        .onChange(of: runner.items) { _, _ in recomputeFilteredItems() }
+        // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer o
+        // filtro (potencialmente sobre centenas de produtos publicados) a cada tecla.
+        .onChange(of: searchText) { _, _ in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                recomputeFilteredItems()
+            }
         }
     }
 
@@ -384,7 +402,16 @@ struct AccountPublishedTabView: View {
         }
     }
 
-    private var filteredItems: [MegaphoneItem] {
+    /// Refaz o filtro/ordenação inteiro de uma vez só, guardando o resultado em `filteredItems` —
+    /// chamado só quando `filter`, `runner.items` ou `searchText` mudam de verdade, não a cada
+    /// leitura (ver os `@State`/`onChange` no topo do arquivo e em `body`).
+    /// A busca por título consulta o SwiftData (`runner.searchProductIDs(matching:)` — `#Predicate`
+    /// + `fetchLimit`, sem `JSONDecoder`), mas só pra saber QUAIS ids batem — os itens em si sempre
+    /// vêm de `runner.items` (a lista ao vivo), nunca reconstruídos a partir do que foi persistido:
+    /// status/exposição salvos nunca refletem uma megafonagem em andamento (só existe ao vivo aqui),
+    /// então buscar aceitando esse "atraso" mostraria status errado de propósito. Ver
+    /// `MegaphoneItemRecord`/`MegaphoneRunner.searchProductIDs(matching:)`.
+    private func recomputeFilteredItems() {
         let items: [MegaphoneItem]
         switch filter {
         case .all:
@@ -397,8 +424,12 @@ struct AccountPublishedTabView: View {
                 .sorted { ($0.computedDiscountPercent ?? 0) < ($1.computedDiscountPercent ?? 0) }
         }
         let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedSearch.isEmpty else { return items }
-        return items.filter { $0.product.title.localizedCaseInsensitiveContains(trimmedSearch) }
+        guard !trimmedSearch.isEmpty else {
+            filteredItems = items
+            return
+        }
+        let matchedIDs = Set(runner.searchProductIDs(matching: trimmedSearch))
+        filteredItems = items.filter { matchedIDs.contains($0.id) }
     }
 
     @ViewBuilder

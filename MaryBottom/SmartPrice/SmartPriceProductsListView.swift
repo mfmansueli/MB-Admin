@@ -13,6 +13,13 @@ struct SmartPriceProductsListView: View {
     @State private var isConfirmingBulkActivate = false
     @State private var searchText = ""
     @State private var statusFilter: SmartPriceStatusFilter = .all
+    /// Cache de `filteredItems`/`selectableItems` (ver `recomputeFilteredItems`) — antes disso, uma
+    /// cadeia inteira (`titlesByID` → `displayItems` → `statusFilteredItems` → `filteredItems` →
+    /// `selectableItems`) era refeita do zero a cada leitura, várias vezes por render, numa loja
+    /// com muitos produtos.
+    @State private var filteredItems: [SmartPriceListItem] = []
+    @State private var selectableItems: [SmartPriceListItem] = []
+    @State private var searchDebounceTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
     private var loader: SmartPriceProductsLoader { account.smartPriceProductsLoader }
@@ -64,9 +71,54 @@ struct SmartPriceProductsListView: View {
         // Só busca sozinho quando ainda não tem nada — nem carregado agora, nem persistido de uma
         // abertura anterior do app — e só quando essa aba é de fato exibida.
         .task {
-            guard loader.items.isEmpty, loader.phase == .idle else { return }
-            loader.load()
+            if loader.items.isEmpty, loader.phase == .idle {
+                loader.load()
+            }
+            loader.refreshPersistedTitles()
+            recomputeFilteredItems()
         }
+        // `loader.items` muda a cada página carregada; `account.runner.items` é quem dá título e
+        // link (pode chegar depois da lista de preço esperto) — qualquer um dos dois mudando
+        // recalcula o filtro uma vez só. Quando é `account.runner.items` que muda, também conserta
+        // (`refreshPersistedTitles`) os registros que ficaram com título vazio por terem sido
+        // gravados antes da aba "publicados" responder.
+        .onChange(of: loader.items) { _, _ in recomputeFilteredItems() }
+        .onChange(of: account.runner.items) { _, _ in
+            loader.refreshPersistedTitles()
+            recomputeFilteredItems()
+        }
+        .onChange(of: statusFilter) { _, _ in recomputeFilteredItems() }
+        // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer a
+        // cadeia inteira (potencialmente sobre centenas de produtos) a cada tecla.
+        .onChange(of: searchText) { _, _ in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                recomputeFilteredItems()
+            }
+        }
+    }
+
+    /// Sem busca, monta a partir de `loader.items` (já em memória, completo). Com busca, delega a
+    /// parte de título pro loader (que consulta o SwiftData com `#Predicate` + `fetchLimit` — ver
+    /// `SmartPriceProductsLoader.search(matching:)`), em vez de filtrar tudo em Swift a cada tecla.
+    /// De um jeito ou de outro, ainda precisa cruzar com `account.runner.items` pra ter link/foto de
+    /// verdade (a API de preço esperto não devolve isso — só o título fica persistido, ver
+    /// `SmartPriceProductRecord`) e aplicar o filtro de status por cima.
+    private func recomputeFilteredItems() {
+        let titles = Dictionary(uniqueKeysWithValues: account.runner.items.map { ($0.product.id, $0.product) })
+        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseProducts = trimmed.isEmpty ? loader.items : loader.search(matching: trimmed)
+        var items = baseProducts.map { SmartPriceListItem(product: $0, matched: titles[$0.id]) }
+        if statusFilter != .all {
+            items = items.filter { statusFilter.matches($0.product) }
+        }
+        filteredItems = items
+        // Só os itens não bloqueados entram na seleção — um item `blocked` não aceita a ação de
+        // ativar, então nem "selecionar todos" nem o toque na linha deixam marcá-lo (mesma checagem
+        // em `SmartPriceProductRowView`).
+        selectableItems = items.filter { !$0.product.blocked }
     }
 
     private var searchAndFilterBar: some View {
@@ -102,38 +154,6 @@ struct SmartPriceProductsListView: View {
             }
             .contentShape(.rect)
         }
-    }
-
-    /// Título e link de cada produto vêm de `account.runner.items` (a aba "publicados"), cruzado
-    /// pelo id — ver comentário no topo do arquivo.
-    private var titlesByID: [Int: EnjoeiProduct] {
-        Dictionary(uniqueKeysWithValues: account.runner.items.map { ($0.product.id, $0.product) })
-    }
-
-    private var displayItems: [SmartPriceListItem] {
-        let titles = titlesByID
-        return loader.items.map { SmartPriceListItem(product: $0, matched: titles[$0.id]) }
-    }
-
-    /// Só o filtro de status ("todos"/"preço atual"/"preço alto, venda lenta"/"preço baixo") — a
-    /// busca por título entra depois, em `filteredItems`. "Selecionar todos" considera o resultado
-    /// final dos dois juntos (`selectableItems`, montado a partir de `filteredItems`).
-    private var statusFilteredItems: [SmartPriceListItem] {
-        guard statusFilter != .all else { return displayItems }
-        return displayItems.filter { statusFilter.matches($0.product) }
-    }
-
-    private var filteredItems: [SmartPriceListItem] {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return statusFilteredItems }
-        return statusFilteredItems.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
-    }
-
-    /// Só os itens não bloqueados entram na seleção — um item `blocked` não aceita a ação de
-    /// ativar, então nem "selecionar todos" nem o toque na linha deixam marcá-lo (mesma checagem em
-    /// `SmartPriceProductRowView`).
-    private var selectableItems: [SmartPriceListItem] {
-        filteredItems.filter { !$0.product.blocked }
     }
 
     private var selectionBar: some View {

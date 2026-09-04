@@ -47,6 +47,18 @@ final class CrossAccountPoster {
         }
     }
 
+    /// Como `post(...)`, mas espera a postagem terminar de verdade — usado por `PostQueue`, que
+    /// precisa saber quando um item acabou antes de passar pro próximo. `run(...)` já deixa
+    /// `statuses[target]` resolvido (sucesso ou falha) antes de voltar, então não tem por que quem
+    /// chama ficar checando o dicionário num laço só pra saber a mesma coisa que já teria de graça
+    /// esperando essa função terminar.
+    func postAndWait(product: EnjoeiProduct, from source: AccountSession, to destination: AccountSession) async {
+        let target = PostTarget(productID: product.id, destinationAccountID: destination.id)
+        guard statuses[target] != .megaphoning, statuses[target] != .succeeded else { return }
+        statuses[target] = .megaphoning
+        await run(product: product, from: source, to: destination, target: target)
+    }
+
     private func run(
         product: EnjoeiProduct,
         from source: AccountSession,

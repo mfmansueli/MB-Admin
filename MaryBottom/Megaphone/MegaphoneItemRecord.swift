@@ -1,18 +1,62 @@
 import Foundation
 import SwiftData
 
-/// Registro SwiftData de um produto carregado pelo megafone — mesmo raciocínio de
-/// `InactiveProductRecord`: o `MegaphoneItem` inteiro codificado em `payload`, `sortIndex`
-/// preservando a ordem original da vitrine.
+/// Registro SwiftData de um produto carregado pelo megafone — cada campo de `EnjoeiProduct` vira
+/// sua própria coluna (nada de JSON codificado num blob), mesmo raciocínio de
+/// `InactiveProductRecord`/`SmartPriceProductRecord`. `sortIndex` preserva a ordem original da
+/// vitrine.
+///
+/// `status`/`exposure` do `MegaphoneItem` original **não** viram colunas — `status` é sempre
+/// `.pending` no momento em que `MegaphoneRunner.setLoadedItems` persiste (a lista é gravada logo
+/// depois de carregar a loja, antes de qualquer produto ser megafonado; nenhuma megafonagem em
+/// andamento chega a ser persistida, só existe ao vivo em `MegaphoneRunner.items`), então reconstruir
+/// sempre como `.pending` em `asMegaphoneItem` já é fiel ao que sempre foi salvo. `exposure` fica
+/// como um blob pequeno à parte (`exposurePayload`) — só é lido de volta em `loadItems()` (o
+/// carregamento inicial, uma vez só, nunca no caminho de busca), então o custo de decodificar não
+/// se repete por resultado de busca.
+///
+/// Valores padrão nas colunas não-opcionais são só pra migração automática de quem já tinha
+/// registros salvos num esquema anterior (com `payload`) — todo `init` novo sempre passa os valores
+/// de verdade. Ver `SwiftDataMegaphoneItemsPersistence.wipeStaleSchemaIfNeeded()`.
 @Model
 final class MegaphoneItemRecord {
+    @available(iOS 18, macOS 15, *)
+    #Index<MegaphoneItemRecord>([\.accountID, \.title])
+
     var accountID: EnjoeiAccountID
     var sortIndex: Int
-    var payload: Data
+    var productID: Int = 0
+    var title: String = ""
+    var path: String = ""
+    var photoPublicID: String?
+    var currentPrice: Double?
+    var originalPrice: Double?
+    var exposurePayload: Data?
 
-    init(accountID: EnjoeiAccountID, sortIndex: Int, payload: Data) {
+    init(accountID: EnjoeiAccountID, sortIndex: Int, item: MegaphoneItem) {
         self.accountID = accountID
         self.sortIndex = sortIndex
-        self.payload = payload
+        self.productID = item.product.id
+        self.title = item.product.title
+        self.path = item.product.path
+        self.photoPublicID = item.product.photoPublicID
+        self.currentPrice = item.product.currentPrice
+        self.originalPrice = item.product.originalPrice
+        if let exposure = item.exposure {
+            self.exposurePayload = try? JSONEncoder().encode(exposure)
+        }
+    }
+
+    var asMegaphoneItem: MegaphoneItem {
+        let product = EnjoeiProduct(
+            id: productID,
+            title: title,
+            path: path,
+            photoPublicID: photoPublicID,
+            currentPrice: currentPrice,
+            originalPrice: originalPrice
+        )
+        let exposure = exposurePayload.flatMap { try? JSONDecoder().decode(MegaphoneExposure.self, from: $0) }
+        return MegaphoneItem(product: product, status: .pending, exposure: exposure)
     }
 }

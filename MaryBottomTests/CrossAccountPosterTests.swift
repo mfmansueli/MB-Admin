@@ -200,6 +200,43 @@ struct CrossAccountPosterTests {
         #expect(poster.cooldownUntil == nil)
     }
 
+    /// `postAndWait` é quem `PostQueue` usa (em vez de um laço checando `statuses`) — precisa
+    /// voltar só depois que o status já está resolvido, sucesso ou falha.
+    @Test("postAndWait só volta depois que o status já está resolvido, com sucesso")
+    func postAndWaitSoVoltaComStatusResolvidoSucesso() async {
+        let source = makeAccount(client: StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)]))
+        let destination = makeAccount(client: StubEnjoeiClient())
+        let poster = CrossAccountPoster()
+
+        await poster.postAndWait(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
+
+        #expect(poster.statuses[target(1, destination: destination)] == .succeeded)
+    }
+
+    @Test("postAndWait só volta depois que o status já está resolvido, com falha")
+    func postAndWaitSoVoltaComStatusResolvidoFalha() async {
+        let source = makeAccount(client: StubEnjoeiClient(templateError: .http(status: 500, message: "o enjoei caiu")))
+        let destination = makeAccount(client: StubEnjoeiClient())
+        let poster = CrossAccountPoster()
+
+        await poster.postAndWait(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
+
+        #expect(poster.statuses[target(1, destination: destination)] == .failed("o enjoei caiu"))
+    }
+
+    @Test("postAndWait não posta de novo um produto já concluído com sucesso")
+    func postAndWaitNaoRepostaProdutoJaConcluido() async {
+        let source = makeAccount(client: StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)]))
+        let destinationClient = StubEnjoeiClient()
+        let destination = makeAccount(client: destinationClient)
+        let poster = CrossAccountPoster()
+        await poster.postAndWait(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
+
+        await poster.postAndWait(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
+
+        #expect(await destinationClient.createProductCalls.count == 1)
+    }
+
     /// Espera uma condição sem prender o teste pra sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {

@@ -104,6 +104,15 @@ final class MegaphoneRunner {
         }
     }
 
+    /// Busca por título direto na persistência (SwiftData em produção — ver
+    /// `SwiftDataMegaphoneItemsPersistence.searchProductIDs(matching:)`), devolvendo só os ids que
+    /// batem. Quem chama cruza esses ids com `items` (a lista ao vivo, com status/exposição
+    /// corretos — o que fica persistido nunca reflete uma megafonagem em andamento) — ver
+    /// `AccountPublishedTabView.recomputeFilteredItems()`.
+    func searchProductIDs(matching query: String, limit: Int = 500) -> [Int] {
+        itemsPersistence.searchProductIDs(matching: query, accountID: accountID, limit: limit)
+    }
+
     /// Descarta a lista carregada e busca a loja de novo do zero — pro botão de recarregar, quando
     /// o usuário quer garantir que está vendo o catálogo atual. Só carrega (igual a `load`), nunca
     /// começa a megafonar sozinho: em nenhuma hipótese o app dispara isso sem o toque explícito no
