@@ -16,6 +16,14 @@ struct ComparisonResultView: View {
     @State private var searchText = ""
     @State private var isSelecting = false
     @State private var selectedProductIDs: Set<Int> = []
+    /// Cache de `filteredMatches`/`filteredOnlyInA`/`filteredOnlyInB` (ver `recomputeFilteredItems`)
+    /// — sem isso, o filtro de busca rodava sobre os três resultados inteiros a cada leitura no
+    /// `body` (seleção, contagem, etc.), várias vezes por render, numa comparação com muitos
+    /// produtos. Mesmo raciocínio de `AccountPublishedTabView.filteredItems`.
+    @State private var filteredMatches: [ProductMatch] = []
+    @State private var filteredOnlyInA: [EnjoeiProduct] = []
+    @State private var filteredOnlyInB: [EnjoeiProduct] = []
+    @State private var searchDebounceTask: Task<Void, Never>?
     @FocusState private var isSearchFocused: Bool
 
     private enum ResultFilter: Hashable {
@@ -28,10 +36,6 @@ struct ComparisonResultView: View {
     }
 
     var body: some View {
-        let matches = filteredMatches(result.matches)
-        let onlyInA = filteredProducts(result.onlyInA)
-        let onlyInB = filteredProducts(result.onlyInB)
-
         VStack(spacing: 8) {
             HStack(spacing: 12) {
                 searchField
@@ -39,11 +43,11 @@ struct ComparisonResultView: View {
             }
             .padding(.horizontal, 20)
 
-            if !onlyInA.isEmpty || !onlyInB.isEmpty {
+            if !filteredOnlyInA.isEmpty || !filteredOnlyInB.isEmpty {
                 // Só os produtos das seções que o filtro atual realmente mostra — com "parecidos"
                 // selecionado, por exemplo, não tem o que marcar, já que os pares não são
                 // selecionáveis.
-                let selectableIDs = selectableProductIDs(onlyInA: onlyInA, onlyInB: onlyInB)
+                let selectableIDs = selectableProductIDs(onlyInA: filteredOnlyInA, onlyInB: filteredOnlyInB)
                 HStack {
                     Button(isSelecting ? "cancelar seleção" : "selecionar") {
                         isSelecting.toggle()
@@ -76,77 +80,105 @@ struct ComparisonResultView: View {
                 .padding(.horizontal, 20)
             }
 
-            if matches.isEmpty, onlyInA.isEmpty, onlyInB.isEmpty {
+            if filteredMatches.isEmpty, filteredOnlyInA.isEmpty, filteredOnlyInB.isEmpty {
                 ContentUnavailableView.search(text: searchText)
                     .frame(maxHeight: .infinity)
             } else {
-                List {
-                    if resultFilter == .all || resultFilter == .matches, !matches.isEmpty {
-                        Section {
-                            ForEach(matches) { match in
-                                ProductMatchRowView(match: match)
+                // `LazyVStack` em vez de `List`: mesmo raciocínio de
+                // `AccountPublishedTabView.productList` — no idiom otimizado do Mac Catalyst, `List`
+                // vira `NSTableView`, caro pra reconstruir do zero, e `.id(result.id)` (ver quem
+                // chama esta view) reconstrói esta lista inteira a cada comparação nova.
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        if resultFilter == .all || resultFilter == .matches, !filteredMatches.isEmpty {
+                            Section {
+                                ForEach(filteredMatches) { match in
+                                    ProductMatchRowView(match: match)
+                                    if match.id != filteredMatches.last?.id {
+                                        Divider()
+                                    }
+                                }
+                            } header: {
+                                sectionHeader("produtos em comum")
                             }
-                        } header: {
-                            sectionHeader("produtos em comum")
                         }
-                    }
-                    if resultFilter == .all || resultFilter == .onlyInA, !onlyInA.isEmpty {
-                        Section {
-                            ForEach(onlyInA) { product in
-                                // Só existe em A — postar cria ele em B.
-                                UnmatchedProductRowView(
-                                    product: product,
-                                    sourceAccount: accountA,
-                                    destinationAccount: accountB,
-                                    poster: poster,
-                                    postQueue: postQueue,
-                                    isSelecting: isSelecting,
-                                    isSelected: selectedProductIDs.contains(product.id),
-                                    onToggleSelection: { toggleSelection(productID: product.id) }
-                                )
+                        if resultFilter == .all || resultFilter == .onlyInA, !filteredOnlyInA.isEmpty {
+                            Section {
+                                ForEach(filteredOnlyInA) { product in
+                                    // Só existe em A — postar cria ele em B.
+                                    UnmatchedProductRowView(
+                                        product: product,
+                                        sourceAccount: accountA,
+                                        destinationAccount: accountB,
+                                        poster: poster,
+                                        postQueue: postQueue,
+                                        isSelecting: isSelecting,
+                                        isSelected: selectedProductIDs.contains(product.id),
+                                        onToggleSelection: { toggleSelection(productID: product.id) }
+                                    )
+                                    if product.id != filteredOnlyInA.last?.id {
+                                        Divider()
+                                    }
+                                }
+                            } header: {
+                                sectionHeader("só em \(accountA.user.name)")
                             }
-                        } header: {
-                            sectionHeader("só em \(accountA.user.name)")
                         }
-                    }
-                    if resultFilter == .all || resultFilter == .onlyInB, !onlyInB.isEmpty {
-                        Section {
-                            ForEach(onlyInB) { product in
-                                // Só existe em B — postar cria ele em A.
-                                UnmatchedProductRowView(
-                                    product: product,
-                                    sourceAccount: accountB,
-                                    destinationAccount: accountA,
-                                    poster: poster,
-                                    postQueue: postQueue,
-                                    isSelecting: isSelecting,
-                                    isSelected: selectedProductIDs.contains(product.id),
-                                    onToggleSelection: { toggleSelection(productID: product.id) }
-                                )
+                        if resultFilter == .all || resultFilter == .onlyInB, !filteredOnlyInB.isEmpty {
+                            Section {
+                                ForEach(filteredOnlyInB) { product in
+                                    // Só existe em B — postar cria ele em A.
+                                    UnmatchedProductRowView(
+                                        product: product,
+                                        sourceAccount: accountB,
+                                        destinationAccount: accountA,
+                                        poster: poster,
+                                        postQueue: postQueue,
+                                        isSelecting: isSelecting,
+                                        isSelected: selectedProductIDs.contains(product.id),
+                                        onToggleSelection: { toggleSelection(productID: product.id) }
+                                    )
+                                    if product.id != filteredOnlyInB.last?.id {
+                                        Divider()
+                                    }
+                                }
+                            } header: {
+                                sectionHeader("só em \(accountB.user.name)")
                             }
-                        } header: {
-                            sectionHeader("só em \(accountB.user.name)")
                         }
                     }
                 }
-                .listStyle(.plain)
+            }
+        }
+        .task { recomputeFilteredItems() }
+        // Debounce: espera a digitação parar por 200ms antes de refiltrar, mesmo raciocínio de
+        // `AccountPublishedTabView.searchText`.
+        .onChange(of: searchText) { _, _ in
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(for: .milliseconds(200))
+                guard !Task.isCancelled else { return }
+                recomputeFilteredItems()
             }
         }
     }
 
-    private func filteredMatches(_ matches: [ProductMatch]) -> [ProductMatch] {
+    /// Refaz o filtro dos três resultados de uma vez só — ver `filteredMatches`/`filteredOnlyInA`/
+    /// `filteredOnlyInB` no topo do arquivo.
+    private func recomputeFilteredItems() {
         let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return matches }
-        return matches.filter {
+        guard !text.isEmpty else {
+            filteredMatches = result.matches
+            filteredOnlyInA = result.onlyInA
+            filteredOnlyInB = result.onlyInB
+            return
+        }
+        filteredMatches = result.matches.filter {
             $0.productA.title.localizedCaseInsensitiveContains(text)
                 || $0.productB.title.localizedCaseInsensitiveContains(text)
         }
-    }
-
-    private func filteredProducts(_ products: [EnjoeiProduct]) -> [EnjoeiProduct] {
-        let text = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return products }
-        return products.filter { $0.title.localizedCaseInsensitiveContains(text) }
+        filteredOnlyInA = result.onlyInA.filter { $0.title.localizedCaseInsensitiveContains(text) }
+        filteredOnlyInB = result.onlyInB.filter { $0.title.localizedCaseInsensitiveContains(text) }
     }
 
     private var searchField: some View {

@@ -54,6 +54,9 @@ struct UnmatchedProductRowView: View {
             }
         }
         .padding(.vertical, 2)
+        // Fundo sólido pro scroll do mouse/trackpad funcionar em qualquer área da row no Mac
+        // Catalyst, não só em cima da foto — ver o mesmo comentário em `MegaphoneRowView`.
+        .background(.background)
         .contentShape(.rect)
         .onTapGesture {
             if isSelecting { onToggleSelection() }
@@ -82,33 +85,31 @@ struct UnmatchedProductRowView: View {
 
     @ViewBuilder
     private var postButton: some View {
-        // O bloqueio de 2 minutos passa sozinho sem nenhuma outra mudança de estado disparar uma
-        // atualização da view — sem o tick daqui, o botão continuaria desabilitado depois do
-        // cooldown acabar, até algo mais forçar um redraw.
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            Button {
-                isConfirmingPost = true
-            } label: {
-                switch postStatus {
-                case .megaphoning:
-                    HStack {
-                        ProgressView()
-                        Text("postando em \(destinationAccount.user.name)…")
-                    }
-                case .succeeded:
-                    Label("postado em \(destinationAccount.user.name)", systemImage: "checkmark.circle.fill")
-                case .failed:
-                    Label("postar em \(destinationAccount.user.name)", systemImage: "paperplane.fill")
-                case .pending:
-                    Label("postar em \(destinationAccount.user.name)", systemImage: "paperplane.fill")
+        // `poster.isInCooldown` zera sozinho quando o bloqueio expira (ver
+        // `CrossAccountPoster.scheduleCooldownExpiry`) — não precisa de um tick próprio aqui pra
+        // notar a hora certa, ao contrário de antes.
+        Button {
+            isConfirmingPost = true
+        } label: {
+            switch postStatus {
+            case .megaphoning:
+                HStack {
+                    ProgressView()
+                    Text("postando em \(destinationAccount.user.name)…")
                 }
+            case .succeeded:
+                Label("postado em \(destinationAccount.user.name)", systemImage: "checkmark.circle.fill")
+            case .failed:
+                Label("postar em \(destinationAccount.user.name)", systemImage: "paperplane.fill")
+            case .pending:
+                Label("postar em \(destinationAccount.user.name)", systemImage: "paperplane.fill")
             }
-            .font(.footnote)
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .tint(postButtonTint)
-            .disabled(postStatus == .megaphoning || postStatus == .succeeded || poster.isInCooldown)
         }
+        .font(.footnote)
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .tint(postButtonTint)
+        .disabled(postStatus == .megaphoning || postStatus == .succeeded || poster.isInCooldown)
     }
 
     private var postButtonTint: Color {

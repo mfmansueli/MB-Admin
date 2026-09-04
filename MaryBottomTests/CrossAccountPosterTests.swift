@@ -162,6 +162,58 @@ struct CrossAccountPosterTests {
         #expect(await destinationClient.createProductCalls.count == 2)
     }
 
+    @Test("cooldown expira sozinho, sem precisar de mais nenhuma mudança de estado pra notar")
+    func cooldownExpiraSozinho() async throws {
+        let source = makeAccount(client: StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)]))
+        let destination = makeAccount(client: StubEnjoeiClient())
+        // Duração bem curta — sem esperar o minuto real do padrão, o teste ainda cobre o
+        // comportamento (`cooldownUntil` zera sozinho, sem precisar de outro `post`/leitura pra
+        // "notar" a expiração).
+        let poster = CrossAccountPoster(cooldownDuration: 0.05)
+
+        poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
+
+        #expect(poster.isInCooldown)
+        // Sleep de verdade, com margem folgada (10x a duração) — `waitUntil` (só `Task.yield` em
+        // laço) não serve aqui: sem nenhum outro trabalho pra ceder vez, as 10 mil iterações podem
+        // esgotar bem antes dos 50ms reais do timer interno, então o teste "desistiria" cedo demais.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(poster.isInCooldown == false)
+        #expect(poster.cooldownUntil == nil)
+    }
+
+    @Test("uma postagem nova estica cooldownUntil em vez de deixar a expiração antiga zerar por cima")
+    func postagemNovaEsticaOCooldown() async throws {
+        let source = makeAccount(client: StubEnjoeiClient(
+            templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)]
+        ))
+        let destination = makeAccount(client: StubEnjoeiClient())
+        let poster = CrossAccountPoster(cooldownDuration: 0.3)
+
+        poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
+        await waitUntil { poster.statuses[target(1, destination: destination)] != .megaphoning && poster.statuses[target(1, destination: destination)] != nil }
+        let firstCooldownUntil = try #require(poster.cooldownUntil)
+
+        try await Task.sleep(for: .milliseconds(50))
+        poster.post(product: EnjoeiFixtures.product(id: 2), from: source, to: destination)
+        await waitUntil { poster.statuses[target(2, destination: destination)] != .megaphoning && poster.statuses[target(2, destination: destination)] != nil }
+        let secondCooldownUntil = try #require(poster.cooldownUntil)
+
+        // Comparação de valor, não corrida contra relógio de verdade: a segunda postagem estica o
+        // prazo pra mais longe do que a primeira sozinha deixaria. `scheduleCooldownExpiry` cancela
+        // a tarefa antiga na hora (síncrono, dentro de `run()`), então não existe janela de corrida
+        // pra testar aqui — só confirmar que o valor não regrediu.
+        #expect(secondCooldownUntil > firstCooldownUntil)
+
+        // Sleep de verdade, folgado o bastante pra passar dos dois prazos (o antigo, que a tarefa
+        // cancelada não deveria mais tocar, e o novo, estendido) — mesmo raciocínio de
+        // `cooldownExpiraSozinho` sobre não usar `waitUntil` aqui.
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(poster.isInCooldown == false)
+        #expect(poster.cooldownUntil == nil)
+    }
+
     @Test("o mesmo produto postado pra dois destinos diferentes não colide: os dois rodam de verdade")
     func mesmoProdutoDoisDestinosNaoColide() async {
         let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])

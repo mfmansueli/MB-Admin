@@ -28,6 +28,13 @@ final class CrossAccountPoster {
     /// `static`) pra testes poderem encurtar sem esperar 1 minuto de verdade.
     let cooldownDuration: TimeInterval
     private(set) var cooldownUntil: Date?
+    /// Zera `cooldownUntil` sozinho quando o bloqueio expira de verdade — sem isso, nada mudava de
+    /// estado no momento exato em que o cooldown passava (`isInCooldown` só é correto no instante em
+    /// que é lido), e cada linha da tela de comparação que mostra o botão "postar em X" precisava de
+    /// um `TimelineView` próprio, tiquetaqueando a cada segundo só pra notar a hora certa — caro
+    /// numa comparação com muitos produtos. Um `Task` só, aqui, resolve pra todo mundo que observa
+    /// `isInCooldown` de uma vez.
+    private var cooldownExpiryTask: Task<Void, Never>?
 
     var isInCooldown: Bool {
         guard let cooldownUntil else { return false }
@@ -78,9 +85,23 @@ final class CrossAccountPoster {
             }
             statuses[target] = .succeeded
             cooldownUntil = Date().addingTimeInterval(cooldownDuration)
+            scheduleCooldownExpiry()
         } catch {
             statuses[target] = .failed(error.localizedDescription)
             failureDetails[target] = MegaphoneFailureDetail(action: .post, error: error)
+        }
+    }
+
+    /// Substitui qualquer expiração agendada antes — uma postagem nova sempre estica
+    /// `cooldownUntil` pra mais longe, então a tarefa antiga (que zeraria no prazo velho) tem que
+    /// morrer, senão ela zera `cooldownUntil` cedo demais por cima do prazo novo.
+    private func scheduleCooldownExpiry() {
+        cooldownExpiryTask?.cancel()
+        cooldownExpiryTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: .milliseconds(Int(cooldownDuration * 1000)))
+            guard !Task.isCancelled else { return }
+            cooldownUntil = nil
         }
     }
 

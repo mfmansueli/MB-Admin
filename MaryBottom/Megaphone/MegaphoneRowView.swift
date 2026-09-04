@@ -74,6 +74,12 @@ struct MegaphoneRowView: View {
             }
         }
         .padding(.vertical, 2)
+        // Fundo sólido (mesmo que igual ao da página) — sem isso, no Mac Catalyst o scroll do
+        // mouse/trackpad só funciona em cima de conteúdo com pixel de verdade (a foto), porque a
+        // `ScrollView`/`LazyVStack` (ver quem usa esta row) não tem `List` por baixo roteando o
+        // gesto sozinha. `.contentShape` não resolve isso — é pra gesture recognizers de toque, o
+        // scroll do mouse no Catalyst passa por outro caminho que precisa de uma camada desenhada.
+        .background(.background)
         .contentShape(.rect)
         .onTapGesture {
             if isSelecting { onToggleSelection() }
