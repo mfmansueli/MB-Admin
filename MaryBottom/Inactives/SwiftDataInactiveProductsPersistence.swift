@@ -11,17 +11,10 @@ final class SwiftDataInactiveProductsPersistence: InactiveProductsPersisting {
     private let context: ModelContext
     private let defaults: UserDefaults
 
-    init(container: ModelContainer = SwiftDataInactiveProductsPersistence.sharedContainer, defaults: UserDefaults = .standard) {
+    init(container: ModelContainer = SharedModelContainer.shared, defaults: UserDefaults = .standard) {
         context = ModelContext(container)
         self.defaults = defaults
     }
-
-    // Mesmo raciocínio de `SwiftDataPostHistoryPersistence.sharedContainer` — computado uma vez só
-    // e cacheado, pra duas instâncias sem `container` explícito nunca brigarem por lock do SQLite.
-    nonisolated static let sharedContainer: ModelContainer = {
-        let schema = Schema([InactiveProductRecord.self])
-        return try! ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema)])
-    }()
 
     func loadItems(accountID: EnjoeiAccountID) -> [InactiveProduct] {
         migrateLegacyItemsIfNeeded(accountID: accountID)

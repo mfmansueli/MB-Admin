@@ -9,15 +9,10 @@ final class SwiftDataSmartPriceProductsPersistence: SmartPriceProductsPersisting
     private let context: ModelContext
     private let defaults: UserDefaults
 
-    init(container: ModelContainer = SwiftDataSmartPriceProductsPersistence.sharedContainer, defaults: UserDefaults = .standard) {
+    init(container: ModelContainer = SharedModelContainer.shared, defaults: UserDefaults = .standard) {
         context = ModelContext(container)
         self.defaults = defaults
     }
-
-    nonisolated static let sharedContainer: ModelContainer = {
-        let schema = Schema([SmartPriceProductRecord.self])
-        return try! ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema)])
-    }()
 
     func loadItems(accountID: EnjoeiAccountID) -> [SmartPriceProduct] {
         migrateLegacyItemsIfNeeded(accountID: accountID)
