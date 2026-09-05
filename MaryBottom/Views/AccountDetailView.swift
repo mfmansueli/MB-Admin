@@ -74,10 +74,14 @@ struct AccountDetailView: View {
 
     var body: some View {
         VStack(spacing: 16) {
+            // `progressSnapshot.totalSucceeded/.totalFailed`, não `runner.totalSucceeded/.totalFailed`
+            // direto — mesmos campos, mas os direto no runner mudam a cada produto megafonado (até
+            // 1500+ vezes por rodada), prendendo o `body` inteiro (toolbar, aba selecionada) a
+            // reavaliar nessa frequência; o snapshot já é a versão em lote pra isso.
             UserHeaderView(
                 user: account.user,
-                megaphoneCount: runner.totalSucceeded,
-                errorCount: runner.totalFailed
+                megaphoneCount: runner.progressSnapshot.totalSucceeded,
+                errorCount: runner.progressSnapshot.totalFailed
             )
 
             Picker("", selection: $selectedTab) {
@@ -147,8 +151,10 @@ struct AccountDetailView: View {
                     // sistema, sem impor um frame fixo que brigue com o dimensionamento próprio do
                     // `_UIButtonBarButton` por trás do item de toolbar no Mac Catalyst (`.frame`
                     // fixo aqui gerava "Unable to simultaneously satisfy constraints" toda vez que
-                    // este botão re-renderizava — coisa frequente durante o megafone, já que o
-                    // corpo da view lê `runner.totalSucceeded`/`totalFailed`/`items.count`).
+                    // este botão re-renderizava — historicamente frequente durante o megafone,
+                    // já que o corpo da view lia `runner.totalSucceeded`/`totalFailed`/`items.count`
+                    // direto (agora vem de `progressSnapshot`, bem menos frequente — ver abaixo —,
+                    // mas o fix de layout continua valendo pra qualquer outro re-render).
                     Label("recarregar produtos", systemImage: "arrow.clockwise")
                         .labelStyle(.iconOnly)
                         .font(.body.weight(.semibold))

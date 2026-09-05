@@ -6,9 +6,15 @@ struct UserHeaderView: View {
     let megaphoneCount: Int
     let errorCount: Int
 
+    @Environment(\.displayScale) private var displayScale
+
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: user.avatarURL) { image in
+            // `CachedAsyncImage`, não `AsyncImage` — mesmo raciocínio de `AccountRowView`/
+            // `ProductPhotoView`: sem isso, o avatar é redecodificado do zero toda vez que este
+            // header re-renderiza (o que acontece a cada produto megafonado, via
+            // `megaphoneCount`/`errorCount` mudando).
+            CachedAsyncImage(url: user.avatarURL, maxPixelSize: 72 * displayScale) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 Circle().fill(.quaternary)
