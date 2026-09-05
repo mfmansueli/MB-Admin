@@ -6,13 +6,20 @@ import Observation
 @MainActor
 @Observable
 final class MegaphoneRunner {
-    // `internal(set)` em vez de `private(set)` nas propriedades abaixo — sem isso, os métodos
+    /// Só muda por `setPhase(_:)`, mesmo dentro deste tipo — é o único jeito de garantir que toda
+    /// transição force uma publicação de `progressSnapshot` na hora (ver esse método), inclusive
+    /// as que acontecem em `MegaphoneRunner+ProductLoading.swift`.
+    private(set) var phase: MegaphonePhase = .idle
+    // `internal(set)` em vez de `private(set)` na propriedade abaixo — sem isso, os métodos
     // movidos pra `MegaphoneRunner+ProductLoading.swift`/`MegaphoneRunner+ProductActions.swift`
     // (mesmo tipo, arquivos diferentes) não conseguiriam escrever aqui: `private` em Swift vale
-    // por arquivo, não por tipo. Continuam só de leitura pra fora do módulo (a UI só lê, nunca
+    // por arquivo, não por tipo. Continua só de leitura pra fora do módulo (a UI só lê, nunca
     // atribui direto).
-    internal(set) var phase: MegaphonePhase = .idle
     internal(set) var items: [MegaphoneItem] = []
+    /// Resumo pra quem só mostra visão geral — ver `MegaphoneProgressSnapshot` e
+    /// `refreshProgressSnapshot(force:)`. Só muda por esse método (mesmo de arquivos diferentes,
+    /// que só conseguem chamá-lo — a atribuição em si mora dentro dele, neste arquivo).
+    private(set) var progressSnapshot = MegaphoneProgressSnapshot()
     /// Produto sendo megafonado agora — a lista rola até ele.
     private(set) var currentItemID: Int?
     /// Rodada em andamento e quantas foram pedidas.
@@ -46,6 +53,14 @@ final class MegaphoneRunner {
     /// Quantos ids pedir por chamada ao endpoint de exposição — o Enjoei aceita vários de uma vez,
     /// mas evitamos mandar a loja inteira numa URL só.
     var exposureBatchSize = 80
+    /// A cada quantos itens megafonados (no mínimo) `progressSnapshot` se atualiza durante o laço
+    /// automático — ver `refreshProgressSnapshot(force:)`. `var`, não `let`: os testes usam um
+    /// valor pequeno pra provar o lote sem precisar rodar centenas de itens. Em produção, numa loja
+    /// de 1500 produtos isso publica ~150 atualizações de resumo por rodada em vez de 1500.
+    var progressSnapshotBatchSize = 10
+    /// Quantos itens já passaram desde a última publicação de `progressSnapshot` — zera a cada
+    /// publicação, forçada ou não.
+    private var itemsSinceSnapshot = 0
 
     /// Chamado ao fim de uma rodada (concluída, cancelada ou interrompida por falha), para quem
     /// guarda o resumo entre execuções — a tela só observa `phase`, que reseta a cada novo `start`.
@@ -106,7 +121,7 @@ final class MegaphoneRunner {
         // Sempre passa por `.waitingInQueue` primeiro, mesmo quando a vaga está livre na hora (o
         // `Task` abaixo sempre tem pelo menos um agendamento antes de rodar de verdade) — troca pra
         // `.loadingProducts`/o que já estava rodando assim que `megaphoneQueue.acquire` devolver.
-        phase = .waitingInQueue
+        setPhase(.waitingInQueue)
         task = Task { [weak self] in
             guard let self else { return }
             await self.megaphoneQueue.acquire(self)
@@ -119,7 +134,7 @@ final class MegaphoneRunner {
                 self.task = nil
                 return
             }
-            if self.items.isEmpty { self.phase = .loadingProducts(loaded: 0, total: 0) }
+            if self.items.isEmpty { self.setPhase(.loadingProducts(loaded: 0, total: 0)) }
             await self.run(sellerID: sellerID)
             self.task = nil
         }
@@ -166,19 +181,19 @@ final class MegaphoneRunner {
     }
 
     private func loadOnly(sellerID: Int) async {
-        phase = .loadingProducts(loaded: 0, total: 0)
+        setPhase(.loadingProducts(loaded: 0, total: 0))
         do {
             let items = try await loadProductsWithExposure(sellerID: sellerID)
             guard !items.isEmpty else {
-                phase = .idle
+                setPhase(.idle)
                 return
             }
             setLoadedItems(items)
-            phase = .idle
+            setPhase(.idle)
         } catch {
             // Falha ou cancelamento na busca automática não vira alarme — o usuário ainda pode
             // tocar em "megafonar" pra tentar de propósito e ver o erro de verdade.
-            phase = .idle
+            setPhase(.idle)
         }
     }
 
@@ -188,7 +203,7 @@ final class MegaphoneRunner {
     private func loadProductsWithExposure(sellerID: Int) async throws -> [MegaphoneItem] {
         let products = try await loadAllProducts(sellerID: sellerID)
         guard !products.isEmpty else { return [] }
-        phase = .checkingExposure(checked: 0, total: products.count)
+        setPhase(.checkingExposure(checked: 0, total: products.count))
         let exposures = try await loadExposures(productIDs: products.map(\.id))
         return products.map { MegaphoneItem(product: $0, exposure: exposures[$0.id]) }
     }
@@ -224,7 +239,7 @@ final class MegaphoneRunner {
         guard isRunning, pauseReason == nil else { return }
         pauseReason = reason
         if case .megaphoning(let round, let rounds) = phase {
-            phase = .paused(round: round, of: rounds, reason: reason)
+            setPhase(.paused(round: round, of: rounds, reason: reason))
         }
     }
 
@@ -233,7 +248,7 @@ final class MegaphoneRunner {
         guard reason == nil || reason == currentReason else { return }
         pauseReason = nil
         if case .paused(let round, let rounds, _) = phase {
-            phase = .megaphoning(round: round, of: rounds)
+            setPhase(.megaphoning(round: round, of: rounds))
         }
         openPauseGate()
     }
@@ -259,7 +274,7 @@ final class MegaphoneRunner {
             while rounds.includes(round: currentRound) {
                 round = currentRound
                 if currentRound > 1 { resetItemsForNewRound() }
-                phase = .megaphoning(round: currentRound, of: rounds)
+                setPhase(.megaphoning(round: currentRound, of: rounds))
                 token = try await megaphoneAll(token: token)
                 currentRound += 1
             }
@@ -277,9 +292,40 @@ final class MegaphoneRunner {
     }
 
     private func finish(_ phase: MegaphonePhase) {
-        self.phase = phase
+        setPhase(phase)
         onRoundFinished?(
             MegaphoneRoundSummary(succeeded: totalSucceeded, failed: totalFailed, finishedAt: .now)
+        )
+    }
+
+    /// Único ponto que muda `phase` — publica `progressSnapshot` junto, sempre, pra transições de
+    /// fase (raras) nunca ficarem escondidas atrás do lote usado pelas atualizações item a item
+    /// (ver `refreshProgressSnapshot(force:)`). Sem `private`: chamado também pelos métodos de
+    /// carregamento movidos pra `MegaphoneRunner+ProductLoading.swift` (mesmo raciocínio do
+    /// `internal(set)` nas propriedades no topo deste arquivo).
+    func setPhase(_ newPhase: MegaphonePhase) {
+        phase = newPhase
+        refreshProgressSnapshot()
+    }
+
+    /// Publica `progressSnapshot` a partir do estado atual. `force: true` (o padrão) publica sempre
+    /// — usado em toda transição de fase, que é rara e precisa aparecer na hora. `force: false` só
+    /// publica de fato a cada `progressSnapshotBatchSize` itens — usado dentro do laço de
+    /// `megaphoneAll`/`performApplyDiscount`, onde cada item mudando `items` não pode custar um
+    /// recálculo de tela por conta rodando ao mesmo tempo (ver `MegaphoneProgressSnapshot`).
+    func refreshProgressSnapshot(force: Bool = true) {
+        if !force {
+            itemsSinceSnapshot += 1
+            guard itemsSinceSnapshot >= progressSnapshotBatchSize else { return }
+        }
+        itemsSinceSnapshot = 0
+        progressSnapshot = MegaphoneProgressSnapshot(
+            phase: phase,
+            itemsCount: items.count,
+            processedCount: processedCount,
+            totalSucceeded: totalSucceeded,
+            totalFailed: totalFailed,
+            round: round
         )
     }
 
@@ -318,6 +364,7 @@ final class MegaphoneRunner {
                 failureDetails[items[index].id] = MegaphoneFailureDetail(action: .megaphone, error: error)
                 totalFailed += 1
             }
+            refreshProgressSnapshot(force: false)
 
             // A pausa é entre um produto e o próximo; no fim da rodada não faz sentido esperar.
             if index < items.count - 1, delayBetweenProducts > .zero {

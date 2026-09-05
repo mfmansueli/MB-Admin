@@ -107,14 +107,11 @@ struct AccountRowView: View {
             return crossAccountPostLine
         }
         if account.runner.phase.isActive {
-            return MegaphoneStatusText(
-                phase: account.runner.phase,
-                itemsCount: account.runner.items.count,
-                processedCount: account.runner.processedCount,
-                totalSucceeded: account.runner.totalSucceeded,
-                totalFailed: account.runner.totalFailed,
-                round: account.runner.round
-            ).headline
+            // `progressSnapshot`, não `MegaphoneStatusText` montado direto dos campos do runner: ler
+            // `runner.items`/`processedCount` aqui faria essa row recalcular a cada produto
+            // megafonado (até 1500+ vezes por rodada, em cada conta rodando ao mesmo tempo) — ver
+            // `MegaphoneProgressSnapshot`.
+            return account.runner.progressSnapshot.statusText.headline
         }
         if let summary = account.lastRoundSummary {
             return summary.summaryText()

@@ -4,16 +4,10 @@ import SwiftUI
 struct MegaphoneProgressView: View {
     let runner: MegaphoneRunner
 
-    private var statusText: MegaphoneStatusText {
-        MegaphoneStatusText(
-            phase: runner.phase,
-            itemsCount: runner.items.count,
-            processedCount: runner.processedCount,
-            totalSucceeded: runner.totalSucceeded,
-            totalFailed: runner.totalFailed,
-            round: runner.round
-        )
-    }
+    // `runner.progressSnapshot`, não os campos do runner direto: ler `runner.items`/
+    // `processedCount` aqui faria essa view recalcular a cada produto megafonado (até 1500+ vezes
+    // por rodada) — ver `MegaphoneProgressSnapshot`.
+    private var statusText: MegaphoneStatusText { runner.progressSnapshot.statusText }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {

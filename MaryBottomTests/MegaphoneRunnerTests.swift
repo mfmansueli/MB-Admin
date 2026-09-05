@@ -1030,6 +1030,65 @@ struct MegaphoneRunnerTests {
         #expect(runner.inactivateStatuses[1] == nil)
     }
 
+    // MARK: - progressSnapshot (resumo em lote pra telas de visão geral)
+
+    @Test("progressSnapshot muda de fase na hora, mesmo em pleno lote sem ter batido o tamanho dele")
+    func progressSnapshotAcompanhaTransicaoDeFaseNaHora() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
+        let runner = MegaphoneRunner(client: client)
+        runner.delayBetweenProducts = .seconds(30)
+
+        runner.start(sellerID: 1)
+        await waitUntil { runner.processedCount >= 1 }
+        runner.pause()
+
+        #expect(runner.progressSnapshot.phase == .paused(round: 1, of: .once, reason: .user))
+
+        runner.cancel()
+        await runner.waitUntilFinished()
+    }
+
+    @Test("progressSnapshot não acompanha cada item — só publica a cada progressSnapshotBatchSize")
+    func progressSnapshotNaoAcompanhaCadaItem() async {
+        let ids = Array(1...5)
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: ids, endCursor: nil)])
+        let runner = MegaphoneRunner(client: client)
+        runner.delayBetweenProducts = .seconds(30)
+        runner.progressSnapshotBatchSize = 3
+
+        runner.start(sellerID: 1)
+        await waitUntil { runner.processedCount >= 1 }
+
+        // Um item passou, mas não bateu o lote de 3 — o resumo publicado ainda não mudou.
+        #expect(runner.processedCount == 1)
+        #expect(runner.progressSnapshot.processedCount == 0)
+
+        runner.cancel()
+        await runner.waitUntilFinished()
+
+        // Cancelar força uma publicação final, que alcança o que já tinha sido processado.
+        #expect(runner.progressSnapshot.processedCount == 1)
+    }
+
+    @Test("progressSnapshot publica assim que bate progressSnapshotBatchSize itens, sem esperar o fim da rodada")
+    func progressSnapshotPublicaAoBaterOLote() async {
+        let ids = Array(1...5)
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: ids, endCursor: nil)])
+        let runner = MegaphoneRunner(client: client)
+        runner.delayBetweenProducts = .milliseconds(20)
+        runner.progressSnapshotBatchSize = 2
+
+        runner.start(sellerID: 1)
+        await waitUntil { runner.progressSnapshot.processedCount >= 2 }
+
+        #expect(runner.progressSnapshot.processedCount == 2)
+        // A rodada continua rodando (mais itens por vir) — a publicação não esperou ela terminar.
+        #expect(runner.phase.isActive)
+
+        runner.cancel()
+        await runner.waitUntilFinished()
+    }
+
     /// Espera uma condição do runner sem prender o teste para sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {

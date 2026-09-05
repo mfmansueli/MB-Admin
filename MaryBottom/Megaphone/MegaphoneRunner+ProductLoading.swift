@@ -15,7 +15,7 @@ extension MegaphoneRunner {
             let page = try await client.storeProductsPage(sellerID: sellerID, after: cursor)
             let newProducts = page.products.filter { seenIDs.insert($0.id).inserted }
             products.append(contentsOf: newProducts)
-            phase = .loadingProducts(loaded: products.count, total: max(page.total, products.count))
+            setPhase(.loadingProducts(loaded: products.count, total: max(page.total, products.count)))
 
             // Sem cursor novo, sem produto inédito, ou cursor repetido: acabou a loja.
             guard let endCursor = page.endCursor, !newProducts.isEmpty, endCursor != cursor else {
@@ -34,7 +34,7 @@ extension MegaphoneRunner {
             let exposures = try await client.megaphoneExposures(productIDs: batch)
             for exposure in exposures { exposuresByProductID[exposure.productID] = exposure }
             checked += batch.count
-            phase = .checkingExposure(checked: checked, total: productIDs.count)
+            setPhase(.checkingExposure(checked: checked, total: productIDs.count))
         }
         return exposuresByProductID
     }

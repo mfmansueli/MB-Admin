@@ -22,9 +22,14 @@ struct AccountPublishedTabView: View {
     /// Quantas vezes repetir a lista. Fica guardado entre execuções do app (0 = infinito). Por
     /// conta: com contas rodando em paralelo, uma preferência global faria trocar a velocidade de
     /// uma afetar silenciosamente as outras já em andamento.
-    @AppStorage private var storedRounds: Int
-    /// Intervalo entre um megafone e o próximo, em milissegundos.
-    @AppStorage private var storedSpeed: Int
+    ///
+    /// `@State` simples, não `@AppStorage` com chave dinâmica — esta view tem identidade estável
+    /// entre contas agora (ver o comentário no topo de `AccountDetailView.swift`), e `@AppStorage`
+    /// só recalcula a chave de verdade quando a identidade da view muda. Lido/gravado manualmente no
+    /// `UserDefaults` em `onChange(of: account.id)`/`onChange(of: storedRounds)`/
+    /// `onChange(of: storedSpeed)`, abaixo.
+    @State private var storedRounds = 1
+    @State private var storedSpeed = MegaphoneSpeed.standard.milliseconds
     @FocusState private var isSearchFocused: Bool
 
     @State private var isConfirmingBulkApply = false
@@ -57,12 +62,13 @@ struct AccountPublishedTabView: View {
         _bulkAction = bulkAction
         _discountBulkAction = discountBulkAction
         _isFollowing = isFollowing
-        _storedRounds = AppStorage(wrappedValue: 1, "megaphone.rounds.\(account.id)")
-        _storedSpeed = AppStorage(wrappedValue: MegaphoneSpeed.standard.milliseconds, "megaphone.speed.\(account.id)")
     }
 
     private var rounds: MegaphoneRounds { MegaphoneRounds(rawValue: storedRounds) }
     private var speed: MegaphoneSpeed { MegaphoneSpeed(milliseconds: storedSpeed) }
+
+    private func roundsKey(_ accountID: EnjoeiAccountID) -> String { "megaphone.rounds.\(accountID)" }
+    private func speedKey(_ accountID: EnjoeiAccountID) -> String { "megaphone.speed.\(accountID)" }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -86,6 +92,10 @@ struct AccountPublishedTabView: View {
         // Vale mudar o intervalo no meio da rodada: o laço lê o valor a cada produto.
         .onChange(of: storedSpeed) { _, milliseconds in
             runner.delayBetweenProducts = MegaphoneSpeed(milliseconds: milliseconds).duration
+            UserDefaults.standard.set(milliseconds, forKey: speedKey(account.id))
+        }
+        .onChange(of: storedRounds) { _, newValue in
+            UserDefaults.standard.set(newValue, forKey: roundsKey(account.id))
         }
         // A seleção só faz sentido dentro do filtro "pede desconto" — trocar de filtro (ou sair
         // dele) com itens marcados deixaria a seleção "invisível" mas ainda contando pro botão de
@@ -97,7 +107,21 @@ struct AccountPublishedTabView: View {
             discountBulkAction = .applyDiscount
             recomputeFilteredItems()
         }
-        .task { recomputeFilteredItems() }
+        // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
+        // conta — sem identidade nova por conta (ver `AccountDetailView.swift`), é o único gatilho
+        // que sobrou pra recarregar `storedRounds`/`storedSpeed` e zerar o resto do estado local.
+        .onChange(of: account.id, initial: true) { _, newAccountID in
+            storedRounds = UserDefaults.standard.object(forKey: roundsKey(newAccountID)) as? Int ?? 1
+            storedSpeed = UserDefaults.standard.object(forKey: speedKey(newAccountID)) as? Int
+                ?? MegaphoneSpeed.standard.milliseconds
+            searchDebounceTask?.cancel()
+            searchDebounceTask = nil
+            isConfirmingBulkApply = false
+            isConfirmingBulkRepost = false
+            isConfirmingBulkDelete = false
+            isConfirmingBulkInactivate = false
+            recomputeFilteredItems()
+        }
         .onChange(of: runner.items) { _, _ in recomputeFilteredItems() }
         // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer o
         // filtro (potencialmente sobre centenas de produtos publicados) a cada tecla.
@@ -457,10 +481,12 @@ struct AccountPublishedTabView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     // `LazyVStack` em vez de `List`: no idiom otimizado do Mac Catalyst, `List` vira
-                    // `NSTableView` por baixo, que é caro pra reconstruir do zero — e a troca de
-                    // conta reconstrói esta lista inteira sempre (ver `.id(account.id)` em
-                    // `AccountsListView`). `LazyVStack` não passa por essa ponte e ainda mantém a
-                    // virtualização (só monta as linhas visíveis).
+                    // `NSTableView` por baixo, caro pra reconstruir do zero. `LazyVStack` não passa
+                    // por essa ponte e ainda mantém a virtualização (só monta as linhas visíveis) —
+                    // importante já que esta view agora mantém identidade estável entre contas (ver
+                    // o comentário no topo de `AccountDetailView.swift`), então o `ForEach` abaixo
+                    // é quem de fato atualiza item a item ao trocar de conta, em vez de reconstruir
+                    // do zero.
                     LazyVStack(spacing: 0) {
                         ForEach(filteredItems) { item in
                             MegaphoneRowView(

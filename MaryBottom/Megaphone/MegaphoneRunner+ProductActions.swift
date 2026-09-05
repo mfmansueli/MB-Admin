@@ -32,6 +32,9 @@ extension MegaphoneRunner {
             failureDetails[productID] = MegaphoneFailureDetail(action: .applyDiscount, error: error)
             totalFailed += 1
         }
+        // Fora do laço automático (que já publica em lote no fim de cada item, ver
+        // `megaphoneAll`) — essa ação é avulsa e rara, então publica na hora sem lote.
+        refreshProgressSnapshot()
     }
 
     /// Procura de novo o índice em vez de guardar o de antes do `await`: uma rodada nova
