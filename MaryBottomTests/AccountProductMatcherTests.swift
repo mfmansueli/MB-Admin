@@ -107,6 +107,34 @@ struct AccountProductMatcherTests {
         #expect(result.onlyInB.isEmpty)
     }
 
+    @Test("com descrição buscada (comparação completa), títulos parecidos + descrição em comum casam mais forte")
+    func descricaoAjudaACasar() {
+        // Títulos bem diferentes sozinhos não bateriam o threshold padrão — a descrição em comum
+        // é o que empurra o par pra cima de 0.5.
+        var a = EnjoeiFixtures.product(id: 1, title: "peça exclusiva prata")
+        a = a.withDescription("colar curto prata 925 zircônia branca clássico elegante")
+        var b = EnjoeiFixtures.product(id: 2, title: "joia linda presente")
+        b = b.withDescription("colar curto prata 925 zircônia branca clássico elegante")
+
+        let result = AccountProductMatcher.compare(productsA: [a], productsB: [b], threshold: 0.5)
+
+        #expect(result.matches.count == 1)
+        #expect(result.onlyInA.isEmpty)
+        #expect(result.onlyInB.isEmpty)
+    }
+
+    @Test("sem descrição (comparação simples), continua comparando só pelo título — mesmo resultado de sempre")
+    func semDescricaoContinuaSoTitulo() {
+        let a = EnjoeiFixtures.product(id: 1, title: "peça exclusiva prata")
+        let b = EnjoeiFixtures.product(id: 2, title: "joia linda presente")
+
+        let result = AccountProductMatcher.compare(productsA: [a], productsB: [b], threshold: 0.5)
+
+        #expect(result.matches.isEmpty)
+        #expect(result.onlyInA.map(\.id) == [1])
+        #expect(result.onlyInB.map(\.id) == [2])
+    }
+
     @Test("threshold customizado muda o resultado")
     func thresholdCustomizado() {
         let a = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925 zircônia branca clássico")

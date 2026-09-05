@@ -28,4 +28,16 @@ final class InMemoryMegaphoneItemsPersistence: MegaphoneItemsPersisting {
     func clearItems() {
         items = []
     }
+
+    func upsertDescription(for product: EnjoeiProduct, description: String) {
+        guard let index = items.firstIndex(where: { $0.id == product.id }) else {
+            items.append(MegaphoneItem(product: product.withDescription(description)))
+            return
+        }
+        items[index] = MegaphoneItem(
+            product: items[index].product.withDescription(description),
+            status: items[index].status,
+            exposure: items[index].exposure
+        )
+    }
 }

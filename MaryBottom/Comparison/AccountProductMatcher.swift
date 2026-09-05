@@ -17,8 +17,8 @@ nonisolated enum AccountProductMatcher {
         threshold: Double = defaultThreshold
     ) -> AccountComparisonResult {
         // Tokeniza uma vez por produto, não uma vez por par — O(N+M) em vez de O(N×M) tokenizações.
-        let tokensA = productsA.map { ($0, ProductSimilarity.tokenize($0.title)) }
-        let tokensB = productsB.map { ($0, ProductSimilarity.tokenize($0.title)) }
+        let tokensA = productsA.map { ($0, ProductSimilarity.tokenize(comparableText(for: $0))) }
+        let tokensB = productsB.map { ($0, ProductSimilarity.tokenize(comparableText(for: $0))) }
 
         // Índice invertido — cada palavra de B aponta pros índices dos produtos que a contêm.
         // Sem isso, o laço abaixo calculava interseção/união pra TODO par (A×B) só pra descartar a
@@ -84,5 +84,15 @@ nonisolated enum AccountProductMatcher {
         let onlyInB = productsB.enumerated().filter { !usedB.contains($0.offset) }.map(\.element)
 
         return AccountComparisonResult(matches: matches, onlyInA: onlyInA, onlyInB: onlyInB)
+    }
+
+    /// Título sozinho por padrão; com descrição já buscada (comparação completa, ver
+    /// `AccountComparisonLoader`), soma as duas — mais texto em comum entre dois anúncios do mesmo
+    /// produto, sem exigir que a descrição também bata sozinha (ela nunca entra sem o título já
+    /// contribuir pelo menos uma palavra). Não é `private`: `ProductMatchDifference` reusa a mesma
+    /// função pra explicar o score de um par já casado com o texto exato que gerou aquele número.
+    static func comparableText(for product: EnjoeiProduct) -> String {
+        guard let description = product.description, !description.isEmpty else { return product.title }
+        return "\(product.title) \(description)"
     }
 }

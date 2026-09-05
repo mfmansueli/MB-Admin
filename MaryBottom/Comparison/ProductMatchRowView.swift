@@ -5,6 +5,8 @@ import SwiftUI
 struct ProductMatchRowView: View {
     let match: ProductMatch
 
+    @State private var isShowingDifference = false
+
     var body: some View {
         VStack(spacing: 8) {
             HStack {
@@ -16,9 +18,28 @@ struct ProductMatchRowView: View {
             }
             HStack(alignment: .top, spacing: 12) {
                 side(for: match.productA)
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.footnote)
-                    .foregroundStyle(.tertiary)
+                VStack(spacing: 6) {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .font(.footnote)
+                        .foregroundStyle(.tertiary)
+                    // O cálculo de `ProductMatchDifference` só acontece dentro do `.sheet` — o
+                    // SwiftUI não avalia esse conteúdo até o usuário efetivamente abrir, então
+                    // nenhuma comparação extra roda só por essa row existir na lista.
+                    //
+                    // Círculo com tamanho mínimo, mesmo padrão dos botões de ícone do resto do
+                    // app (ex.: "recarregar produtos") — sem isso, o alvo de toque ficava do
+                    // tamanho do próprio glifo, pequeno demais pra acertar de primeira.
+                    Button {
+                        isShowingDifference = true
+                    } label: {
+                        Image(systemName: "text.magnifyingglass")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .frame(minWidth: 34, minHeight: 34)
+                            .background(.quaternary, in: .circle)
+                    }
+                    .buttonStyle(.plain)
+                }
                 side(for: match.productB)
             }
         }
@@ -27,6 +48,9 @@ struct ProductMatchRowView: View {
         // Catalyst, não só em cima da foto — ver o mesmo comentário em `MegaphoneRowView`.
         .background(.background)
         .contentShape(.rect)
+        .sheet(isPresented: $isShowingDifference) {
+            ProductMatchDifferenceSheet(match: match)
+        }
     }
 
     @ViewBuilder

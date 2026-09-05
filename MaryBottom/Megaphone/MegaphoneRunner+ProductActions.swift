@@ -41,6 +41,18 @@ extension MegaphoneRunner {
         items[index].status = status
     }
 
+    /// Aplica a descrição buscada por `ProductDetailsLoader` na lista ao vivo — sem efeito se o
+    /// produto não estiver mais em `items` (ex.: apagado, ou uma lista nova carregada no meio da
+    /// busca de detalhes).
+    func applyDescription(productID: Int, description: String) {
+        guard let index = items.firstIndex(where: { $0.id == productID }) else { return }
+        items[index] = MegaphoneItem(
+            product: items[index].product.withDescription(description),
+            status: items[index].status,
+            exposure: items[index].exposure
+        )
+    }
+
     /// Apaga um produto de vez. Ação destrutiva e provavelmente irreversível — a confirmação fica
     /// por conta de quem chama (a tela). O item continua na lista, só marcado como excluído: tirar
     /// ele de `items` na hora derrubaria a linha (e o que estiver mostrando o resultado) da tela.

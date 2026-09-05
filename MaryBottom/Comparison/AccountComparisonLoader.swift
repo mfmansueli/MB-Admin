@@ -10,6 +10,11 @@ final class AccountComparisonLoader {
         case idle
         /// Soma das duas contas — cada uma informa seu próprio `loaded`/`total` conforme pagina.
         case loadingProducts(loaded: Int, total: Int)
+        /// Só na "comparação completa" (ver `compare(fullComparison:)`) — as duas contas buscam a
+        /// descrição de cada produto ao mesmo tempo; cada `AccountSession.productDetailsLoader` tem
+        /// seu próprio `phase`, que a tela lê direto pra mostrar o progresso individual de cada
+        /// loja.
+        case fetchingDetails
         case finished(AccountComparisonResult)
     }
 
@@ -23,7 +28,11 @@ final class AccountComparisonLoader {
     private var loadedB = 0
     private var totalB = 0
 
-    func compare(accountA: AccountSession, accountB: AccountSession) {
+    /// - Parameter fullComparison: além do título, busca a descrição de cada produto das duas
+    ///   contas (`ProductDetailsLoader`, ao mesmo tempo pras duas) antes de casar os pares — mais
+    ///   precisa, mas uma chamada de rede por produto, sem lote, então pode demorar bastante numa
+    ///   loja grande.
+    func compare(accountA: AccountSession, accountB: AccountSession, fullComparison: Bool = false) {
         guard task == nil else { return }
         loadedA = 0
         totalA = 0
@@ -31,7 +40,7 @@ final class AccountComparisonLoader {
         totalB = 0
         phase = .loadingProducts(loaded: 0, total: 0)
         task = Task { [weak self] in
-            await self?.run(accountA: accountA, accountB: accountB)
+            await self?.run(accountA: accountA, accountB: accountB, fullComparison: fullComparison)
             self?.task = nil
         }
     }
@@ -41,7 +50,7 @@ final class AccountComparisonLoader {
         await task?.value
     }
 
-    private func run(accountA: AccountSession, accountB: AccountSession) async {
+    private func run(accountA: AccountSession, accountB: AccountSession, fullComparison: Bool) async {
         // Busca a lista de produtos direto do cliente, sem passar por `MegaphoneRunner.load` —
         // aquele fluxo também confere a exposição de cada produto (chamada extra, via WebView, em
         // lotes) pro megafone, o que aqui só deixa a comparação lenta à toa: ela nunca usa
@@ -65,8 +74,18 @@ final class AccountComparisonLoader {
             self?.totalB = total
             self?.updateLoadingPhase()
         }
-        let productsA = (try? await productsATask) ?? []
-        let productsB = (try? await productsBTask) ?? []
+        var productsA = (try? await productsATask) ?? []
+        var productsB = (try? await productsBTask) ?? []
+
+        if fullComparison {
+            await fetchDetails(productsA: productsA, accountA: accountA, productsB: productsB, accountB: accountB)
+        }
+        // Sempre usa a descrição que já estiver salva localmente pra cada produto, mesmo com
+        // "comparação completa" desligada — não busca nada novo (isso só acontece acima, e só
+        // ligado), mas o que uma comparação completa anterior (com qualquer conta) já deixou salvo
+        // não devia ficar de fora só porque desta vez o toggle está desligado.
+        productsA = applyKnownDescriptions(to: productsA, loader: accountA.productDetailsLoader)
+        productsB = applyKnownDescriptions(to: productsB, loader: accountB.productDetailsLoader)
 
         // O(N×M) pares — tira do MainActor pra não travar a tela numa loja grande.
         let result = await Task.detached {
@@ -77,6 +96,35 @@ final class AccountComparisonLoader {
 
     private func updateLoadingPhase() {
         phase = .loadingProducts(loaded: loadedA + loadedB, total: totalA + totalB)
+    }
+
+    /// Dispara a busca de descrição das duas contas ao mesmo tempo (cada `AccountSession` tem seu
+    /// próprio `productDetailsLoader`, sessão/`WKWebView` própria — não competem entre si) e espera
+    /// as duas terminarem. Não devolve nada: quem chama sempre passa por `applyKnownDescriptions`
+    /// logo depois, que já lê o que ficou persistido (incluindo o que acabou de ser buscado aqui).
+    private func fetchDetails(
+        productsA: [EnjoeiProduct],
+        accountA: AccountSession,
+        productsB: [EnjoeiProduct],
+        accountB: AccountSession
+    ) async {
+        phase = .fetchingDetails
+        accountA.productDetailsLoader.fetchAll(products: productsA)
+        accountB.productDetailsLoader.fetchAll(products: productsB)
+        await accountA.productDetailsLoader.waitUntilFinished()
+        await accountB.productDetailsLoader.waitUntilFinished()
+    }
+
+    /// Preenche a descrição de cada produto que já estiver salva localmente pra essa conta —
+    /// independente de "comparação completa" estar ligada agora: uma comparação completa anterior
+    /// (com qualquer conta) já pode ter deixado a descrição salva, e ela deve valer sempre que
+    /// disponível, não só quando o toggle está ligado nesta chamada em particular. Produto sem
+    /// descrição continua com `description: nil` — o matcher cai pra título sozinho pra ele.
+    private func applyKnownDescriptions(to products: [EnjoeiProduct], loader: ProductDetailsLoader) -> [EnjoeiProduct] {
+        let descriptions = loader.knownDescriptions(for: products.map(\.id))
+        return products.map { product in
+            descriptions[product.id].map(product.withDescription) ?? product
+        }
     }
 
     /// - Parameter onProgress: quantos produtos já vieram e o total esperado, depois de cada

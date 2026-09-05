@@ -63,6 +63,19 @@ final class SwiftDataMegaphoneItemsPersistence: MegaphoneItemsPersisting {
         try? context.save()
     }
 
+    func upsertDescription(for product: EnjoeiProduct, description: String) {
+        let productID = product.id
+        let descriptor = FetchDescriptor<MegaphoneItemRecord>(predicate: #Predicate { $0.productID == productID })
+        if let record = try? context.fetch(descriptor).first {
+            record.descriptionText = description
+        } else {
+            let nextIndex = (try? context.fetchCount(FetchDescriptor<MegaphoneItemRecord>())) ?? 0
+            let item = MegaphoneItem(product: product.withDescription(description))
+            context.insert(MegaphoneItemRecord(sortIndex: nextIndex, item: item))
+        }
+        try? context.save()
+    }
+
     private func deleteRecords() {
         try? context.delete(model: MegaphoneItemRecord.self)
     }

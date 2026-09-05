@@ -15,19 +15,24 @@ struct SwiftDataMegaphoneItemsPersistenceTests {
         UserDefaults(suiteName: "SwiftDataMegaphoneItemsPersistenceTests.\(UUID().uuidString)")!
     }
 
-    private func makeItem(id: Int, status: MegaphoneStatus = .pending, exposure: MegaphoneExposure? = nil) -> MegaphoneItem {
-        MegaphoneItem(
-            product: EnjoeiProduct(
-                id: id,
-                title: "produto \(id)",
-                path: "produto-\(id)",
-                photoPublicID: "foto-\(id)",
-                currentPrice: 100,
-                originalPrice: 150
-            ),
-            status: status,
-            exposure: exposure
+    private func makeItem(
+        id: Int,
+        status: MegaphoneStatus = .pending,
+        exposure: MegaphoneExposure? = nil,
+        description: String? = nil
+    ) -> MegaphoneItem {
+        var product = EnjoeiProduct(
+            id: id,
+            title: "produto \(id)",
+            path: "produto-\(id)",
+            photoPublicID: "foto-\(id)",
+            currentPrice: 100,
+            originalPrice: 150
         )
+        if let description {
+            product = product.withDescription(description)
+        }
+        return MegaphoneItem(product: product, status: status, exposure: exposure)
     }
 
     @Test("sem nada salvo ainda, devolve lista vazia")
@@ -81,6 +86,54 @@ struct SwiftDataMegaphoneItemsPersistenceTests {
         persistenceA.saveItems([makeItem(id: 1)])
 
         #expect(persistenceB.loadItems().isEmpty)
+    }
+
+    @Test("guarda e lê de volta a descrição, quando presente")
+    func salvaELeDeVoltaDescricao() {
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        let items = [makeItem(id: 1, description: "descrição completa do produto 1"), makeItem(id: 2)]
+
+        persistence.saveItems(items)
+
+        let reloaded = persistence.loadItems()
+        #expect(reloaded.first { $0.id == 1 }?.product.description == "descrição completa do produto 1")
+        #expect(reloaded.first { $0.id == 2 }?.product.description == nil)
+    }
+
+    @Test("upsertDescription grava só a descrição, sem mexer no resto do produto, quando já persistido")
+    func upsertDescriptionAtualizaProdutoExistente() {
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([makeItem(id: 1), makeItem(id: 2)])
+
+        persistence.upsertDescription(
+            for: EnjoeiProduct(id: 1, title: "produto 1", path: "produto-1", photoPublicID: "foto-1", currentPrice: 100, originalPrice: 150),
+            description: "descrição buscada depois"
+        )
+
+        let reloaded = persistence.loadItems()
+        #expect(reloaded.first { $0.id == 1 }?.product.description == "descrição buscada depois")
+        #expect(reloaded.first { $0.id == 1 }?.product.title == "produto 1")
+        #expect(reloaded.first { $0.id == 2 }?.product.description == nil)
+        #expect(reloaded.count == 2)
+    }
+
+    /// Cenário real: a tela de comparação busca produtos frescos direto da rede (não via
+    /// `MegaphoneRunner.load`), então pode chamar isso pra uma conta que nunca teve a lista de
+    /// publicados aberta — sem registro nenhum ainda pra esse produto.
+    @Test("upsertDescription cria o registro quando o produto ainda não estava persistido")
+    func upsertDescriptionCriaRegistroQuandoNaoExistia() {
+        let persistence = SwiftDataMegaphoneItemsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+
+        persistence.upsertDescription(
+            for: EnjoeiProduct(id: 42, title: "produto novo", path: "produto-novo", photoPublicID: "foto-42", currentPrice: 200, originalPrice: 200),
+            description: "descrição de um produto nunca persistido"
+        )
+
+        let reloaded = persistence.loadItems()
+        #expect(reloaded.count == 1)
+        #expect(reloaded.first?.id == 42)
+        #expect(reloaded.first?.product.title == "produto novo")
+        #expect(reloaded.first?.product.description == "descrição de um produto nunca persistido")
     }
 
     @Test("clearItems apaga tudo")

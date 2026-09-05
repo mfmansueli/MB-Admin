@@ -19,6 +19,7 @@ final class AccountSession: Identifiable {
     let keepAlive: MegaphoneKeepAlive
     let inactiveProductsLoader: InactiveProductsLoader
     let smartPriceProductsLoader: SmartPriceProductsLoader
+    let productDetailsLoader: ProductDetailsLoader
     let webView: WKWebView?
 
     private let sessionClearer: EnjoeiSessionClearing
@@ -40,9 +41,14 @@ final class AccountSession: Identifiable {
         sessionClearer = dependencies.sessionClearer
         webView = dependencies.webView
 
+        // Compartilhado entre o runner e `productDetailsLoader`: os dois lêem/escrevem a mesma
+        // tabela de produtos publicados (um a lista inteira, o outro só a descrição de cada um) —
+        // duas instâncias apontando pro mesmo `ModelContainer` funcionam, mas reusar uma só evita
+        // abrir um segundo `ModelContext`/repetir a migração de esquema à toa.
+        let megaphoneItemsPersistence = SwiftDataMegaphoneItemsPersistence(accountID: id)
         let runner = MegaphoneRunner(
             client: dependencies.client,
-            itemsPersistence: SwiftDataMegaphoneItemsPersistence(accountID: id),
+            itemsPersistence: megaphoneItemsPersistence,
             megaphoneQueue: megaphoneQueue
         )
         self.runner = runner
@@ -61,6 +67,18 @@ final class AccountSession: Identifiable {
         smartPriceProductsLoader.titleResolver = { [weak runner] productID in
             runner?.items.first { $0.product.id == productID }?.product.title
         }
+
+        let productDetailsLoader = ProductDetailsLoader(
+            client: dependencies.client,
+            itemsPersistence: megaphoneItemsPersistence
+        )
+        // A descrição buscada não tem pra onde ir sozinha — este loader só busca e persiste, quem
+        // atualiza a lista ao vivo (pra a tela e a comparação enxergarem sem reabrir o app) é o
+        // runner. `weak`: mesmo raciocínio do `titleResolver` acima.
+        productDetailsLoader.onDescriptionFetched = { [weak runner] productID, description in
+            runner?.applyDescription(productID: productID, description: description)
+        }
+        self.productDetailsLoader = productDetailsLoader
     }
 
     var record: AccountRecord {

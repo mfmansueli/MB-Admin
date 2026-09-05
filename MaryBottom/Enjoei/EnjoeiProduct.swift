@@ -8,6 +8,24 @@ nonisolated struct EnjoeiProduct: Identifiable, Equatable, Sendable, Codable {
     let photoPublicID: String?
     let currentPrice: Double?
     let originalPrice: Double?
+    /// `nil` até `ProductDetailsLoader` buscar o produto inteiro (`EnjoeiClientProtocol
+    /// .productTemplate`) — nenhuma das rotas usadas pra listar a loja devolve descrição, só esse
+    /// pedido avulso por produto.
+    var description: String? = nil
+
+    /// Cópia com a descrição preenchida — usado por `MegaphoneRunner.applyDescription` depois que
+    /// `ProductDetailsLoader` busca o produto inteiro.
+    func withDescription(_ description: String) -> EnjoeiProduct {
+        EnjoeiProduct(
+            id: id,
+            title: title,
+            path: path,
+            photoPublicID: photoPublicID,
+            currentPrice: currentPrice,
+            originalPrice: originalPrice,
+            description: description
+        )
+    }
 
     var photoURL: URL? {
         guard let photoPublicID else { return nil }

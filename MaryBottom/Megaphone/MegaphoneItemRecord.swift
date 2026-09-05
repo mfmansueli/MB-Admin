@@ -29,6 +29,9 @@ final class MegaphoneItemRecord {
     var currentPrice: Double?
     var originalPrice: Double?
     var exposurePayload: Data?
+    /// Preenchido por `ProductDetailsLoader`, bem depois do carregamento inicial — `nil` até
+    /// alguém tocar o botão de buscar detalhes completos.
+    var descriptionText: String?
 
     init(sortIndex: Int, item: MegaphoneItem) {
         self.sortIndex = sortIndex
@@ -38,13 +41,14 @@ final class MegaphoneItemRecord {
         self.photoPublicID = item.product.photoPublicID
         self.currentPrice = item.product.currentPrice
         self.originalPrice = item.product.originalPrice
+        self.descriptionText = item.product.description
         if let exposure = item.exposure {
             self.exposurePayload = try? JSONEncoder().encode(exposure)
         }
     }
 
     var asMegaphoneItem: MegaphoneItem {
-        let product = EnjoeiProduct(
+        var product = EnjoeiProduct(
             id: productID,
             title: title,
             path: path,
@@ -52,6 +56,9 @@ final class MegaphoneItemRecord {
             currentPrice: currentPrice,
             originalPrice: originalPrice
         )
+        if let descriptionText {
+            product = product.withDescription(descriptionText)
+        }
         let exposure = exposurePayload.flatMap { try? JSONDecoder().decode(MegaphoneExposure.self, from: $0) }
         return MegaphoneItem(product: product, status: .pending, exposure: exposure)
     }

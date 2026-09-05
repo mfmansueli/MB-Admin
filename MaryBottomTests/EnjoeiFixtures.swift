@@ -14,6 +14,25 @@ nonisolated enum EnjoeiFixtures {
         )
     }
 
+    static func productTemplate(description: String = "descrição de exemplo") -> ProductTemplate {
+        ProductTemplate(
+            title: "produto",
+            description: description,
+            brand: nil,
+            used: false,
+            price: 10000,
+            originalPrice: 10000,
+            weight: "0.3",
+            quantity: 1,
+            category: .init(id: 327),
+            size: nil,
+            shipping: .init(type: "charge_by_weight", hasInsurance: true),
+            photos: [],
+            originPlanID: 1,
+            smartPrice: nil
+        )
+    }
+
     static func page(ids: [Int], total: Int? = nil, endCursor: String? = "cursor") -> StoreProductsPage {
         StoreProductsPage(
             products: ids.map { product(id: $0) },
