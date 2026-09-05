@@ -337,6 +337,39 @@ struct AccountsStoreTests {
         PerAccountModelContainer.destroy(for: idB)
     }
 
+    @Test("aviso de memória do observer aplica o teto na megaphoneQueue compartilhada")
+    func avisoDeMemoriaAplicaTetoNaMegaphoneQueue() async {
+        let observer = FakeMemoryPressureObserver()
+        let idA = EnjoeiAccountID()
+        let idB = EnjoeiAccountID()
+        let store = AccountsStore(
+            dependenciesFactory: { id in
+                AccountDependencies(
+                    client: StubEnjoeiClient(user: id == idA ? .stub : otherUser),
+                    sessionClearer: FakeSessionClearer(),
+                    webView: nil
+                )
+            },
+            persistence: InMemoryAccountsPersistence(),
+            memoryPressureObserver: observer
+        )
+        #expect(observer.startCount == 1)
+        await store.checkLoginFromWebView(accountID: idA)
+        await store.checkLoginFromWebView(accountID: idB)
+        let runnerA = store.accounts.first { $0.id == idA }!.runner
+        let runnerB = store.accounts.first { $0.id == idB }!.runner
+        await store.megaphoneQueue.acquire(runnerA)
+
+        observer.fireMemoryWarning()
+
+        let acquiredB = Task { await store.megaphoneQueue.acquire(runnerB) }
+        await waitUntil { store.megaphoneQueue.isWaiting(runnerB) }
+        #expect(store.megaphoneQueue.isWaiting(runnerB))
+
+        store.megaphoneQueue.release(runnerA)
+        await acquiredB.value
+    }
+
     @Test("fim de rodada do megafone preenche e persiste o resumo da conta")
     func fimDeRodadaPersisteResumo() async {
         let id = EnjoeiAccountID()

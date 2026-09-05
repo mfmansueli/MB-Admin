@@ -45,6 +45,9 @@ struct PostQueueRowView: View {
             .buttonStyle(.plain)
         }
         .padding(.vertical, 2)
+        // Fundo sólido pro scroll do mouse/trackpad funcionar em qualquer área da row no Mac
+        // Catalyst, não só em cima da foto — ver o mesmo comentário em `MegaphoneRowView`.
+        .background(.background)
         .sheet(isPresented: $isShowingErrorDetail) {
             if case .failed(let message) = status {
                 MegaphoneErrorDetailSheet(product: item.product, message: message, detail: failureDetail)

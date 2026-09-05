@@ -213,8 +213,13 @@ struct AccountDetailView: View {
     private func tabLabel(_ tab: DetailTab) -> String {
         switch tab {
         case .published:
-            guard !runner.items.isEmpty else { return tab.rawValue }
-            return "\(tab.rawValue) (\(runner.items.count.formatted()))"
+            // `progressSnapshot.itemsCount`, não `runner.items.count` direto — ler `items` aqui
+            // prenderia esta view (dona do toolbar/segmented control) a reavaliar a cada produto
+            // megafonado, mesmo só lendo `.count`/`.isEmpty` (O(1)) — ver o comentário em
+            // `AccountPublishedTabView.swift` sobre o mesmo raciocínio aplicado ao `onChange`.
+            let itemsCount = runner.progressSnapshot.itemsCount
+            guard itemsCount > 0 else { return tab.rawValue }
+            return "\(tab.rawValue) (\(itemsCount.formatted()))"
         case .inactive:
             let loader = account.inactiveProductsLoader
             guard !loader.items.isEmpty || loader.phase == .finished else { return tab.rawValue }

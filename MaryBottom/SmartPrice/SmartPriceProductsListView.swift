@@ -88,13 +88,22 @@ struct SmartPriceProductsListView: View {
             loader.refreshPersistedTitles()
             recomputeFilteredItems()
         }
-        // `loader.items` muda a cada página carregada; `account.runner.items` é quem dá título e
-        // link (pode chegar depois da lista de preço esperto) — qualquer um dos dois mudando
-        // recalcula o filtro uma vez só. Quando é `account.runner.items` que muda, também conserta
+        // `loader.items` muda a cada página carregada; `account.runner.progressSnapshot` é quem
+        // avisa que os publicados (título/link) chegaram ou mudaram — qualquer um dos dois
+        // mudando recalcula o filtro uma vez só. Quando é o snapshot que muda, também conserta
         // (`refreshPersistedTitles`) os registros que ficaram com título vazio por terem sido
         // gravados antes da aba "publicados" responder.
+        //
+        // De propósito NÃO é `account.runner.items` direto: aquele array muda uma vez por produto
+        // megafonado (até 1500+ vezes por rodada), e `Equatable` de `[MegaphoneItem]` compara
+        // campo a campo (incluindo strings) — um `onChange` nele custa O(catálogo) a cada produto
+        // processado, mesmo bug que travava a aba "publicados" (ver o comentário lá em
+        // `AccountPublishedTabView.swift`), só que aqui só morde se esta aba ficar aberta enquanto
+        // o megafone roda em segundo plano. `progressSnapshot` é a struct pequena e barata que já
+        // existe exatamente pra isso, atualizada em lote (`progressSnapshotBatchSize`), não a cada
+        // item.
         .onChange(of: loader.items) { _, _ in recomputeFilteredItems() }
-        .onChange(of: account.runner.items) { _, _ in
+        .onChange(of: account.runner.progressSnapshot) { _, _ in
             loader.refreshPersistedTitles()
             recomputeFilteredItems()
         }

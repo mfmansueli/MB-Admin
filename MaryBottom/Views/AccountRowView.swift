@@ -6,10 +6,14 @@ struct AccountRowView: View {
     let account: AccountSession
 
     @Environment(AccountsStore.self) private var accountsStore
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         HStack(spacing: 12) {
-            AsyncImage(url: account.user.avatarURL) { image in
+            // `CachedAsyncImage`, não `AsyncImage`: mesmo raciocínio de `ProductPhotoView` — sem
+            // isso, o avatar é redecodificado do zero toda vez que essa row sai e volta pra área
+            // visível ao rolar a lista de contas.
+            CachedAsyncImage(url: account.user.avatarURL, maxPixelSize: 60 * displayScale) { image in
                 image.resizable().scaledToFill()
             } placeholder: {
                 Circle().fill(.quaternary)

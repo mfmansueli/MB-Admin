@@ -36,18 +36,25 @@ struct PostQueueView: View {
                             description: Text("reposte, apague ou poste produtos em outra conta — o andamento de cada ação aparece aqui.")
                         )
                     } else {
-                        List {
-                            ForEach(postQueue.items) { item in
-                                PostQueueRowView(
-                                    item: item,
-                                    status: postQueue.status(for: item),
-                                    failureDetail: postQueue.failureDetail(for: item),
-                                    productURL: poster.postedProductURLs[item.postTarget],
-                                    onRemove: { postQueue.remove(id: item.id) }
-                                )
+                        // `LazyVStack` em vez de `List`: mesmo raciocínio de
+                        // `AccountPublishedTabView.productList` — no idiom otimizado do Mac
+                        // Catalyst, `List` vira `NSTableView`, caro pra reconstruir do zero.
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(postQueue.items) { item in
+                                    PostQueueRowView(
+                                        item: item,
+                                        status: postQueue.status(for: item),
+                                        failureDetail: postQueue.failureDetail(for: item),
+                                        productURL: poster.postedProductURLs[item.postTarget],
+                                        onRemove: { postQueue.remove(id: item.id) }
+                                    )
+                                    if item.id != postQueue.items.last?.id {
+                                        Divider()
+                                    }
+                                }
                             }
                         }
-                        .listStyle(.plain)
                     }
                 }
             }

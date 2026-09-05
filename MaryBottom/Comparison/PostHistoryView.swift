@@ -34,10 +34,19 @@ struct PostHistoryView: View {
                         if filteredHistory.isEmpty {
                             emptyFilteredState
                         } else {
-                            List(filteredHistory) { entry in
-                                PostHistoryRowView(entry: entry)
+                            // `LazyVStack` em vez de `List`: mesmo raciocínio de
+                            // `AccountPublishedTabView.productList` — no idiom otimizado do Mac
+                            // Catalyst, `List` vira `NSTableView`, caro pra reconstruir do zero.
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    ForEach(filteredHistory) { entry in
+                                        PostHistoryRowView(entry: entry)
+                                        if entry.id != filteredHistory.last?.id {
+                                            Divider()
+                                        }
+                                    }
+                                }
                             }
-                            .listStyle(.plain)
                         }
                     }
                 }

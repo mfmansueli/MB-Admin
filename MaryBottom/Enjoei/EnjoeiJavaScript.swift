@@ -84,6 +84,71 @@ nonisolated enum EnjoeiJavaScript {
     return meta ? (meta.getAttribute("content") || "") : "";
     """
 
+    /// Nome do `WKScriptMessageHandler` que recebe o progresso de `megaphoneBatch` (ver
+    /// `MegaphoneBatchMessageHandler`) — usado tanto para registrar o handler quanto dentro do
+    /// script abaixo, pra `window.webkit.messageHandlers.<nome>` bater com o que foi registrado.
+    static let megaphoneBatchHandlerName = "megaphoneBatchProgress"
+
+    /// Megafona uma lista de produtos em lote, sem sair da página — evita o round-trip de IPC por
+    /// produto que `megaphone` (acima) custa quando chamado um a um em Swift (ver
+    /// `MegaphoneRunner.megaphoneAll()`, que hoje monta a lista de pendentes e chama este script uma
+    /// vez só). Mesmo endpoint/corpo/cabeçalhos do `megaphone` de cima, um produto de cada vez, com
+    /// a mesma pausa entre produtos que existia no laço em Swift (`delayMilliseconds`, equivalente a
+    /// `MegaphoneRunner.delayBetweenProducts`).
+    ///
+    /// Token CSRF: renova sozinho (relendo a meta tag) e tenta de novo uma vez quando o servidor
+    /// recusa (422 ou 403) — mesma resiliência que `MegaphoneRunner.megaphone(productID:newPrice:token:)`
+    /// já fazia em Swift por fora; sem isso o lote inteiro perderia esse retry. Sessão caída (401)
+    /// para o lote na hora: sem sessão, os produtos restantes não seriam megafonados de qualquer
+    /// jeito.
+    ///
+    /// Cada produto processado é reportado ao Swift assim que o fetch dele termina — via
+    /// `window.webkit.messageHandlers` (ver `MegaphoneBatchMessageHandler`) — pra tela acompanhar o
+    /// andamento enquanto o `callAsyncJavaScript` do lote inteiro ainda está rodando. Devolve o
+    /// token em uso ao final (pode ter sido renovado no meio).
+    static let megaphoneBatch = """
+    async function sendMegaphone(productID, csrfToken) {
+        const headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest"
+        };
+        if (csrfToken) { headers["X-CSRF-Token"] = csrfToken; }
+        const response = await fetch("/api/megaphones", {
+            method: "POST",
+            credentials: "include",
+            headers: headers,
+            body: JSON.stringify({ version: "v2", product_id: productID })
+        });
+        return { status: response.status, body: await response.text() };
+    }
+
+    function readCSRFToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? (meta.getAttribute("content") || "") : "";
+    }
+
+    let currentToken = token;
+    for (let index = 0; index < productIDs.length; index++) {
+        const productID = productIDs[index];
+        let result = await sendMegaphone(productID, currentToken);
+        if (result.status === 422 || result.status === 403) {
+            currentToken = readCSRFToken();
+            result = await sendMegaphone(productID, currentToken);
+        }
+        window.webkit.messageHandlers.\(megaphoneBatchHandlerName).postMessage({
+            productID: productID,
+            status: result.status,
+            body: result.body
+        });
+        if (result.status === 401) { break; }
+        if (index < productIDs.length - 1 && delayMilliseconds > 0) {
+            await new Promise(function (resolve) { setTimeout(resolve, delayMilliseconds); });
+        }
+    }
+    return currentToken;
+    """
+
     /// Consulta se cada produto pede desconto pra alcançar exposição máxima no megafone — a mesma
     /// rota que o site chama antes de abrir o popup de desconto. `productIDs` chega pronto,
     /// separado por vírgula.

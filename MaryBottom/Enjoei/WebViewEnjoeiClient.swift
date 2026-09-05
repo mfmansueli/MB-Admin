@@ -46,6 +46,21 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
         if let error = response.failure { throw error }
     }
 
+    func megaphoneBatch(
+        productIDs: [Int],
+        csrfToken: String,
+        delayMilliseconds: Int,
+        onProgress: @escaping (Int, MegaphoneWebResponse) -> Void
+    ) async throws -> String {
+        guard !productIDs.isEmpty else { return csrfToken }
+        let result = try await webSession.runBatch(
+            EnjoeiJavaScript.megaphoneBatch,
+            arguments: ["productIDs": productIDs, "token": csrfToken, "delayMilliseconds": delayMilliseconds],
+            onProgress: onProgress
+        )
+        return result as? String ?? csrfToken
+    }
+
     func megaphoneExposures(productIDs: [Int]) async throws -> [MegaphoneExposure] {
         guard !productIDs.isEmpty else { return [] }
         let result = try await webSession.run(
@@ -143,5 +158,9 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
         )
         let response = MegaphoneWebResponse(javaScriptResult: result)
         if let error = response.failure { throw error }
+    }
+
+    func reloadPage() async {
+        await webSession.load(EnjoeiAPI.webBaseURL)
     }
 }

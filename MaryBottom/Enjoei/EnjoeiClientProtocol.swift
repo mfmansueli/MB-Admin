@@ -15,6 +15,18 @@ nonisolated protocol EnjoeiClientProtocol: Sendable {
     /// Megafona um produto. `newPrice` aplica o desconto sugerido junto (ver
     /// `MegaphoneExposure.priceToIncreaseExposure`); `nil` megafona sem mexer no preço.
     func megaphone(productID: Int, csrfToken: String, newPrice: Double?) async throws
+    /// Megafona uma lista de produtos num lote só, sem sair da página (ver
+    /// `EnjoeiJavaScript.megaphoneBatch`) — usado pelo laço automático (`MegaphoneRunner.megaphoneAll()`)
+    /// em vez de chamar `megaphone(productID:csrfToken:newPrice:)` um a um, pra cortar o round-trip
+    /// de IPC por produto. `onProgress` é chamado uma vez por produto, na ordem em que cada resposta
+    /// chega — antes do lote inteiro terminar. Devolve o token CSRF em uso ao final (pode ter sido
+    /// renovado no meio do lote).
+    func megaphoneBatch(
+        productIDs: [Int],
+        csrfToken: String,
+        delayMilliseconds: Int,
+        onProgress: @escaping (Int, MegaphoneWebResponse) -> Void
+    ) async throws -> String
     /// Como cada produto se encaixa no megafone: se pede desconto pra alcançar exposição máxima.
     func megaphoneExposures(productIDs: [Int]) async throws -> [MegaphoneExposure]
     /// Lê todos os campos de um produto já publicado, pra repostar (duplicar) o anúncio.
@@ -36,4 +48,11 @@ nonisolated protocol EnjoeiClientProtocol: Sendable {
     func smartPriceProductsPage(page: Int, tab: Bool) async throws -> SmartPriceProductsPage
     /// Ativa (ou desativa) o preço esperto de um produto (ver `EnjoeiJavaScript.setSmartPrice`).
     func setSmartPrice(productID: Int, activate: Bool, csrfToken: String) async throws
+    /// Recarrega a página de bastidores — mesma operação de recuperação que `EnjoeiWebSession.run`
+    /// já faz sozinha quando um script falha em segundo plano, só que aqui é preventivo: reseta o
+    /// heap JS/DOM que a própria página do Enjoei acumula numa sessão muito longa (centenas de
+    /// chamadas seguidas, várias rodadas de megafone — ver `MegaphoneRunner.pageReloadThreshold`),
+    /// sem recriar a `WKWebView`/`WKWebsiteDataStore` (essa área já teve um crash real do próprio
+    /// WebKit — ver `AccountsStore.swift`). Login/cookies sobrevivem a um reload de página.
+    func reloadPage() async
 }

@@ -25,7 +25,7 @@ struct InactiveProductsLoaderTests {
         )
     }
 
-    @Test("busca todas as páginas em sequência e acumula os itens")
+    @Test("busca todas as páginas e acumula os itens, na ordem certa mesmo buscando em paralelo")
     func buscaTodasAsPaginas() async {
         let client = StubEnjoeiClient(inactivePagesByNumber: [
             1: InactiveProductsPage(products: [makeProduct(id: 1), makeProduct(id: 2)], maxPage: 3),
@@ -38,7 +38,34 @@ struct InactiveProductsLoaderTests {
         await waitUntil { loader.phase == .finished }
 
         #expect(loader.items.map(\.id) == [1, 2, 3, 4])
-        #expect(await client.requestedInactivePages == [1, 2, 3])
+        // Páginas 2 e 3 são buscadas no mesmo pedaço concorrente (ver `pageConcurrency`) — não dá
+        // pra garantir a ordem em que a chamada chega no dublê, só que as três foram pedidas.
+        #expect(await client.requestedInactivePages.sorted() == [1, 2, 3])
+    }
+
+    @Test("busca várias páginas ao mesmo tempo, respeitando pageConcurrency")
+    func buscaVariasPaginasAoMesmoTempo() async {
+        let client = StubEnjoeiClient(
+            inactivePagesByNumber: [
+                1: InactiveProductsPage(products: [makeProduct(id: 1)], maxPage: 5),
+                2: InactiveProductsPage(products: [makeProduct(id: 2)], maxPage: 5),
+                3: InactiveProductsPage(products: [makeProduct(id: 3)], maxPage: 5),
+                4: InactiveProductsPage(products: [makeProduct(id: 4)], maxPage: 5),
+                5: InactiveProductsPage(products: [makeProduct(id: 5)], maxPage: 5)
+            ],
+            pageDelay: .milliseconds(30)
+        )
+        let loader = makeLoader(client: client)
+        loader.pageConcurrency = 3
+
+        loader.load()
+        await waitUntil { loader.phase == .finished }
+
+        #expect(loader.items.map(\.id) == [1, 2, 3, 4, 5])
+        // Página 1 é sempre sozinha (revela `maxPage`); 2-4 formam o primeiro pedaço sob
+        // `pageConcurrency = 3` — prova (por contador, não por limiar de tempo) que pelo menos
+        // duas delas estavam de fato em andamento ao mesmo tempo, não uma de cada vez.
+        #expect(await client.maxConcurrentPageRequests >= 2)
     }
 
     @Test("loja sem inativos termina com lista vazia, sem erro")

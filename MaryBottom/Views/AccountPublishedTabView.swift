@@ -122,7 +122,17 @@ struct AccountPublishedTabView: View {
             isConfirmingBulkInactivate = false
             recomputeFilteredItems()
         }
-        .onChange(of: runner.items) { _, _ in recomputeFilteredItems() }
+        // `runner.progressSnapshot`, não `runner.items` direto: `items` muda uma vez por produto
+        // megafonado (até 1500+ vezes por rodada) — um `.onChange` nele precisa comparar a lista
+        // INTEIRA (`Equatable` sintetizado de `MegaphoneItem`, campo a campo, incluindo strings)
+        // a cada mutação de UM item, então o app inteiro passava a gastar O(catálogo) só decidindo
+        // se disparava o `onChange`, a cada produto, em cada rodada — confirmado numa amostra de
+        // CPU depois de muitas rodadas seguidas (o processo ficava preso em
+        // `MegaphoneItem`/`EnjoeiProduct`.`__derived_struct_equals` e retain/release em cima disso).
+        // `progressSnapshot` já é o resumo em lote pensado exatamente pra isso (ver seu doc
+        // comment) — struct pequena, comparação barata, atualizada a cada
+        // `progressSnapshotBatchSize` itens em vez de a cada um.
+        .onChange(of: runner.progressSnapshot) { _, _ in recomputeFilteredItems() }
         // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer o
         // filtro (potencialmente sobre centenas de produtos publicados) a cada tecla.
         .onChange(of: searchText) { _, _ in
@@ -385,7 +395,11 @@ struct AccountPublishedTabView: View {
 
     @ViewBuilder
     private var searchField: some View {
-        if !runner.items.isEmpty {
+        // `progressSnapshot.itemsCount`, não `runner.items.isEmpty` direto — ler `items` aqui
+        // prenderia esta view (e o resto do `body`, que a chama) a reavaliar a cada produto
+        // megafonado, mesmo `.isEmpty` sendo O(1) — mesmo raciocínio do `onChange` corrigido
+        // acima, agora aplicado a toda leitura de `runner.items` dentro do `body`.
+        if runner.progressSnapshot.itemsCount > 0 {
             SearchField(placeholder: "buscar por nome", text: $searchText, isFocused: $isSearchFocused)
                 .frame(maxWidth: .infinity)
         }
@@ -393,7 +407,7 @@ struct AccountPublishedTabView: View {
 
     @ViewBuilder
     private var filterPicker: some View {
-        if !runner.items.isEmpty {
+        if runner.progressSnapshot.itemsCount > 0 {
             Menu {
                 Picker("filtro", selection: $filter) {
                     Text("todos os anúncios").tag(AccountProductFilter.all)
@@ -458,7 +472,9 @@ struct AccountPublishedTabView: View {
 
     @ViewBuilder
     private var productList: some View {
-        if runner.items.isEmpty {
+        // Mesmo raciocínio de `searchField`/`filterPicker` acima — `progressSnapshot.itemsCount`,
+        // não `runner.items.isEmpty` direto.
+        if runner.progressSnapshot.itemsCount == 0 {
             ContentUnavailableView(
                 "nenhum produto na fila",
                 systemImage: "shippingbox",

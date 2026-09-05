@@ -25,15 +25,20 @@ final class AccountsStore {
 
     private let dependenciesFactory: AccountDependenciesFactory
     private let persistence: AccountsPersisting
+    /// Rede de segurança automática pro `megaphoneQueue` acima ficar sem limite de propósito — ver
+    /// `MegaphoneQueue.applyMemoryPressureCap(_:)`.
+    private let memoryPressureObserver: any MemoryPressureObserving
 
     init(
         dependenciesFactory: AccountDependenciesFactory? = nil,
         persistence: AccountsPersisting? = nil,
         postHistoryPersistence: PostHistoryPersisting? = nil,
-        postQueueItemsPersistence: PostQueueItemsPersisting? = nil
+        postQueueItemsPersistence: PostQueueItemsPersisting? = nil,
+        memoryPressureObserver: (any MemoryPressureObserving)? = nil
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
+        self.memoryPressureObserver = memoryPressureObserver ?? SystemMemoryPressureObserver()
         // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
         // provider de verdade é ligado logo abaixo, já com `self` totalmente inicializado. Se
         // houver itens pendentes restaurados, `PostQueue.init` já começa a fila (pausada, esperando
@@ -46,6 +51,13 @@ final class AccountsStore {
             itemsPersistence: postQueueItemsPersistence ?? UserDefaultsPostQueueItemsPersistence()
         )
         postQueue.accountsProvider = { [weak self] in self?.accounts ?? [] }
+        // Nunca aborta quem já está megafonando (ver o doc de `applyMemoryPressureCap`) — só evita
+        // que contas novas comecem enquanto o aviso estiver de pé. `megaphoneQueue` já existe aqui
+        // (inicializado por cima, sem depender de `self`).
+        self.memoryPressureObserver.onMemoryWarning = { [weak self] in
+            self?.megaphoneQueue.applyMemoryPressureCap(1)
+        }
+        self.memoryPressureObserver.start()
     }
 
     /// Abertura do app: cada conta salva tem sua WebView de bastidores recriada e conferida contra

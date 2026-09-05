@@ -10,9 +10,12 @@ struct ProductPhotoView: View {
     var size: CGFloat = 64
 
     @State private var isShowingFullSize = false
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
-        CachedAsyncImage(url: photoURL) { image in
+        // Pixels de verdade, não pontos — pra `CachedAsyncImage` decodificar/guardar só o tanto de
+        // pixel que essa row realmente desenha, em vez do `300x300` que a foto vem da rede.
+        CachedAsyncImage(url: photoURL, maxPixelSize: size * displayScale) { image in
             image.resizable().scaledToFill()
         } placeholder: {
             RoundedRectangle(cornerRadius: 10).fill(.quaternary)

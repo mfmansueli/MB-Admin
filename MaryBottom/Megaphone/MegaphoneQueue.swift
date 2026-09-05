@@ -11,11 +11,22 @@ import Observation
 /// Não mexe no ciclo de vida da `WKWebView` (criar/destruir) de propósito — essa área já teve um
 /// crash real do próprio WebKit (ver `AccountsStore.swift`), então esta fila só governa quando o
 /// trabalho de rede acontece, nunca a `WKWebView` em si.
+///
+/// `baseLimit` (o teto normal, escolhido pelo usuário) é fixo, mas um aviso de memória real do
+/// sistema pode empurrar um teto temporário por cima dele (ver `applyMemoryPressureCap(_:)`,
+/// ligado em `AccountsStore` a um `MemoryPressureObserving`) — rede de segurança automática para o
+/// cenário que motivou `baseLimit = .max`: várias lojas grandes megafonando juntas.
 @MainActor
 @Observable
 final class MegaphoneQueue {
-    /// Quantas contas podem megafonar de verdade ao mesmo tempo.
-    private let concurrencyLimit: Int
+    /// Quantas contas podem megafonar de verdade ao mesmo tempo, em condição normal — decisão do
+    /// usuário (ver `AccountsStore.megaphoneQueue`). Nunca mexida por pressão de memória; só o teto
+    /// abaixo reage a isso.
+    private let baseLimit: Int
+    /// Teto temporário imposto por um aviso de memória real do sistema (ver
+    /// `applyMemoryPressureCap(_:)`) — `nil` fora de pressão. Só reduz, nunca aumenta `baseLimit`.
+    private var pressureCap: Int?
+    private var effectiveLimit: Int { min(baseLimit, pressureCap ?? .max) }
     private var activeRunnerIDs: Set<ObjectIdentifier> = []
     private var waitingOrder: [ObjectIdentifier] = []
     private var waitersByRunnerID: [ObjectIdentifier: CheckedContinuation<Void, Never>] = [:]
@@ -24,7 +35,7 @@ final class MegaphoneQueue {
     // `AccountSession.init`, avaliada fora do MainActor — sem isso, o compilador recusa construir
     // o valor padrão inline.
     nonisolated init(concurrencyLimit: Int = 1) {
-        self.concurrencyLimit = concurrencyLimit
+        self.baseLimit = concurrencyLimit
     }
 
     /// `true` enquanto essa conta já pediu pra megafonar mas ainda está esperando a vez — pra a
@@ -38,7 +49,7 @@ final class MegaphoneQueue {
     /// se cancelada (é seguro: `release` só mexe em algo se essa conta realmente tinha a vez).
     func acquire(_ runner: MegaphoneRunner) async {
         let id = ObjectIdentifier(runner)
-        guard activeRunnerIDs.count >= concurrencyLimit else {
+        guard activeRunnerIDs.count >= effectiveLimit else {
             activeRunnerIDs.insert(id)
             return
         }
@@ -62,7 +73,21 @@ final class MegaphoneQueue {
     func release(_ runner: MegaphoneRunner) {
         let id = ObjectIdentifier(runner)
         guard activeRunnerIDs.remove(id) != nil else { return }
+        // Ninguém mais rodando: esquece o aviso de pressão sozinho, sem precisar de um "acabou"
+        // explícito do sistema — se a pressão continuar de verdade, um novo aviso chega assim que
+        // a próxima conta ocupar uma vaga e voltar a pesar de verdade.
+        if activeRunnerIDs.isEmpty {
+            pressureCap = nil
+        }
         promoteNextWaiter()
+    }
+
+    /// Chamado por um observador de aviso de memória (ver `MemoryPressureObserving`) — nunca aborta
+    /// quem já está rodando (um lote de `megaphoneAll` em andamento sempre termina), só limita
+    /// quantas contas NOVAS a fila deixa começar enquanto o aviso estiver de pé. `nil` remove o
+    /// teto na hora.
+    func applyMemoryPressureCap(_ cap: Int?) {
+        pressureCap = cap
     }
 
     private func cancelWaiting(id: ObjectIdentifier) {
@@ -71,8 +96,11 @@ final class MegaphoneQueue {
         waitersByRunnerID.removeValue(forKey: id)?.resume()
     }
 
+    /// Só promove enquanto ainda houver vaga sob o teto atual — com `pressureCap` reduzindo
+    /// `effectiveLimit` no meio do caminho, uma vaga liberada não significa mais, por si só, que dá
+    /// pra admitir mais alguém.
     private func promoteNextWaiter() {
-        guard !waitingOrder.isEmpty else { return }
+        guard activeRunnerIDs.count < effectiveLimit, !waitingOrder.isEmpty else { return }
         let nextID = waitingOrder.removeFirst()
         waitersByRunnerID.removeValue(forKey: nextID)?.resume()
     }

@@ -24,7 +24,7 @@ struct SmartPriceProductsLoaderTests {
 
     // MARK: - carregamento
 
-    @Test("busca todas as páginas em sequência e acumula os itens, sempre pela aba tab=false")
+    @Test("busca todas as páginas e acumula os itens, na ordem certa mesmo buscando em paralelo, sempre pela aba tab=false")
     func buscaTodasAsPaginas() async {
         let client = StubEnjoeiClient(smartPricePagesByNumber: [
             1: SmartPriceProductsPage(products: [makeProduct(id: 1), makeProduct(id: 2)], currentPage: 1, totalPages: 3),
@@ -37,8 +37,35 @@ struct SmartPriceProductsLoaderTests {
         await waitUntil { loader.phase == .finished }
 
         #expect(loader.items.map(\.id) == [1, 2, 3, 4])
-        #expect(await client.requestedSmartPricePages.map(\.page) == [1, 2, 3])
+        // Páginas 2 e 3 são buscadas no mesmo pedaço concorrente (ver `pageConcurrency`) — não dá
+        // pra garantir a ordem em que a chamada chega no dublê, só que as três foram pedidas.
+        #expect(await client.requestedSmartPricePages.map(\.page).sorted() == [1, 2, 3])
         #expect(await client.requestedSmartPricePages.allSatisfy { $0.tab == false })
+    }
+
+    @Test("busca várias páginas ao mesmo tempo, respeitando pageConcurrency")
+    func buscaVariasPaginasAoMesmoTempo() async {
+        let client = StubEnjoeiClient(
+            smartPricePagesByNumber: [
+                1: SmartPriceProductsPage(products: [makeProduct(id: 1)], currentPage: 1, totalPages: 5),
+                2: SmartPriceProductsPage(products: [makeProduct(id: 2)], currentPage: 2, totalPages: 5),
+                3: SmartPriceProductsPage(products: [makeProduct(id: 3)], currentPage: 3, totalPages: 5),
+                4: SmartPriceProductsPage(products: [makeProduct(id: 4)], currentPage: 4, totalPages: 5),
+                5: SmartPriceProductsPage(products: [makeProduct(id: 5)], currentPage: 5, totalPages: 5)
+            ],
+            pageDelay: .milliseconds(30)
+        )
+        let loader = makeLoader(client: client)
+        loader.pageConcurrency = 3
+
+        loader.load()
+        await waitUntil { loader.phase == .finished }
+
+        #expect(loader.items.map(\.id) == [1, 2, 3, 4, 5])
+        // Página 1 é sempre sozinha (revela `totalPages`); 2-4 formam o primeiro pedaço sob
+        // `pageConcurrency = 3` — prova (por contador, não por limiar de tempo) que pelo menos
+        // duas delas estavam de fato em andamento ao mesmo tempo, não uma de cada vez.
+        #expect(await client.maxConcurrentPageRequests >= 2)
     }
 
     @Test("loja toda com preço esperto termina com lista vazia, sem erro")

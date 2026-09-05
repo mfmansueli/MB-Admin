@@ -11,12 +11,20 @@ import WebKit
 /// então o login feito lá vale aqui, e sobrevive ao fechamento do app.
 @MainActor
 final class EnjoeiWebSession: EnjoeiSessionClearing {
+    /// Compartilhado por todas as contas — sem isso, `WKWebViewConfiguration()` dá a cada uma seu
+    /// próprio `WKProcessPool` implícito, e com várias contas megafonando ao mesmo tempo WebKit não
+    /// tem chance nenhuma de reaproveitar nada entre elas. Isolamento de sessão continua garantido
+    /// por `WKWebsiteDataStore(forIdentifier:)` abaixo — é um eixo independente do process pool, não
+    /// muda com o compartilhamento.
+    private static let sharedProcessPool = WKProcessPool()
+
     let webView: WKWebView
     private let navigationDelegate = WebSessionNavigationDelegate()
 
     init(dataStoreIdentifier: EnjoeiAccountID) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = WKWebsiteDataStore(forIdentifier: dataStoreIdentifier)
+        configuration.processPool = Self.sharedProcessPool
         webView = WKWebView(frame: CGRect(x: 0, y: 0, width: 1, height: 1), configuration: configuration)
         webView.navigationDelegate = navigationDelegate
     }
@@ -49,6 +57,22 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
             await load(EnjoeiAPI.webBaseURL)
             return try await evaluate(script, arguments: arguments)
         }
+    }
+
+    /// Roda um script de lote (ver `EnjoeiJavaScript.megaphoneBatch`) que reporta o progresso de
+    /// cada item por um `WKScriptMessageHandler` enquanto o `callAsyncJavaScript` do lote inteiro
+    /// ainda está em andamento. Registra o handler antes de rodar e desregistra depois — só um
+    /// megafone roda por vez por conta (o `task` do `MegaphoneRunner` garante isso), então não tem
+    /// risco de duas mensagens de lotes diferentes se cruzarem.
+    func runBatch(
+        _ script: String,
+        arguments: [String: Any] = [:],
+        onProgress: @escaping (Int, MegaphoneWebResponse) -> Void
+    ) async throws -> Any? {
+        let controller = webView.configuration.userContentController
+        controller.add(MegaphoneBatchMessageHandler(onProgress: onProgress), name: EnjoeiJavaScript.megaphoneBatchHandlerName)
+        defer { controller.removeScriptMessageHandler(forName: EnjoeiJavaScript.megaphoneBatchHandlerName) }
+        return try await run(script, arguments: arguments)
     }
 
     private func evaluate(_ script: String, arguments: [String: Any]) async throws -> Any? {

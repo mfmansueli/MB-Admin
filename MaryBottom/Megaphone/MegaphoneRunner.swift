@@ -48,11 +48,21 @@ final class MegaphoneRunner {
     /// dicionário só, sobrescrito a cada falha nova, já basta.
     internal(set) var failureDetails: [Int: MegaphoneFailureDetail] = [:]
 
-    /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei.
+    /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei. `megaphoneAll` manda
+    /// esse valor para dentro do laço em JS (ver `delayBetweenProductsMilliseconds`) — não dá mais
+    /// pra usar `Task.sleep` aqui, já que o laço item a item saiu do Swift.
     var delayBetweenProducts: Duration = .milliseconds(900)
     /// Quantos ids pedir por chamada ao endpoint de exposição — o Enjoei aceita vários de uma vez,
     /// mas evitamos mandar a loja inteira numa URL só.
     var exposureBatchSize = 80
+    /// Quantos produtos manda por chamada ao lote em JS (`EnjoeiJavaScript.megaphoneBatch`) — ver
+    /// `megaphoneAll()`. Um pedaço só com a loja inteira reduziria IPC ao máximo, mas
+    /// `callAsyncJavaScript` não é sensível a `Task.cancel()`: um pedaço já disparado roda até o
+    /// fim não importa o que o Swift decida nesse meio tempo, então esse valor é também o quanto
+    /// pausar/cancelar demora a fazer efeito de verdade (pior caso: tempo de terminar o pedaço
+    /// atual). `var`, não `let`, pelo mesmo motivo de `progressSnapshotBatchSize` — testes usam um
+    /// valor pequeno sem precisar de centenas de itens.
+    var megaphoneBatchChunkSize = 10
     /// A cada quantos itens megafonados (no mínimo) `progressSnapshot` se atualiza durante o laço
     /// automático — ver `refreshProgressSnapshot(force:)`. `var`, não `let`: os testes usam um
     /// valor pequeno pra provar o lote sem precisar rodar centenas de itens. Em produção, numa loja
@@ -61,6 +71,19 @@ final class MegaphoneRunner {
     /// Quantos itens já passaram desde a última publicação de `progressSnapshot` — zera a cada
     /// publicação, forçada ou não.
     private var itemsSinceSnapshot = 0
+    /// Quantos produtos processar (sucesso ou falha) antes de recarregar a página de bastidores
+    /// proativamente, entre um pedaço e o próximo — ver `EnjoeiClientProtocol.reloadPage()`. Não é
+    /// recuperação de erro (isso já existe em `EnjoeiWebSession.run`): é suspeita de que, numa
+    /// sessão muito longa (centenas de rodadas seguidas, a mesma página desde o login), o heap
+    /// JS/DOM da própria página do Enjoei só cresce, nunca reseta — pressão de memória grande o
+    /// bastante explicaria o app inteiro (não só a WebView) ficando lento/travando o scroll depois
+    /// de muitas rodadas. `var`, não `let`: dá pra baixar num teste sem esperar centenas de
+    /// produtos de verdade.
+    var pageReloadThreshold = 250
+    /// Quantos produtos já foram processados (em qualquer rodada) desde o último reload — zera a
+    /// cada reload, rolando por cima de fronteira de rodada (a contagem é da sessão toda, não por
+    /// rodada).
+    private var itemsSinceLastPageReload = 0
 
     /// Chamado ao fim de uma rodada (concluída, cancelada ou interrompida por falha), para quem
     /// guarda o resumo entre execuções — a tela só observa `phase`, que reseta a cada novo `start`.
@@ -329,46 +352,95 @@ final class MegaphoneRunner {
         )
     }
 
-    /// Megafona a fila inteira uma vez. Devolve o token em uso ao final — ele pode ter sido
-    /// renovado no caminho. Pula produtos já concluídos ou em andamento por fora — um desconto
-    /// aplicado na mão (`applyDiscount`) enquanto a rodada corria não pode ser megafonado de novo
-    /// por cima, ou os dois chamariam a rota ao mesmo tempo pro mesmo produto. Erro num produto não
-    /// para os demais — só sessão caída (`notAuthenticated`) interrompe a rodada de verdade.
+    /// Quantos milissegundos `delayBetweenProducts` representa — é o que `megaphoneAll` manda pro
+    /// laço em JS (`EnjoeiJavaScript.megaphoneBatch`), que não entende `Duration`.
+    private var delayBetweenProductsMilliseconds: Int {
+        let components = delayBetweenProducts.components
+        let milliseconds = Double(components.seconds) * 1000
+            + Double(components.attoseconds) / 1_000_000_000_000_000
+        return Int(milliseconds.rounded())
+    }
+
+    /// Megafona a fila inteira em pedaços de `megaphoneBatchChunkSize`, cada um num lote só dentro
+    /// da própria WebView (ver `EnjoeiClientProtocol.megaphoneBatch`/`EnjoeiJavaScript.megaphoneBatch`)
+    /// — evita o round-trip de IPC por produto que o laço item a item em Swift custava antes, sem
+    /// abrir mão de pausar/cancelar entre um pedaço e o próximo (ver `megaphoneBatchChunkSize` pro
+    /// porquê de não ser um lote só com a loja inteira). Pula produtos já concluídos ou em andamento
+    /// por fora — um desconto aplicado na mão (`applyDiscount`) enquanto a rodada corria não pode
+    /// ser megafonado de novo por cima, ou os dois chamariam a rota ao mesmo tempo pro mesmo
+    /// produto; essa checagem roda de novo a cada pedaço nesse conjunto de pendentes já calculado,
+    /// então uma ação manual num produto ainda não alcançado é vista quando o pedaço dele chegar (ao
+    /// contrário do laço antigo, que revia o pulo item a item, ela ainda não é vista dentro do
+    /// pedaço já disparado — só no próximo). Erro num produto não para os demais — só sessão caída
+    /// (`notAuthenticated`) interrompe a rodada de verdade.
     private func megaphoneAll(token: String) async throws -> String {
         var token = token
 
-        for index in items.indices {
-            // A pausa vem antes das checagens de pular: uma decisão tomada enquanto o laço estava
-            // parado nesse mesmo item (aplicar desconto manualmente, repostar, apagar) só é vista
-            // se a gente reavaliar o item depois de acordar — checar antes de esperar deixaria a
-            // decisão passar batido quando ela chega durante a pausa.
+        let pendingIDs = items
+            .filter { $0.status != .succeeded && $0.status != .megaphoning }
+            .filter { deleteStatuses[$0.id] != .succeeded }
+            .filter { inactivateStatuses[$0.id] != .succeeded }
+            .map(\.id)
+        guard !pendingIDs.isEmpty else { return token }
+
+        let chunks = stride(from: 0, to: pendingIDs.count, by: megaphoneBatchChunkSize).map {
+            Array(pendingIDs[$0..<Swift.min($0 + megaphoneBatchChunkSize, pendingIDs.count)])
+        }
+
+        for (chunkIndex, chunk) in chunks.enumerated() {
+            // Único ponto em que dá pra interromper um lote em andamento — o `callAsyncJavaScript`
+            // de um pedaço já disparado roda até o fim não importa o que decidirmos nesse meio
+            // tempo (ver doc de `megaphoneBatchChunkSize`), daí checar antes de cada pedaço, não
+            // dentro dele.
             await waitWhilePaused()
             try Task.checkCancellation()
-            if items[index].status == .succeeded || items[index].status == .megaphoning { continue }
-            if deleteStatuses[items[index].id] == .succeeded { continue }
-            if inactivateStatuses[items[index].id] == .succeeded { continue }
-            items[index].status = .megaphoning
-            currentItemID = items[index].id
 
-            do {
-                token = try await megaphone(productID: items[index].id, newPrice: nil, token: token)
-                items[index].status = .succeeded
-                totalSucceeded += 1
-            } catch EnjoeiError.notAuthenticated {
-                items[index].status = .failed(EnjoeiError.notAuthenticated.localizedDescription)
-                failureDetails[items[index].id] = MegaphoneFailureDetail(action: .megaphone, error: EnjoeiError.notAuthenticated)
-                totalFailed += 1
-                throw EnjoeiError.notAuthenticated
-            } catch {
-                items[index].status = .failed(error.localizedDescription)
-                failureDetails[items[index].id] = MegaphoneFailureDetail(action: .megaphone, error: error)
-                totalFailed += 1
+            // Recheca apagado/inativado aqui, não só quando `pendingIDs` foi montada: uma ação
+            // manual pode ter acontecido enquanto pedaços anteriores rodavam.
+            let liveChunk = chunk.filter { deleteStatuses[$0] != .succeeded && inactivateStatuses[$0] != .succeeded }
+            guard !liveChunk.isEmpty else { continue }
+            for id in liveChunk {
+                setStatus(.megaphoning, for: id)
             }
-            refreshProgressSnapshot(force: false)
 
-            // A pausa é entre um produto e o próximo; no fim da rodada não faz sentido esperar.
-            if index < items.count - 1, delayBetweenProducts > .zero {
+            var sessionExpired = false
+            token = try await client.megaphoneBatch(
+                productIDs: liveChunk,
+                csrfToken: token,
+                delayMilliseconds: delayBetweenProductsMilliseconds
+            ) { [weak self] productID, response in
+                guard let self else { return }
+                self.currentItemID = productID
+                if let error = response.failure {
+                    self.setStatus(.failed(error.localizedDescription), for: productID)
+                    self.failureDetails[productID] = MegaphoneFailureDetail(action: .megaphone, error: error)
+                    self.totalFailed += 1
+                    if case .notAuthenticated = error { sessionExpired = true }
+                } else {
+                    self.setStatus(.succeeded, for: productID)
+                    self.totalSucceeded += 1
+                }
+                self.itemsSinceLastPageReload += 1
+                self.refreshProgressSnapshot(force: false)
+            }
+
+            if sessionExpired {
+                currentItemID = nil
+                throw EnjoeiError.notAuthenticated
+            }
+
+            // Mesma cadência que já existia entre um produto e o seguinte — sem isso, o último
+            // produto de um pedaço e o primeiro do próximo sairiam sem o intervalo que o resto do
+            // laço respeita (o script em JS só espera *dentro* do próprio pedaço).
+            if chunkIndex < chunks.count - 1, delayBetweenProducts > .zero {
                 try await Task.sleep(for: delayBetweenProducts)
+            }
+
+            // Reload proativo entre pedaços — ver `pageReloadThreshold`. Cancelamento já é
+            // checado no topo do laço, antes do próximo pedaço; não precisa checar de novo aqui.
+            if itemsSinceLastPageReload >= pageReloadThreshold {
+                itemsSinceLastPageReload = 0
+                await client.reloadPage()
             }
         }
 
