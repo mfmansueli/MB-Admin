@@ -91,10 +91,21 @@ struct InactiveProductsListView: View {
                     .buttonStyle(.bordered)
             }
         }
-        // Só busca sozinho quando ainda não tem nada — nem carregado agora, nem persistido de uma
-        // abertura anterior do app — e só quando essa aba é de fato exibida (a view nem é
-        // construída enquanto "publicados" estiver selecionado).
-        .task {
+        // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
+        // conta na barra lateral mantendo a mesma aba selecionada — sem `.id(account.id)` (esta
+        // view não é mais destruída/reconstruída a cada troca de conta, ver `AccountDetailView`),
+        // o switch/case em `AccountDetailView.body` só desmonta esta view quando a ABA muda, não
+        // quando só a conta muda — por isso este `onChange` é o único gatilho que sobra pra zerar
+        // busca/seleção/ação em massa antes que vazem de uma conta pra outra.
+        .onChange(of: account.id, initial: true) { _, _ in
+            isSelecting = false
+            selectedIDs = []
+            bulkAction = .repost
+            isConfirmingBulkRepost = false
+            isConfirmingBulkActivate = false
+            searchText = ""
+            searchDebounceTask?.cancel()
+            searchDebounceTask = nil
             if loader.items.isEmpty, loader.phase == .idle {
                 loader.load()
             }

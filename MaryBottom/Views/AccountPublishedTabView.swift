@@ -497,7 +497,6 @@ struct AccountPublishedTabView: View {
                                 isSelected: selectedIDs.contains(item.id),
                                 onToggleSelection: { toggleSelection(itemID: item.id) }
                             )
-                            .id(item.id)
                             if item.id != filteredItems.last?.id {
                                 Divider()
                             }
