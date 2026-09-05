@@ -11,6 +11,11 @@ final class AccountsStore {
     private(set) var isRestoring = true
     var isPresentingLogin = false
     private(set) var pendingLoginAccountID: EnjoeiAccountID?
+    /// Espelho da seleção da barra lateral (`AccountsListView`) — só pra `releaseIdleAccountsMemory()`
+    /// nunca liberar memória da conta que o usuário está olhando agora (evita um recarregamento de
+    /// página visível na próxima ação dela). Não é a fonte da verdade da seleção em si, que continua
+    /// sendo o `@State` da própria `AccountsListView`.
+    var selectedAccountID: EnjoeiAccountID?
 
     /// Compartilhado entre a tela de comparação (postagem avulsa) e a fila de ações — as duas
     /// precisam respeitar o mesmo bloqueio entre uma postagem e a próxima.
@@ -56,6 +61,7 @@ final class AccountsStore {
         // (inicializado por cima, sem depender de `self`).
         self.memoryPressureObserver.onMemoryWarning = { [weak self] in
             self?.megaphoneQueue.applyMemoryPressureCap(1)
+            self?.releaseIdleAccountsMemory()
         }
         self.memoryPressureObserver.start()
     }
@@ -239,6 +245,25 @@ final class AccountsStore {
     private func finishPresentingLogin() {
         isPresentingLogin = false
         pendingLoginAccountID = nil
+    }
+
+    /// Sob aviso real de pressão de memória (nunca proativamente — sem timer de inatividade nenhum),
+    /// libera a página de bastidores das contas que não são a selecionada nem estão com o megafone
+    /// rodando ou esperando a vez (ver `EnjoeiClientProtocol.releaseMemoryIfIdle()`). A checagem aqui
+    /// é só uma heurística de "vale a pena tentar" — quem garante que isso nunca acontece no meio de
+    /// uma chamada real é o contador dentro de `EnjoeiWebSession`, não esta lista; se algum outro
+    /// subsistema (ex. `ProductDetailsLoader` numa comparação) estiver ocupado numa conta elegível
+    /// aqui, o pior caso é só uma página recarregada a mais, nunca uma chamada quebrada.
+    private func isEligibleForMemoryRelease(_ account: AccountSession) -> Bool {
+        account.id != selectedAccountID
+            && !account.runner.isRunning
+            && !megaphoneQueue.isWaiting(account.runner)
+    }
+
+    private func releaseIdleAccountsMemory() {
+        for account in accounts where isEligibleForMemoryRelease(account) {
+            Task { await account.client.releaseMemoryIfIdle() }
+        }
     }
 
     private func persist() {

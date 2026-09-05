@@ -163,4 +163,8 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
     func reloadPage() async {
         await webSession.load(EnjoeiAPI.webBaseURL)
     }
+
+    func releaseMemoryIfIdle() async {
+        await webSession.releaseMemoryIfIdle()
+    }
 }

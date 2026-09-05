@@ -148,6 +148,12 @@ struct AccountsListView: View {
         } action: { newSize in
             windowSize = newSize
         }
+        // Espelha a seleção pro `AccountsStore` — só pra `releaseIdleAccountsMemory()` saber qual
+        // conta não liberar memória (a que o usuário está olhando agora). A seleção em si continua
+        // vivendo aqui, sem mudar de comportamento nenhum.
+        .onChange(of: selectedAccountID, initial: true) { _, newValue in
+            accountsStore.selectedAccountID = newValue
+        }
         .sheet(isPresented: $accountsStore.isPresentingLogin) {
             if let accountID = accountsStore.pendingLoginAccountID {
                 // No Mac Catalyst, o conteúdo de `.sheet`/`.fullScreenCover` às vezes não herda o

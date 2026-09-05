@@ -263,6 +263,12 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         reloadPageCallCount += 1
     }
 
+    private(set) var releaseMemoryIfIdleCallCount = 0
+
+    func releaseMemoryIfIdle() async {
+        releaseMemoryIfIdleCallCount += 1
+    }
+
     func setSmartPrice(productID: Int, activate: Bool, csrfToken: String) async throws {
         setSmartPriceCalls.append((productID, activate, csrfToken))
         if csrfRejectionsRemaining > 0 {

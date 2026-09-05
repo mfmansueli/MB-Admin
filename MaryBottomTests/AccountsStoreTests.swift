@@ -370,6 +370,53 @@ struct AccountsStoreTests {
         await acquiredB.value
     }
 
+    @Test("aviso de memória libera a página das contas ociosas, exceto a selecionada e a que está megafonando")
+    func avisoDeMemoriaLiberaContasOciosas() async {
+        let observer = FakeMemoryPressureObserver()
+        let idSelected = EnjoeiAccountID()
+        let idMegaphoning = EnjoeiAccountID()
+        let idIdle = EnjoeiAccountID()
+        let idleUser = EnjoeiUser(
+            id: 3, nickname: "terceira-conta", name: "terceira conta", avatarPublicID: nil, availableProductsCount: nil
+        )
+        let clientSelected = StubEnjoeiClient(user: .stub)
+        let clientMegaphoning = StubEnjoeiClient(user: otherUser)
+        let clientIdle = StubEnjoeiClient(user: idleUser)
+        let store = AccountsStore(
+            dependenciesFactory: { id in
+                let client: StubEnjoeiClient
+                switch id {
+                case idSelected: client = clientSelected
+                case idMegaphoning: client = clientMegaphoning
+                default: client = clientIdle
+                }
+                return AccountDependencies(client: client, sessionClearer: FakeSessionClearer(), webView: nil)
+            },
+            persistence: InMemoryAccountsPersistence(),
+            memoryPressureObserver: observer
+        )
+        await store.checkLoginFromWebView(accountID: idSelected)
+        await store.checkLoginFromWebView(accountID: idMegaphoning)
+        await store.checkLoginFromWebView(accountID: idIdle)
+        store.selectedAccountID = idSelected
+        let megaphoningAccount = store.accounts.first { $0.id == idMegaphoning }!
+        // Só precisa estar `isRunning`, não terminar de verdade — a checagem de elegibilidade roda
+        // sincronamente dentro de `fireMemoryWarning()`, antes de qualquer trabalho assíncrono do
+        // `runner` acontecer.
+        megaphoningAccount.runner.start(sellerID: otherUser.id)
+        #expect(megaphoningAccount.runner.isRunning)
+
+        observer.fireMemoryWarning()
+
+        for _ in 0..<10_000 where await clientIdle.releaseMemoryIfIdleCallCount == 0 {
+            await Task.yield()
+        }
+
+        #expect(await clientIdle.releaseMemoryIfIdleCallCount == 1)
+        #expect(await clientSelected.releaseMemoryIfIdleCallCount == 0)
+        #expect(await clientMegaphoning.releaseMemoryIfIdleCallCount == 0)
+    }
+
     @Test("fim de rodada do megafone preenche e persiste o resumo da conta")
     func fimDeRodadaPersisteResumo() async {
         let id = EnjoeiAccountID()

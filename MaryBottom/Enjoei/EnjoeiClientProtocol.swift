@@ -55,4 +55,9 @@ nonisolated protocol EnjoeiClientProtocol: Sendable {
     /// sem recriar a `WKWebView`/`WKWebsiteDataStore` (essa área já teve um crash real do próprio
     /// WebKit — ver `AccountsStore.swift`). Login/cookies sobrevivem a um reload de página.
     func reloadPage() async
+    /// Libera memória de uma conta ociosa navegando a página de bastidores pra algo bem mais leve
+    /// (`about:blank`) — chamado só sob aviso real de pressão de memória do sistema (ver
+    /// `AccountsStore.releaseIdleAccountsMemory()`), nunca proativamente. Sem efeito se essa conta
+    /// tiver qualquer chamada em andamento; a próxima chamada de verdade recarrega a página sozinha.
+    func releaseMemoryIfIdle() async
 }

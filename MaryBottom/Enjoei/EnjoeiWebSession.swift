@@ -20,6 +20,10 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
 
     let webView: WKWebView
     private let navigationDelegate = WebSessionNavigationDelegate()
+    /// Quantas chamadas (`run`/`clearSession`) estão em andamento agora — a rede de segurança de
+    /// `releaseMemoryIfIdle()`: nunca libera memória no meio de uma chamada real, não importa qual
+    /// subsistema a disparou (todos passam por `run`/`runBatch`, que delega pra `run`).
+    private var inFlightCallCount = 0
 
     init(dataStoreIdentifier: EnjoeiAccountID) {
         let configuration = WKWebViewConfiguration()
@@ -47,6 +51,8 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
         arguments: [String: Any] = [:],
         reloadingPage: Bool = false
     ) async throws -> Any? {
+        inFlightCallCount += 1
+        defer { inFlightCallCount -= 1 }
         if reloadingPage || !isOnEnjoeiPage {
             await load(EnjoeiAPI.webBaseURL)
         }
@@ -84,8 +90,22 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
         )
     }
 
+    /// Libera o heap JS/DOM que a página acumula numa sessão muito longa (centenas de chamadas,
+    /// várias rodadas de megafone) navegando pra uma página em branco — bem mais leve que a real,
+    /// sem recriar `WKWebView`/`WKWebsiteDataStore` (essa área já teve um crash real do WebKit, ver
+    /// `AccountsStore.swift`). Os cookies/sessão continuam intocados, vivem no data store, não na
+    /// página. `inFlightCallCount == 0` garante que isso nunca acontece no meio de uma chamada real;
+    /// `run()` já detecta sozinho (`!isOnEnjoeiPage`) que precisa recarregar a página de verdade na
+    /// próxima chamada, sem nenhum código adicional nesse caminho.
+    func releaseMemoryIfIdle() async {
+        guard inFlightCallCount == 0, isOnEnjoeiPage else { return }
+        await load(URL(string: "about:blank")!)
+    }
+
     /// Apaga cookies e dados do Enjoei — o logout de verdade.
     func clearSession() async {
+        inFlightCallCount += 1
+        defer { inFlightCallCount -= 1 }
         let dataStore = webView.configuration.websiteDataStore
         let cookies = await dataStore.httpCookieStore.allCookies()
         for cookie in cookies where cookie.domain.hasSuffix(EnjoeiAPI.cookieDomainSuffix) {
