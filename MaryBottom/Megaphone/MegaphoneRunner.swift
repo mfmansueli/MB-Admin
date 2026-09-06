@@ -66,8 +66,18 @@ final class MegaphoneRunner {
     /// A cada quantos itens megafonados (no mínimo) `progressSnapshot` se atualiza durante o laço
     /// automático — ver `refreshProgressSnapshot(force:)`. `var`, não `let`: os testes usam um
     /// valor pequeno pra provar o lote sem precisar rodar centenas de itens. Em produção, numa loja
-    /// de 1500 produtos isso publica ~150 atualizações de resumo por rodada em vez de 1500.
-    var progressSnapshotBatchSize = 10
+    /// de 1500 produtos isso publica ~50 atualizações de resumo por rodada em vez de 1500.
+    ///
+    /// Cada publicação reatribui `filteredItems` em `AccountPublishedTabView`, e o `ForEach` sobre
+    /// esse array força o SwiftUI a comparar `MegaphoneItem` (structs com `EnjoeiProduct`/
+    /// `MegaphoneExposure` aninhados, incluindo strings) pra decidir quais linhas mudaram de
+    /// verdade — um trace de CPU num iPad real (Time Profiler) mostrou essa comparação como o maior
+    /// custo de CPU da tela durante uma rodada, mesmo já em lote de 10. Subir esse número reduz
+    /// proporcionalmente quantas vezes isso acontece por rodada — trade-off aceito: a lista demora
+    /// um pouco mais pra refletir um produto recém-megafonado, nunca mais que 30 produtos de atraso
+    /// (ver `MegaphoneRowView.==` pro outro lado desse mesmo fix, que reduz o custo de CADA
+    /// comparação em vez da frequência).
+    var progressSnapshotBatchSize = 30
     /// Quantos itens já passaram desde a última publicação de `progressSnapshot` — zera a cada
     /// publicação, forçada ou não.
     private var itemsSinceSnapshot = 0

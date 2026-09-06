@@ -54,7 +54,13 @@ struct CachedAsyncImage<Content: View, Placeholder: View>: View {
             return
         }
         uiImage = nil
-        guard let (data, _) = try? await URLSession.shared.data(from: url),
+        // `.returnCacheDataElseLoad`: uma vez que a foto está no `URLCache` de `.productPhotos`, usa
+        // ela sempre, sem checar validade — uma foto de produto não muda de conteúdo sob a mesma URL
+        // (o id público é gerado uma vez, na hora do upload), então "desatualizada" não existe aqui.
+        // Sem isso, o boot frio do app (ou qualquer limpeza do `ImageMemoryCache` sob pressão real de
+        // memória) buscava cada foto já vista de novo pela rede — ver `URLSession.productPhotos`.
+        let request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad)
+        guard let (data, _) = try? await URLSession.productPhotos.data(for: request),
               let downsampled = await Self.downsample(data: data, maxPixelSize: maxPixelSize) else { return }
         ImageMemoryCache.shared.setObject(downsampled, forKey: cacheKey)
         uiImage = downsampled

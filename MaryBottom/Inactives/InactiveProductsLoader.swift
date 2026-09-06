@@ -17,6 +17,14 @@ final class InactiveProductsLoader {
     private(set) var phase: Phase = .idle
     private(set) var items: [InactiveProduct] = []
     private var task: Task<Void, Never>?
+
+    /// Pra `AccountsStore.isEligibleForMemoryRelease` saber que essa conta está no meio de um
+    /// carregamento — `phase` sozinho não dá pra comparar direto porque `.loadingPage` carrega
+    /// valores associados.
+    var isLoadingPage: Bool {
+        if case .loadingPage = phase { return true }
+        return false
+    }
     /// `var`, não `let`: testes zeram, igual `MegaphoneRunner.delayBetweenProducts` — não faz
     /// sentido esperar de verdade entre páginas da mesma conta num teste.
     var delayBetweenPages: Duration = .milliseconds(300)

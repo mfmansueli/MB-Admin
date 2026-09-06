@@ -3,13 +3,33 @@ import SwiftUI
 /// Linha da lista de megafone: foto, título, preço (com o desconto já aplicado na loja, quando
 /// houver) e o que aconteceu com aquele produto — inclui o botão de aplicar o desconto sugerido
 /// pelo megafone, quando o produto pede essa decisão.
-struct MegaphoneRowView: View {
+struct MegaphoneRowView: View, Equatable {
     let item: MegaphoneItem
     let runner: MegaphoneRunner
     let account: AccountSession
     var isSelecting = false
     var isSelected = false
     var onToggleSelection: () -> Void = {}
+
+    /// Comparação sob medida pro `.equatable()` de quem chama (`AccountPublishedTabView`) — sem
+    /// ela, o SwiftUI decide se recria a linha comparando `item: MegaphoneItem` inteiro (structs
+    /// `EnjoeiProduct`/`MegaphoneExposure` aninhados, com várias strings), o que um trace de CPU
+    /// real (iPad, Time Profiler) mostrou como o maior custo da tela durante uma rodada — mesmo já
+    /// publicando `progressSnapshot` em lote. `product` some da comparação de propósito: depois de
+    /// carregado ele só muda por `MegaphoneRunner.applyDescription` (daí comparar `description`
+    /// puro, não o produto inteiro), nunca por `setStatus`/`resetItemsForNewRound`. `deleteStatus`/
+    /// `inactivateStatus`/`repostStatus` também somem — não vêm de `item`, vêm de `runner`/
+    /// `accountsStore` lidos ao vivo dentro do `body` (`@Environment`/referência), então o
+    /// `Observation` já invalida esta view sozinho quando qualquer um dos três muda, independente
+    /// desta comparação.
+    static func == (lhs: MegaphoneRowView, rhs: MegaphoneRowView) -> Bool {
+        lhs.item.id == rhs.item.id
+            && lhs.item.status == rhs.item.status
+            && lhs.item.exposure == rhs.item.exposure
+            && lhs.item.product.description == rhs.item.product.description
+            && lhs.isSelecting == rhs.isSelecting
+            && lhs.isSelected == rhs.isSelected
+    }
 
     @State private var isConfirmingApply = false
     @State private var isConfirmingRepost = false

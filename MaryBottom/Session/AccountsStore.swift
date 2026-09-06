@@ -248,16 +248,29 @@ final class AccountsStore {
     }
 
     /// Sob aviso real de pressão de memória (nunca proativamente — sem timer de inatividade nenhum),
-    /// libera a página de bastidores das contas que não são a selecionada nem estão com o megafone
-    /// rodando ou esperando a vez (ver `EnjoeiClientProtocol.releaseMemoryIfIdle()`). A checagem aqui
-    /// é só uma heurística de "vale a pena tentar" — quem garante que isso nunca acontece no meio de
-    /// uma chamada real é o contador dentro de `EnjoeiWebSession`, não esta lista; se algum outro
-    /// subsistema (ex. `ProductDetailsLoader` numa comparação) estiver ocupado numa conta elegível
-    /// aqui, o pior caso é só uma página recarregada a mais, nunca uma chamada quebrada.
+    /// libera a página de bastidores das contas que não são a selecionada, não estão com o megafone
+    /// rodando ou esperando a vez, e não têm nenhum outro carregamento pausado-mas-em-andamento (ver
+    /// `EnjoeiClientProtocol.releaseMemoryIfIdle()`). A checagem aqui é só uma heurística de "vale a
+    /// pena tentar" — quem garante que isso nunca acontece no meio de uma chamada de rede já em voo é
+    /// o contador dentro de `EnjoeiWebSession`, não esta lista.
+    ///
+    /// Os quatro carregamentos abaixo (produto por produto ou página por página, sempre com uma
+    /// pausa entre uma chamada e a próxima) passam por um instante com nenhuma chamada em voo mesmo
+    /// no meio de um carregamento longe de terminar — bem na pausa. Sem checá-los aqui, um aviso de
+    /// memória caindo numa dessas pausas (algo comum com o Mac sob pressão real, que é justamente
+    /// quando este método roda) mandava a página pra `about:blank` no meio da busca; a chamada
+    /// seguinte do mesmo laço então recarregava a página de verdade antes de continuar — e trocar de
+    /// origem assim (`about:blank` ↔ enjoei.com.br) repetidas vezes faz o WebKit abrir um processo
+    /// `WebContent` novo em vez de reaproveitar o existente. Visto ao vivo (`ps`/`sample`) derrubando
+    /// vários processos novos em poucos minutos com a tela de comparação em "comparação completa".
     private func isEligibleForMemoryRelease(_ account: AccountSession) -> Bool {
         account.id != selectedAccountID
             && !account.runner.isRunning
             && !megaphoneQueue.isWaiting(account.runner)
+            && !account.productDetailsLoader.isRunning
+            && !account.inactiveProductsLoader.isLoadingPage
+            && !account.smartPriceProductsLoader.isLoadingPage
+            && !account.smartPriceProductsLoader.isProcessingActivations
     }
 
     private func releaseIdleAccountsMemory() {

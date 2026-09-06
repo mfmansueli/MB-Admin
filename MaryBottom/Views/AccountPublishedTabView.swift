@@ -513,6 +513,10 @@ struct AccountPublishedTabView: View {
                                 isSelected: selectedIDs.contains(item.id),
                                 onToggleSelection: { toggleSelection(itemID: item.id) }
                             )
+                            // Ver `MegaphoneRowView.==` — sem isso, o SwiftUI usa a comparação
+                            // automática de `item: MegaphoneItem` (cara) pra decidir se recria a
+                            // linha; com isso, usa a comparação enxuta da própria view.
+                            .equatable()
                             if item.id != filteredItems.last?.id {
                                 Divider()
                             }

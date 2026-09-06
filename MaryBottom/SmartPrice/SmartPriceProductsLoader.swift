@@ -20,6 +20,14 @@ final class SmartPriceProductsLoader {
     private(set) var phase: Phase = .idle
     private(set) var items: [SmartPriceProduct] = []
     private var task: Task<Void, Never>?
+
+    /// Mesmo raciocínio de `InactiveProductsLoader.isLoadingPage` — pra
+    /// `AccountsStore.isEligibleForMemoryRelease` saber que essa conta está no meio de um
+    /// carregamento (`.loadingPage` carrega valores associados, não dá pra comparar `phase` direto).
+    var isLoadingPage: Bool {
+        if case .loadingPage = phase { return true }
+        return false
+    }
     /// `var`, não `let`: testes zeram, igual `InactiveProductsLoader.delayBetweenPages` — não faz
     /// sentido esperar de verdade entre páginas da mesma conta num teste.
     var delayBetweenPages: Duration = .milliseconds(300)
