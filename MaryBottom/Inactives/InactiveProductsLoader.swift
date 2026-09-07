@@ -75,8 +75,15 @@ final class InactiveProductsLoader {
             itemsPersistence.clearItems()
             itemsPersistence.appendPage(first.products, startingAt: 0)
             var collected = first.products
+            var seenIDs = Set(first.products.map(\.id))
             items = collected
-            let maxPage = first.maxPage
+            // `var`, não `let`: a paginação do Enjoei é inferida do maior `/page/N` visto nos
+            // links da própria página (não é um total real de backend — ver
+            // `EnjoeiJavaScript.inactiveProductsPage`), e esse widget às vezes só revela páginas
+            // mais distantes conforme a gente avança. Por isso `maxPage` é reavaliado com o maior
+            // valor visto em CADA página buscada, não só na primeira — senão o loop pode parar
+            // cedo demais e deixar produtos de fora sem erro nenhum.
+            var maxPage = first.maxPage
 
             var nextPage = 2
             while nextPage <= maxPage {
@@ -88,22 +95,28 @@ final class InactiveProductsLoader {
                 // foram disparados, então reordena por número de página antes de gravar, pra
                 // `appendPage(startingAt:)` continuar em sequência e a lista exibida continuar na
                 // ordem certa da loja.
-                let results = try await withThrowingTaskGroup(of: (Int, [InactiveProduct]).self) { group in
+                let results = try await withThrowingTaskGroup(of: (Int, InactiveProductsPage).self) { group in
                     for pageNumber in pageNumbers {
                         group.addTask { [client] in
                             let page = try await client.inactiveProductsPage(page: pageNumber)
-                            return (pageNumber, page.products)
+                            return (pageNumber, page)
                         }
                     }
-                    var collectedResults: [(Int, [InactiveProduct])] = []
+                    var collectedResults: [(Int, InactiveProductsPage)] = []
                     for try await result in group {
                         collectedResults.append(result)
                     }
                     return collectedResults.sorted { $0.0 < $1.0 }
                 }
-                for (_, products) in results {
-                    itemsPersistence.appendPage(products, startingAt: collected.count)
-                    collected += products
+                for (_, page) in results {
+                    maxPage = max(maxPage, page.maxPage)
+                    // A janela de páginas concorrentes pode se sobrepor com o que outra já trouxe
+                    // (a listagem inativa pode mudar entre o disparo das páginas), então descarta
+                    // qualquer produto repetido em vez de duplicar na lista exibida.
+                    let newProducts = page.products.filter { seenIDs.insert($0.id).inserted }
+                    guard !newProducts.isEmpty else { continue }
+                    itemsPersistence.appendPage(newProducts, startingAt: collected.count)
+                    collected += newProducts
                 }
                 items = collected
                 nextPage = chunkEnd + 1

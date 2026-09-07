@@ -68,6 +68,40 @@ struct InactiveProductsLoaderTests {
         #expect(await client.maxConcurrentPageRequests >= 2)
     }
 
+    @Test("revê maxPage a cada página buscada, não só na primeira")
+    func reveMaxPageACadaPagina() async {
+        // Página 1 só revela até a página 2 nos links de paginação (widget "em janela"); só a
+        // página 2 revela que na verdade tem 3 — o loader precisa continuar buscando mesmo depois
+        // de já ter alcançado o `maxPage` que a página 1 sozinha anunciou.
+        let client = StubEnjoeiClient(inactivePagesByNumber: [
+            1: InactiveProductsPage(products: [makeProduct(id: 1)], maxPage: 2),
+            2: InactiveProductsPage(products: [makeProduct(id: 2)], maxPage: 3),
+            3: InactiveProductsPage(products: [makeProduct(id: 3)], maxPage: 3)
+        ])
+        let loader = makeLoader(client: client)
+
+        loader.load()
+        await waitUntil { loader.phase == .finished }
+
+        #expect(loader.items.map(\.id) == [1, 2, 3])
+    }
+
+    @Test("descarta produtos repetidos entre páginas em vez de duplicar na lista")
+    func descartaProdutosRepetidosEntrePaginas() async {
+        // Simula a listagem mudando entre o disparo de páginas concorrentes: a página 2 repete um
+        // produto que a página 1 já trouxe.
+        let client = StubEnjoeiClient(inactivePagesByNumber: [
+            1: InactiveProductsPage(products: [makeProduct(id: 1), makeProduct(id: 2)], maxPage: 2),
+            2: InactiveProductsPage(products: [makeProduct(id: 2), makeProduct(id: 3)], maxPage: 2)
+        ])
+        let loader = makeLoader(client: client)
+
+        loader.load()
+        await waitUntil { loader.phase == .finished }
+
+        #expect(loader.items.map(\.id) == [1, 2, 3])
+    }
+
     @Test("loja sem inativos termina com lista vazia, sem erro")
     func lojaSemInativos() async {
         let client = StubEnjoeiClient(inactivePagesByNumber: [1: InactiveProductsPage(products: [], maxPage: 1)])
