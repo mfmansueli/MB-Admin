@@ -1,4 +1,4 @@
-# MaryBottom
+# MB Admin
 
 Projeto novo. Convenções gerais de workflow (um tipo por arquivo, sempre escrever testes) já vêm do
 `~/.claude/CLAUDE.md` global e valem aqui também — não repetidas neste arquivo.
@@ -51,7 +51,7 @@ return secureView // secureView vira a root view do UIViewRepresentable
 ## Deixado de fora por enquanto
 
 Padrões de arquitetura Firebase (albums, chat, contadores premium, etc.) do RainbowMatch não estão
-aqui porque este projeto ainda não usa Firebase. Se/quando o MaryBottom adotar Firebase, vale trazer
+aqui porque este projeto ainda não usa Firebase. Se/quando o MB Admin adotar Firebase, vale trazer
 os padrões relevantes daquele projeto (ex.: snapshot de dados compartilhados em vez de referência
 viva, checagem de premium via listener no próprio documento do usuário em vez de estado local
 otimista) na hora, olhando o app real primeiro.
