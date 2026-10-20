@@ -34,12 +34,31 @@ final class AccountsStore {
     /// `MegaphoneQueue.applyMemoryPressureCap(_:)`.
     private let memoryPressureObserver: any MemoryPressureObserving
 
+    /// Se um aviso de memória limita a `megaphoneQueue` a uma conta por vez — só fora do Mac. No
+    /// iPhone/iPad o aviso é sobre o próprio app, perto de ser encerrado pelo sistema, e é esse o
+    /// cenário que o teto protege. No Mac (Catalyst) o aviso reflete a pressão do sistema inteiro
+    /// (outros apps abertos contam) e chega com frequência mesmo com o app longe de qualquer
+    /// risco — com o teto valendo lá, a terceira loja ficava presa em "esperando a vez" até as
+    /// outras duas terminarem (pra sempre, com rodadas infinitas), que é justamente o que
+    /// `concurrencyLimit: .max` decidiu não fazer.
+    private static var memoryWarningCapsMegaphoneQueueByDefault: Bool {
+        #if targetEnvironment(macCatalyst)
+        false
+        #else
+        true
+        #endif
+    }
+
+    /// - Parameter memoryWarningCapsMegaphoneQueue: `nil` usa o padrão da plataforma (ver
+    ///   `memoryWarningCapsMegaphoneQueueByDefault`); os testes fixam o valor pra não depender de
+    ///   onde rodam.
     init(
         dependenciesFactory: AccountDependenciesFactory? = nil,
         persistence: AccountsPersisting? = nil,
         postHistoryPersistence: PostHistoryPersisting? = nil,
         postQueueItemsPersistence: PostQueueItemsPersisting? = nil,
-        memoryPressureObserver: (any MemoryPressureObserving)? = nil
+        memoryPressureObserver: (any MemoryPressureObserving)? = nil,
+        memoryWarningCapsMegaphoneQueue: Bool? = nil
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
@@ -59,8 +78,11 @@ final class AccountsStore {
         // Nunca aborta quem já está megafonando (ver o doc de `applyMemoryPressureCap`) — só evita
         // que contas novas comecem enquanto o aviso estiver de pé. `megaphoneQueue` já existe aqui
         // (inicializado por cima, sem depender de `self`).
+        let capsMegaphoneQueue = memoryWarningCapsMegaphoneQueue ?? Self.memoryWarningCapsMegaphoneQueueByDefault
         self.memoryPressureObserver.onMemoryWarning = { [weak self] in
-            self?.megaphoneQueue.applyMemoryPressureCap(1)
+            if capsMegaphoneQueue {
+                self?.megaphoneQueue.applyMemoryPressureCap(1)
+            }
             self?.releaseIdleAccountsMemory()
         }
         self.memoryPressureObserver.start()

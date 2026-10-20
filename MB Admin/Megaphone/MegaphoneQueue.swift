@@ -14,8 +14,8 @@ import Observation
 ///
 /// `baseLimit` (o teto normal, escolhido pelo usuário) é fixo, mas um aviso de memória real do
 /// sistema pode empurrar um teto temporário por cima dele (ver `applyMemoryPressureCap(_:)`,
-/// ligado em `AccountsStore` a um `MemoryPressureObserving`) — rede de segurança automática para o
-/// cenário que motivou `baseLimit = .max`: várias lojas grandes megafonando juntas.
+/// ligado em `AccountsStore` a um `MemoryPressureObserving`, fora do Mac) — rede de segurança
+/// automática para o cenário que motivou `baseLimit = .max`: várias lojas grandes megafonando juntas.
 @MainActor
 @Observable
 final class MegaphoneQueue {
@@ -62,9 +62,11 @@ final class MegaphoneQueue {
             Task { @MainActor in self?.cancelWaiting(id: id) }
         }
         // Chega aqui tanto por ter sido promovida (chegou a vez) quanto por ter sido cancelada
-        // enquanto esperava — o `defer { release(...) }` de quem chamou cuida de liberar de novo
-        // sem problema nos dois casos (ver comentário em `release`).
-        activeRunnerIDs.insert(id)
+        // enquanto esperava. Promovida: a vaga já foi ocupada por `promoteWaiters()`, no instante da
+        // promoção — não aqui, depois de retomar, senão várias promoções seguidas (ex.: o teto de
+        // pressão caindo com duas contas na fila) contariam as vagas antes de qualquer uma delas
+        // retomar e acabariam admitindo gente demais. Cancelada: nunca ocupou vaga, e o
+        // `defer { release(...) }` de quem chamou vira um no-op seguro (ver `release`).
     }
 
     /// Libera a vez dessa conta — chamar sempre que ela parar de megafonar de verdade (terminou,
@@ -79,15 +81,22 @@ final class MegaphoneQueue {
         if activeRunnerIDs.isEmpty {
             pressureCap = nil
         }
-        promoteNextWaiter()
+        promoteWaiters()
     }
 
     /// Chamado por um observador de aviso de memória (ver `MemoryPressureObserving`) — nunca aborta
     /// quem já está rodando (um lote de `megaphoneAll` em andamento sempre termina), só limita
     /// quantas contas NOVAS a fila deixa começar enquanto o aviso estiver de pé. `nil` remove o
-    /// teto na hora.
+    /// teto na hora, já admitindo quem estava esperando por causa dele.
+    ///
+    /// Com nenhuma conta megafonando, um aviso é ignorado: a pressão não vem do megafone, e o teto
+    /// só se desfaz sozinho quando a fila esvazia (ver `release`) — armado com a fila já vazia, nada
+    /// nunca o desfaria, e ele seguraria a próxima sessão inteira de megafone (horas depois, se for
+    /// o caso) numa conta por vez.
     func applyMemoryPressureCap(_ cap: Int?) {
+        guard cap == nil || !activeRunnerIDs.isEmpty else { return }
         pressureCap = cap
+        promoteWaiters()
     }
 
     private func cancelWaiting(id: ObjectIdentifier) {
@@ -96,12 +105,16 @@ final class MegaphoneQueue {
         waitersByRunnerID.removeValue(forKey: id)?.resume()
     }
 
-    /// Só promove enquanto ainda houver vaga sob o teto atual — com `pressureCap` reduzindo
-    /// `effectiveLimit` no meio do caminho, uma vaga liberada não significa mais, por si só, que dá
-    /// pra admitir mais alguém.
-    private func promoteNextWaiter() {
-        guard activeRunnerIDs.count < effectiveLimit, !waitingOrder.isEmpty else { return }
-        let nextID = waitingOrder.removeFirst()
-        waitersByRunnerID.removeValue(forKey: nextID)?.resume()
+    /// Promove todo mundo que couber sob o teto atual, não só o primeiro da fila — quando o teto de
+    /// pressão se desfaz, várias vagas abrem de uma vez, e promover um só deixava as outras contas
+    /// esperando à toa até a próxima liberação. Com `pressureCap` reduzindo `effectiveLimit` no meio
+    /// do caminho, uma vaga liberada também não significa mais, por si só, que dá pra admitir mais
+    /// alguém. Ocupa a vaga já aqui (ver o comentário no fim de `acquire`).
+    private func promoteWaiters() {
+        while activeRunnerIDs.count < effectiveLimit, !waitingOrder.isEmpty {
+            let nextID = waitingOrder.removeFirst()
+            activeRunnerIDs.insert(nextID)
+            waitersByRunnerID.removeValue(forKey: nextID)?.resume()
+        }
     }
 }

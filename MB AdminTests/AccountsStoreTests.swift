@@ -351,7 +351,8 @@ struct AccountsStoreTests {
                 )
             },
             persistence: InMemoryAccountsPersistence(),
-            memoryPressureObserver: observer
+            memoryPressureObserver: observer,
+            memoryWarningCapsMegaphoneQueue: true
         )
         #expect(observer.startCount == 1)
         await store.checkLoginFromWebView(accountID: idA)
@@ -368,6 +369,50 @@ struct AccountsStoreTests {
 
         store.megaphoneQueue.release(runnerA)
         await acquiredB.value
+    }
+
+    @Test("no Mac, aviso de memória não segura a terceira loja na fila com as outras duas megafonando")
+    func noMacAvisoDeMemoriaNaoSeguraTerceiraLoja() async {
+        let observer = FakeMemoryPressureObserver()
+        let idA = EnjoeiAccountID()
+        let idB = EnjoeiAccountID()
+        let idC = EnjoeiAccountID()
+        let thirdUser = EnjoeiUser(
+            id: 3, nickname: "terceira-conta", name: "terceira conta", avatarPublicID: nil, availableProductsCount: nil
+        )
+        let store = AccountsStore(
+            dependenciesFactory: { id in
+                let user: EnjoeiUser
+                switch id {
+                case idA: user = .stub
+                case idB: user = otherUser
+                default: user = thirdUser
+                }
+                return AccountDependencies(
+                    client: StubEnjoeiClient(user: user),
+                    sessionClearer: FakeSessionClearer(),
+                    webView: nil
+                )
+            },
+            persistence: InMemoryAccountsPersistence(),
+            memoryPressureObserver: observer,
+            memoryWarningCapsMegaphoneQueue: false
+        )
+        await store.checkLoginFromWebView(accountID: idA)
+        await store.checkLoginFromWebView(accountID: idB)
+        await store.checkLoginFromWebView(accountID: idC)
+        let runnerA = store.accounts.first { $0.id == idA }!.runner
+        let runnerB = store.accounts.first { $0.id == idB }!.runner
+        let runnerC = store.accounts.first { $0.id == idC }!.runner
+        await store.megaphoneQueue.acquire(runnerA)
+        await store.megaphoneQueue.acquire(runnerB)
+
+        observer.fireMemoryWarning()
+
+        // Sem teto, entra na hora — se o aviso tivesse armado o teto, este `await` nunca voltaria
+        // (A e B nunca liberam neste teste).
+        await store.megaphoneQueue.acquire(runnerC)
+        #expect(!store.megaphoneQueue.isWaiting(runnerC))
     }
 
     @Test("aviso de memória libera a página das contas ociosas, exceto a selecionada e a que está megafonando")

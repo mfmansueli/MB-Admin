@@ -111,6 +111,96 @@ struct MegaphoneQueueTests {
         #expect(!queue.isWaiting(runnerB))
     }
 
+    @Test("teto de memória se desfazendo promove todas as contas na fila, não só a primeira")
+    func tetoDesfazendoPromoveTodasAsContasNaFila() async {
+        let queue = MegaphoneQueue(concurrencyLimit: .max)
+        let runnerA = makeRunner()
+        let runnerB = makeRunner()
+        let runnerC = makeRunner()
+        await queue.acquire(runnerA)
+        queue.applyMemoryPressureCap(1)
+
+        let acquiredB = Task { await queue.acquire(runnerB) }
+        let acquiredC = Task { await queue.acquire(runnerC) }
+        await waitUntil { queue.isWaiting(runnerB) && queue.isWaiting(runnerC) }
+        #expect(queue.isWaiting(runnerB))
+        #expect(queue.isWaiting(runnerC))
+
+        // A fila esvazia (só A rodava) e o teto cai — as duas vagas abrem juntas.
+        queue.release(runnerA)
+        await acquiredB.value
+        await acquiredC.value
+
+        #expect(!queue.isWaiting(runnerB))
+        #expect(!queue.isWaiting(runnerC))
+    }
+
+    @Test("tirar o teto de memória na mão já promove quem estava esperando por causa dele")
+    func tirarOTetoNaMaoPromoveQuemEsperava() async {
+        let queue = MegaphoneQueue(concurrencyLimit: .max)
+        let runnerA = makeRunner()
+        let runnerB = makeRunner()
+        await queue.acquire(runnerA)
+        queue.applyMemoryPressureCap(1)
+
+        let acquiredB = Task { await queue.acquire(runnerB) }
+        await waitUntil { queue.isWaiting(runnerB) }
+        #expect(queue.isWaiting(runnerB))
+
+        // A continua rodando — mesmo assim B entra, sem esperar A liberar.
+        queue.applyMemoryPressureCap(nil)
+        await acquiredB.value
+
+        #expect(!queue.isWaiting(runnerB))
+    }
+
+    @Test("aviso de memória com ninguém megafonando não deixa teto pendurado pra próxima sessão")
+    func avisoComFilaVaziaNaoDeixaTetoPendurado() async {
+        let queue = MegaphoneQueue(concurrencyLimit: .max)
+        let runnerA = makeRunner()
+        let runnerB = makeRunner()
+        let runnerC = makeRunner()
+
+        queue.applyMemoryPressureCap(1)
+
+        // Se o teto tivesse ficado armado, B ficaria esperando A pra sempre (A nunca libera aqui).
+        await queue.acquire(runnerA)
+        await queue.acquire(runnerB)
+        await queue.acquire(runnerC)
+
+        #expect(!queue.isWaiting(runnerB))
+        #expect(!queue.isWaiting(runnerC))
+    }
+
+    @Test("promover várias de uma vez nunca passa do limite base")
+    func promoverVariasNuncaPassaDoLimiteBase() async {
+        let queue = MegaphoneQueue(concurrencyLimit: 2)
+        let runnerA = makeRunner()
+        let runnerB = makeRunner()
+        let runnerC = makeRunner()
+        let runnerD = makeRunner()
+        await queue.acquire(runnerA)
+        queue.applyMemoryPressureCap(1)
+
+        let acquiredB = Task { await queue.acquire(runnerB) }
+        await waitUntil { queue.isWaiting(runnerB) }
+        let acquiredC = Task { await queue.acquire(runnerC) }
+        await waitUntil { queue.isWaiting(runnerC) }
+        let acquiredD = Task { await queue.acquire(runnerD) }
+        await waitUntil { queue.isWaiting(runnerD) }
+
+        // O teto cai com três esperando, mas o limite base continua 2: só B e C (a ordem de
+        // chegada) entram; D segue esperando uma vaga de verdade.
+        queue.release(runnerA)
+        await acquiredB.value
+        await acquiredC.value
+        #expect(queue.isWaiting(runnerD))
+
+        queue.release(runnerB)
+        await acquiredD.value
+        #expect(!queue.isWaiting(runnerD))
+    }
+
     /// Espera uma condição sem prender o teste pra sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {
