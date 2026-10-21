@@ -27,6 +27,9 @@ final class AccountsStore {
     /// vez deixou de existir. Se voltar a travar com várias contas megafonando juntas, é só baixar
     /// esse número de novo.
     let megaphoneQueue = MegaphoneQueue(concurrencyLimit: .max)
+    /// A Live Activity de cada conta megafonando (tela bloqueada e Dynamic Island) — ver
+    /// `MegaphoneLiveActivities`.
+    let liveActivities = MegaphoneLiveActivities()
 
     private let dependenciesFactory: AccountDependenciesFactory
     private let persistence: AccountsPersisting
@@ -75,6 +78,11 @@ final class AccountsStore {
             itemsPersistence: postQueueItemsPersistence ?? UserDefaultsPostQueueItemsPersistence()
         )
         postQueue.accountsProvider = { [weak self] in self?.accounts ?? [] }
+        // Os botões de pausar/parar da Live Activity rodam no processo do app, mas não enxergam as
+        // contas — chegam aqui pelo id.
+        MegaphoneLiveActivityCommands.shared.handler = { [weak self] command, accountID in
+            self?.handleLiveActivityCommand(command, accountID: accountID)
+        }
         // Nunca aborta quem já está megafonando (ver o doc de `applyMemoryPressureCap`) — só evita
         // que contas novas comecem enquanto o aviso estiver de pé. `megaphoneQueue` já existe aqui
         // (inicializado por cima, sem depender de `self`).
@@ -261,7 +269,26 @@ final class AccountsStore {
         account.runner.onSessionExpired = { [weak account] in
             account?.markSessionExpired()
         }
+        account.runner.onProgressSnapshotChange = { [weak self, weak account] snapshot in
+            guard let account else { return }
+            self?.liveActivities.apply(snapshot, accountID: account.id, accountName: account.user.name)
+        }
         return account
+    }
+
+    /// Mesmo efeito dos botões do painel do megafone na tela da conta.
+    private func handleLiveActivityCommand(_ command: MegaphoneLiveActivityCommands.Command, accountID: EnjoeiAccountID) {
+        guard let runner = accounts.first(where: { $0.id == accountID })?.runner else { return }
+        switch command {
+        case .togglePause:
+            if runner.isPaused {
+                runner.resume()
+            } else {
+                runner.pause()
+            }
+        case .stop:
+            runner.cancel()
+        }
     }
 
     private func finishPresentingLogin() {

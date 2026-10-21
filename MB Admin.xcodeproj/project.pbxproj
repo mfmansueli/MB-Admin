@@ -6,7 +6,18 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		AB100000000000000000003D /* MB Admin LiveActivity.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = AB1000000000000000000030 /* MB Admin LiveActivity.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		AB100000000000000000003B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9DE924C1304394D600659336 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AB1000000000000000000034;
+			remoteInfo = "MB Admin LiveActivity";
+		};
 		AB1000000000000000000007 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 9DE924C1304394D600659336 /* Project object */;
@@ -23,7 +34,22 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		AB100000000000000000003E /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				AB100000000000000000003D /* MB Admin LiveActivity.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		AB1000000000000000000030 /* MB Admin LiveActivity.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "MB Admin LiveActivity.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		9DE924C9304394D600659336 /* MB Admin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MB Admin.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB1000000000000000000001 /* MB AdminTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "MB AdminTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB1000000000000000000020 /* MB AdminUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "MB AdminUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -36,6 +62,13 @@
 				Info.plist,
 			);
 			target = 9DE924C8304394D600659336 /* MB Admin */;
+		};
+		AB1000000000000000000033 /* Exceptions for "MB Admin LiveActivity" folder in "MB Admin LiveActivity" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = AB1000000000000000000034 /* MB Admin LiveActivity */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -56,6 +89,19 @@
 		AB1000000000000000000021 /* MB AdminUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "MB AdminUITests";
+			sourceTree = "<group>";
+		};
+		AB1000000000000000000031 /* MB Admin LiveActivity */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				AB1000000000000000000033 /* Exceptions for "MB Admin LiveActivity" folder in "MB Admin LiveActivity" target */,
+			);
+			path = "MB Admin LiveActivity";
+			sourceTree = "<group>";
+		};
+		AB1000000000000000000032 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -82,6 +128,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AB1000000000000000000036 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -91,6 +144,8 @@
 				9DE924CB304394D600659336 /* MB Admin */,
 				AB1000000000000000000002 /* MB AdminTests */,
 				AB1000000000000000000021 /* MB AdminUITests */,
+				AB1000000000000000000031 /* MB Admin LiveActivity */,
+				AB1000000000000000000032 /* Shared */,
 				9DE924CA304394D600659336 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -101,6 +156,7 @@
 				9DE924C9304394D600659336 /* MB Admin.app */,
 				AB1000000000000000000001 /* MB AdminTests.xctest */,
 				AB1000000000000000000020 /* MB AdminUITests.xctest */,
+				AB1000000000000000000030 /* MB Admin LiveActivity.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -116,13 +172,16 @@
 				9DE924C5304394D600659336 /* Sources */,
 				9DE924C6304394D600659336 /* Frameworks */,
 				9DE924C7304394D600659336 /* Resources */,
+				AB100000000000000000003E /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				AB100000000000000000003C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				9DE924CB304394D600659336 /* MB Admin */,
+				AB1000000000000000000032 /* Shared */,
 			);
 			name = "MB Admin";
 			packageProductDependencies = (
@@ -177,6 +236,29 @@
 			productReference = AB1000000000000000000020 /* MB AdminUITests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
 		};
+		AB1000000000000000000034 /* MB Admin LiveActivity */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB1000000000000000000038 /* Build configuration list for PBXNativeTarget "MB Admin LiveActivity" */;
+			buildPhases = (
+				AB1000000000000000000035 /* Sources */,
+				AB1000000000000000000036 /* Frameworks */,
+				AB1000000000000000000037 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				AB1000000000000000000031 /* MB Admin LiveActivity */,
+				AB1000000000000000000032 /* Shared */,
+			);
+			name = "MB Admin LiveActivity";
+			packageProductDependencies = (
+			);
+			productName = "MB Admin LiveActivity";
+			productReference = AB1000000000000000000030 /* MB Admin LiveActivity.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -198,6 +280,9 @@
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = 9DE924C8304394D600659336;
 					};
+					AB1000000000000000000034 = {
+						CreatedOnToolsVersion = 26.6;
+					};
 				};
 			};
 			buildConfigurationList = 9DE924C4304394D600659336 /* Build configuration list for PBXProject "MB Admin" */;
@@ -217,6 +302,7 @@
 				9DE924C8304394D600659336 /* MB Admin */,
 				AB1000000000000000000003 /* MB AdminTests */,
 				AB1000000000000000000022 /* MB AdminUITests */,
+				AB1000000000000000000034 /* MB Admin LiveActivity */,
 			);
 		};
 /* End PBXProject section */
@@ -237,6 +323,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AB1000000000000000000025 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB1000000000000000000037 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -289,6 +382,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AB1000000000000000000035 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -301,6 +401,12 @@
 			isa = PBXTargetDependency;
 			target = 9DE924C8304394D600659336 /* MB Admin */;
 			targetProxy = AB1000000000000000000026 /* PBXContainerItemProxy */;
+		};
+		AB100000000000000000003C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			platformFilter = ios;
+			target = AB1000000000000000000034 /* MB Admin LiveActivity */;
+			targetProxy = AB100000000000000000003B /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -596,6 +702,70 @@
 			};
 			name = Release;
 		};
+		AB1000000000000000000039 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = X5392U638Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "MB Admin LiveActivity/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "MB Admin";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.mbadmin.LiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		AB100000000000000000003A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = X5392U638Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "MB Admin LiveActivity/Info.plist";
+				INFOPLIST_KEY_CFBundleDisplayName = "MB Admin";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.mbadmin.LiveActivity;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -631,6 +801,15 @@
 			buildConfigurations = (
 				AB1000000000000000000028 /* Debug */,
 				AB1000000000000000000029 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB1000000000000000000038 /* Build configuration list for PBXNativeTarget "MB Admin LiveActivity" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB1000000000000000000039 /* Debug */,
+				AB100000000000000000003A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

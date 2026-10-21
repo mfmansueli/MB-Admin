@@ -1,112 +1,108 @@
 import SwiftUI
 
-/// Uma linha da seção "produtos em comum": os dois lados do par, com o `%` de similaridade entre
-/// eles.
+/// Uma linha da seção "produtos em comum": o anel com o quanto os dois títulos se parecem, o produto
+/// de uma conta e, embaixo, como ele se chama na outra. Par pouco parecido ganha o anel cinza e o
+/// aviso de conferir antes de tratar como igual. A lupa abre as diferenças entre os dois; os links
+/// de cada lado ficam no menu de contexto.
 struct ProductMatchRowView: View {
     let match: ProductMatch
+    let accountBName: String
 
     @State private var isShowingDifference = false
 
     var body: some View {
-        VStack(spacing: 8) {
-            HStack {
-                Spacer()
-                Text("\(Int((match.similarity * 100).rounded()))% parecido")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(similarityColor)
-                Spacer()
-            }
-            HStack(alignment: .top, spacing: 12) {
-                side(for: match.productA)
-                VStack(spacing: 6) {
-                    Image(systemName: "arrow.left.arrow.right")
-                        .font(.footnote)
-                        .foregroundStyle(.tertiary)
-                    // O cálculo de `ProductMatchDifference` só acontece dentro do `.sheet` — o
-                    // SwiftUI não avalia esse conteúdo até o usuário efetivamente abrir, então
-                    // nenhuma comparação extra roda só por essa row existir na lista.
-                    //
-                    // Círculo com tamanho mínimo, mesmo padrão dos botões de ícone do resto do
-                    // app (ex.: "recarregar produtos") — sem isso, o alvo de toque ficava do
-                    // tamanho do próprio glifo, pequeno demais pra acertar de primeira.
-                    Button {
-                        isShowingDifference = true
-                    } label: {
-                        Image(systemName: "text.magnifyingglass")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .frame(minWidth: 34, minHeight: 34)
-                            .background(.quaternary, in: .circle)
-                    }
-                    .buttonStyle(.plain)
+        HStack(spacing: 12) {
+            SimilarityGauge(match: match)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(match.productA.title)
+                    .font(.body.weight(.semibold))
+                    .lineLimit(2)
+                Text("\(accountBName): \(match.productB.title)")
+                    .font(.subheadline)
+                    .foregroundStyle(.supportingText)
+                    .lineLimit(2)
+                if !match.isConfident {
+                    Text("confira antes de considerar igual")
+                        .font(.subheadline.weight(.semibold))
                 }
-                side(for: match.productB)
+            }
+            Spacer(minLength: 8)
+            // O cálculo de `ProductMatchDifference` só acontece dentro do `.sheet` — o SwiftUI não
+            // avalia esse conteúdo até o usuário efetivamente abrir, então nenhuma comparação extra
+            // roda só por essa row existir na lista.
+            Button {
+                isShowingDifference = true
+            } label: {
+                Image(systemName: "text.magnifyingglass")
+            }
+            .buttonStyle(.neutral(isCircle: true, size: 38))
+            .accessibilityLabel("ver diferenças do par")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        // Fundo sólido pro scroll do mouse/trackpad funcionar em qualquer área da row no Mac
+        // Catalyst, não só em cima do anel — ver o mesmo comentário em `MegaphoneRowView`.
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
+        .contentShape(.rect)
+        .contextMenu {
+            ShareLink(item: match.productA.storePageURL) {
+                Label("compartilhar \(match.productA.title)", systemImage: "square.and.arrow.up")
+            }
+            ShareLink(item: match.productB.storePageURL) {
+                Label("compartilhar o de \(accountBName)", systemImage: "square.and.arrow.up")
             }
         }
-        .padding(.vertical, 4)
-        // Fundo sólido pro scroll do mouse/trackpad funcionar em qualquer área da row no Mac
-        // Catalyst, não só em cima da foto — ver o mesmo comentário em `MegaphoneRowView`.
-        .background(.background)
-        .contentShape(.rect)
         .sheet(isPresented: $isShowingDifference) {
             ProductMatchDifferenceSheet(match: match)
         }
     }
-
-    @ViewBuilder
-    private func side(for product: EnjoeiProduct) -> some View {
-        VStack(spacing: 4) {
-            // Mesmo tamanho de foto, título e preço das outras listas de produto (publicados,
-            // inativos) — mesmo com duas colunas lado a lado aqui, o tamanho tem que bater.
-            ProductPhotoView(product: product)
-            Text(product.title)
-                .productTitleFont()
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-            if let price = product.formattedPrice {
-                Text(price)
-                    .productPriceFont()
-                    .foregroundStyle(.secondary)
-            }
-            ShareLink(item: product.storePageURL) {
-                Image(systemName: "square.and.arrow.up")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    /// Quanto mais parecido, mais "certeza" a cor passa — abaixo do threshold padrão o par nem
-    /// aparece aqui, então essas duas faixas já são as únicas relevantes. Ação principal pra quem
-    /// é quase certo, texto de apoio pro resto: verde/laranja ficam reservados pra status.
-    private var similarityColor: Color {
-        match.similarity >= 0.8 ? .accentColor : .supportingText
-    }
 }
 
 #Preview {
-    ProductMatchRowView(
-        match: ProductMatch(
-            productA: EnjoeiProduct(
-                id: 1,
-                title: "colar curto pingente cravejado menino zircônia branca",
-                path: "colar-1",
-                photoPublicID: nil,
-                currentPrice: 299,
-                originalPrice: 299
+    VStack(spacing: 0) {
+        ProductMatchRowView(
+            match: ProductMatch(
+                productA: EnjoeiProduct(
+                    id: 1,
+                    title: "brinco argola estrela 50mm prata 925",
+                    path: "brinco-1",
+                    photoPublicID: nil,
+                    currentPrice: 299,
+                    originalPrice: 299
+                ),
+                productB: EnjoeiProduct(
+                    id: 2,
+                    title: "argola estrela 50 mm prata 925 leve",
+                    path: "brinco-2",
+                    photoPublicID: nil,
+                    currentPrice: 289,
+                    originalPrice: 289
+                ),
+                similarity: 0.82
             ),
-            productB: EnjoeiProduct(
-                id: 2,
-                title: "colar curto pingente cravejado zircônia branca clássico",
-                path: "colar-2",
-                photoPublicID: nil,
-                currentPrice: 289,
-                originalPrice: 289
-            ),
-            similarity: 0.82
+            accountBName: "loja B"
         )
-    )
-    .padding()
+        ProductMatchRowView(
+            match: ProductMatch(
+                productA: EnjoeiProduct(
+                    id: 3,
+                    title: "anel aro 17 entrelaçado zircônia",
+                    path: "anel-3",
+                    photoPublicID: nil,
+                    currentPrice: 149,
+                    originalPrice: 149
+                ),
+                productB: EnjoeiProduct(
+                    id: 4,
+                    title: "anel entrelaçado cravejado aro 16",
+                    path: "anel-4",
+                    photoPublicID: nil,
+                    currentPrice: 149,
+                    originalPrice: 149
+                ),
+                similarity: 0.64
+            ),
+            accountBName: "loja B"
+        )
+    }
 }

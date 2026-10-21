@@ -311,6 +311,66 @@ struct PostQueueTests {
         #expect(account.inactiveProductsLoader.search(matching: "").map(\.id) == [1])
     }
 
+    @Test("tentar de novo um apagar que falhou volta o item pra fila e apaga de verdade")
+    func tentarDeNovoApagarQueFalhou() async throws {
+        let client = StubEnjoeiClient(deleteProductError: .http(status: 500, message: "o enjoei caiu"))
+        let account = makeAccount(name: "conta", client: client)
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [account] }, interval: .zero)
+        queue.enqueueDelete(product: EnjoeiFixtures.product(id: 1), account: account)
+        await waitUntil { !queue.isRunning }
+        let item = try #require(queue.items.first)
+        #expect(queue.status(for: item) == .failed("o enjoei caiu"))
+
+        await client.setDeleteProductError(nil)
+        queue.retry(id: item.id)
+        await waitUntil { account.runner.deleteStatuses[1] == .succeeded }
+        await waitUntil { !queue.isRunning }
+
+        #expect(queue.status(for: item) == .succeeded)
+        #expect(await client.deleteProductCalls.count == 2)
+    }
+
+    @Test("tentar de novo uma postagem que falhou posta de novo, pelo mesmo poster")
+    func tentarDeNovoPostagemQueFalhou() async {
+        let sourceClient = StubEnjoeiClient(templateError: .http(status: 503, message: "fora do ar"))
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destinationClient = StubEnjoeiClient()
+        let destination = makeAccount(name: "destino", client: destinationClient)
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: .zero)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        await waitUntil { !queue.isRunning }
+        #expect(poster.statuses[target(1, destination: destination)] == .failed("fora do ar"))
+
+        await sourceClient.setTemplateError(nil)
+        await sourceClient.setTemplate(makeTemplate(productID: 1), for: 1)
+        if let item = queue.items.first { queue.retry(id: item.id) }
+        await waitUntil { poster.statuses[target(1, destination: destination)] == .succeeded }
+
+        #expect(poster.statuses[target(1, destination: destination)] == .succeeded)
+        #expect(poster.failureDetails[target(1, destination: destination)] == nil)
+        #expect(await destinationClient.createProductCalls.count == 1)
+    }
+
+    @Test("tentar de novo não mexe num item que deu certo — repostar criaria um anúncio duplicado")
+    func tentarDeNovoNaoRepeteSucesso() async {
+        let sourceClient = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])
+        let source = makeAccount(name: "origem", client: sourceClient)
+        let destinationClient = StubEnjoeiClient()
+        let destination = makeAccount(name: "destino", client: destinationClient)
+        let poster = CrossAccountPoster(cooldownDuration: .zero)
+        let queue = PostQueue(poster: poster, accountsProvider: { [source, destination] }, interval: .zero)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 1), source: source, destination: destination)
+        await waitUntil { poster.statuses[target(1, destination: destination)] == .succeeded }
+        await waitUntil { !queue.isRunning }
+
+        if let item = queue.items.first { queue.retry(id: item.id) }
+        await waitUntil { !queue.isRunning }
+
+        #expect(poster.statuses[target(1, destination: destination)] == .succeeded)
+        #expect(await destinationClient.createProductCalls.count == 1)
+    }
+
     @Test("inativar pela fila delega pro runner da conta e aparece como succeeded")
     func inativarPelaFilaDelegaProRunner() async {
         let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)])

@@ -93,6 +93,32 @@ struct AccountComparisonLoaderTests {
         }
     }
 
+    @Test("nova comparação volta pra escolha das contas")
+    func resetVoltaParaIdle() async {
+        let accountA = makeAccount(client: StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)]))
+        let accountB = makeAccount(client: StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)]))
+        let loader = AccountComparisonLoader()
+        loader.compare(accountA: accountA, accountB: accountB)
+        await loader.waitUntilFinished()
+
+        loader.reset()
+
+        #expect(loader.phase == .idle)
+    }
+
+    @Test("nova comparação não larga uma comparação ainda em andamento")
+    func resetNaoInterrompeComparacao() async {
+        let accountA = makeAccount(client: StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)]))
+        let accountB = makeAccount(client: StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)]))
+        let loader = AccountComparisonLoader()
+        loader.compare(accountA: accountA, accountB: accountB)
+
+        loader.reset()
+
+        #expect(loader.phase != .idle)
+        await loader.waitUntilFinished()
+    }
+
     @Test("cada comparação tem um id diferente, mesmo comparando o mesmo par de contas de novo")
     func cadaComparacaoTemIDDiferente() async {
         let clientA = StubEnjoeiClient(pages: [

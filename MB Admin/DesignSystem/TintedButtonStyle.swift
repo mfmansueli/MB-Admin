@@ -6,7 +6,7 @@ import SwiftUI
 /// principal vira quase branca (`#F2F2F7`), e texto branco em cima dela sumiria.
 ///
 /// Vidro tingido a partir do iOS/Mac Catalyst 26, cor sólida antes disso — mesmo critério de
-/// `BulkConfirmButton`.
+/// `GlassSurface`.
 struct TintedButtonStyle: ButtonStyle {
     enum Shape {
         case capsule

@@ -9,7 +9,7 @@ import SwiftUI
 /// tudo isso só faz sentido nesta aba, e sai junto com ela ao trocar pra "inativos"/"sem preço
 /// esperto". Parado, a barra de baixo é a do sistema (repetições · intervalo, busca, megafonar);
 /// com uma rodada em aberto, `MegaphoneRunPanel` toma o lugar dela; selecionando,
-/// `PublishedSelectionActionBar`.
+/// `SelectionActionBar`.
 struct AccountPublishedTabView: View {
     let account: AccountSession
 
@@ -302,7 +302,7 @@ struct AccountPublishedTabView: View {
     @ViewBuilder
     private var bottomBar: some View {
         if isSelecting {
-            PublishedSelectionActionBar(actions: availableBulkActions, isEnabled: !selectedIDs.isEmpty) { action in
+            SelectionActionBar(actions: availableBulkActions, isEnabled: !selectedIDs.isEmpty) { action in
                 pendingBulkAction = action
             }
         } else if isRoundOpen {

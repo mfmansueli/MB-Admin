@@ -1,12 +1,14 @@
 import SwiftUI
 
 /// Uma linha da lista de inativos: foto, título, preço e desde quando está inativo — em modo de
-/// seleção, vira uma linha marcável.
+/// seleção, vira uma linha marcável. As ações do "..." ficam também no menu de contexto (toque
+/// longo / clique direito), como na aba de publicados.
 struct InactiveProductRowView: View {
     let product: InactiveProduct
     let account: AccountSession
     var isSelecting = false
     var isSelected = false
+    var isCompact = true
     var onToggleSelection: () -> Void = {}
 
     @State private var isConfirmingActivate = false
@@ -24,9 +26,7 @@ struct InactiveProductRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             if isSelecting {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                    .font(.title3)
+                selectionIndicator
             }
             ProductPhotoView(product: product)
 
@@ -38,16 +38,16 @@ struct InactiveProductRowView: View {
                 if isDeleted {
                     Text("produto apagado")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.statusFailure)
                 } else if isActivated {
                     Text("produto ativado")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.statusSuccess)
                 } else {
                     if let price = product.formattedPrice {
                         Text(price)
                             .productPriceFont()
-                            .foregroundStyle(.secondary)
+                            .fontWeight(.semibold)
                     }
                     if let inactiveSince = product.inactiveSince {
                         Text("inativo desde \(inactiveSince)")
@@ -71,13 +71,19 @@ struct InactiveProductRowView: View {
                 moreMenu
             }
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, isCompact ? 16 : 24)
+        .padding(.vertical, 8)
         // Fundo sólido pro scroll do mouse/trackpad funcionar em qualquer área da row no Mac
         // Catalyst, não só em cima da foto — ver o mesmo comentário em `MegaphoneRowView`.
         .background(.background)
         .contentShape(.rect)
         .onTapGesture {
             if isSelecting { onToggleSelection() }
+        }
+        .contextMenu {
+            if !isSelecting, !isDeleted {
+                menuContent
+            }
         }
         .confirmationDialog(
             "ativar este produto de novo?",
@@ -118,57 +124,74 @@ struct InactiveProductRowView: View {
         .opacity(isActivated || isDeleted ? 0.4 : 1)
     }
 
-    @ViewBuilder
+    private var selectionIndicator: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.title2)
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(
+                isSelected ? AnyShapeStyle(Color.onTint) : AnyShapeStyle(Color(uiColor: .tertiaryLabel)),
+                isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear)
+            )
+            .accessibilityLabel(isSelected ? "selecionado" : "não selecionado")
+    }
+
     private var moreMenu: some View {
         Menu {
-            ShareLink(item: product.storePageURL) {
-                Label("compartilhar", systemImage: "square.and.arrow.up")
-            }
-            if !isActivated, let whatsAppShareURL {
-                Link(destination: whatsAppShareURL) {
-                    Label("compartilhar no whatsapp", systemImage: "message")
-                }
-            }
-            Button {
-                isConfirmingRepost = true
-            } label: {
-                Label("repostar", systemImage: "doc.on.doc.fill")
-            }
-            if !isActivated {
-                Button {
-                    isConfirmingActivate = true
-                } label: {
-                    if activateStatus == .megaphoning {
-                        Label("ativando…", systemImage: "arrow.triangle.2.circlepath")
-                    } else {
-                        Label("ativar produto", systemImage: "tray.and.arrow.up.fill")
-                    }
-                }
-                .disabled(activateStatus == .megaphoning)
-            }
-            Button(role: .destructive) {
-                isConfirmingDelete = true
-            } label: {
-                if deleteStatus == .megaphoning {
-                    Label("apagando…", systemImage: "trash")
-                } else {
-                    Label("apagar produto", systemImage: "trash")
-                }
-            }
-            .disabled(deleteStatus == .megaphoning)
+            menuContent
         } label: {
             if activateStatus == .megaphoning || deleteStatus == .megaphoning {
                 ProgressView()
             } else {
                 Image(systemName: "ellipsis.circle")
-                    .foregroundStyle(.secondary)
+                    .font(.title3)
+                    .foregroundStyle(.supportingText)
             }
         }
+        .accessibilityLabel("mais ações")
+    }
+
+    @ViewBuilder
+    private var menuContent: some View {
+        ShareLink(item: product.storePageURL) {
+            Label("compartilhar", systemImage: "square.and.arrow.up")
+        }
+        if !isActivated, let whatsAppShareURL {
+            Link(destination: whatsAppShareURL) {
+                Label("compartilhar no whatsapp", systemImage: "message")
+            }
+        }
+        Button {
+            isConfirmingRepost = true
+        } label: {
+            Label("repostar", systemImage: "doc.on.doc.fill")
+        }
+        if !isActivated {
+            Button {
+                isConfirmingActivate = true
+            } label: {
+                if activateStatus == .megaphoning {
+                    Label("ativando…", systemImage: "arrow.triangle.2.circlepath")
+                } else {
+                    Label("ativar produto", systemImage: "tray.and.arrow.up.fill")
+                }
+            }
+            .disabled(activateStatus == .megaphoning)
+        }
+        Button(role: .destructive) {
+            isConfirmingDelete = true
+        } label: {
+            if deleteStatus == .megaphoning {
+                Label("apagando…", systemImage: "trash")
+            } else {
+                Label("apagar produto", systemImage: "trash")
+            }
+        }
+        .disabled(deleteStatus == .megaphoning)
     }
 
     /// A fila só usa `id` (pra ler o template de novo), `title` e `photoPublicID` (pra exibir) — o
     /// resto do `EnjoeiProduct` não importa aqui, então fica com valores neutros. Mesma ideia do
-    /// repost em massa (`InactiveProductsListView.repostarSelecionados`).
+    /// repost em massa (`InactiveProductsListView.perform(_:)`).
     private var placeholderProduct: EnjoeiProduct {
         EnjoeiProduct(
             id: product.id,

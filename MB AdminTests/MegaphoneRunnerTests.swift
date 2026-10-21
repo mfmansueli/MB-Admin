@@ -1150,6 +1150,129 @@ struct MegaphoneRunnerTests {
         await runner.waitUntilFinished()
     }
 
+    // MARK: - tentar de novo (detalhe do erro)
+
+    @Test("tentar de novo um megafone que falhou megafona sem mexer no preço e tira a falha da conta")
+    func tentarDeNovoMegafoneQueFalhou() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            failuresByProductID: [2: .http(status: 504, message: "o enjoei respondeu com erro 504.")]
+        )
+        let runner = makeRunner(client: client)
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+        #expect(runner.totalFailed == 1)
+
+        await client.setMegaphoneFailure(nil, for: 2)
+        runner.retryMegaphone(productID: 2)
+        await waitUntil { runner.items[1].status == .succeeded }
+
+        #expect(runner.items[1].status == .succeeded)
+        #expect(runner.failureDetails[2] == nil)
+        #expect(runner.totalSucceeded == 2)
+        #expect(runner.totalFailed == 0)
+        #expect(runner.progressSnapshot.totalFailed == 0)
+        #expect(await client.appliedDiscounts[2] == nil)
+    }
+
+    @Test("falhando de novo, continua uma falha só na conta, com o diagnóstico novo")
+    func tentarDeNovoFalhaDeNovo() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            failuresByProductID: [2: .http(status: 504, message: "o enjoei respondeu com erro 504.")]
+        )
+        let runner = makeRunner(client: client)
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        await client.setMegaphoneFailure(.http(status: 429, message: "calma lá"), for: 2)
+        runner.retryMegaphone(productID: 2)
+        await waitUntil { runner.items[1].status == .failed("calma lá") }
+
+        #expect(runner.items[1].status == .failed("calma lá"))
+        #expect(runner.totalFailed == 1)
+        #expect(runner.failureDetails[2]?.action == .megaphone)
+        #expect(runner.failureDetails[2]?.httpStatus == 429)
+    }
+
+    @Test("tentar de novo um desconto que falhou aplica o preço sugerido de novo")
+    func tentarDeNovoDescontoQueFalhou() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)],
+            failuresByProductID: [2: .http(status: 500, message: "o enjoei caiu")],
+            exposuresByProductID: [
+                2: MegaphoneExposure(
+                    productID: 2, kind: .maximumAfterDiscount, priceToIncreaseExposure: 100, discountLabel: "- 20%"
+                )
+            ]
+        )
+        let runner = makeRunner(client: client)
+        runner.start(sellerID: 1)
+        runner.pause()
+        await waitUntil { !runner.items.isEmpty }
+        runner.applyDiscount(for: 2)
+        await waitUntil { runner.items.first { $0.id == 2 }?.status == .failed("o enjoei caiu") }
+        #expect(runner.failureDetails[2]?.action == .applyDiscount)
+
+        await client.setMegaphoneFailure(nil, for: 2)
+        runner.retryMegaphone(productID: 2)
+        await waitUntil { runner.items.first { $0.id == 2 }?.status == .succeeded }
+
+        #expect(runner.items.first { $0.id == 2 }?.status == .succeeded)
+        #expect(await client.appliedDiscounts[2] == 100)
+
+        runner.cancel()
+        await runner.waitUntilFinished()
+    }
+
+    @Test("tentar de novo não faz nada num produto que não falhou")
+    func tentarDeNovoSemFalhaNaoFazNada() async {
+        let persistence = InMemoryMegaphoneItemsPersistence()
+        persistence.saveItems([MegaphoneItem(product: EnjoeiFixtures.product(id: 1))])
+        let client = StubEnjoeiClient()
+        let runner = makeRunner(client: client, itemsPersistence: persistence)
+
+        runner.retryMegaphone(productID: 1)
+
+        #expect(runner.items[0].status == .pending)
+        #expect(await client.megaphonedIDs.isEmpty)
+    }
+
+    @Test("esquecer a falha de apagar libera o produto pra fila tentar de novo; sem falha, nada muda")
+    func esquecerFalhaDeApagar() async {
+        let client = StubEnjoeiClient(deleteProductError: .http(status: 500, message: "o enjoei caiu"))
+        let runner = makeRunner(client: client)
+        runner.deleteProduct(productID: 1)
+        await waitUntil { runner.deleteStatuses[1] == .failed("o enjoei caiu") }
+
+        runner.clearFailure(of: .delete, productID: 1)
+
+        #expect(runner.deleteStatuses[1] == nil)
+        #expect(runner.failureDetails[1] == nil)
+
+        await client.setDeleteProductError(nil)
+        runner.deleteProduct(productID: 1)
+        await waitUntil { runner.deleteStatuses[1] == .succeeded }
+        runner.clearFailure(of: .delete, productID: 1)
+
+        #expect(runner.deleteStatuses[1] == .succeeded)
+    }
+
+    @Test("cada resumo publicado avisa quem acompanha a rodada fora da tela (a Live Activity)")
+    func progressSnapshotAvisaQuemAcompanha() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
+        let runner = makeRunner(client: client)
+        var phases: [MegaphonePhase] = []
+        runner.onProgressSnapshotChange = { phases.append($0.phase) }
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(phases.first == .waitingInQueue)
+        #expect(phases.contains(.megaphoning(round: 1, of: .once)))
+        #expect(phases.last == .finished)
+    }
+
     /// Espera uma condição do runner sem prender o teste para sempre se algo der errado.
     private func waitUntil(_ condition: () -> Bool) async {
         for _ in 0..<10_000 where !condition() {

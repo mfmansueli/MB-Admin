@@ -3,12 +3,13 @@ import SwiftUI
 /// Uma linha da lista de "sem preço esperto": foto, preço, o rótulo colorido que o Enjoei já
 /// calcula pra cada anúncio (`SmartPriceProduct.statusText`/`statusColor`) e a faixa em que o
 /// preço esperto poderia variar — em modo de seleção, vira uma linha marcável (exceto quando
-/// `blocked`, que não aceita a ação de ativar).
+/// `blocked`, que não aceita a ação de ativar). As ações do "..." ficam também no menu de contexto.
 struct SmartPriceProductRowView: View {
     let item: SmartPriceListItem
     let loader: SmartPriceProductsLoader
     var isSelecting = false
     var isSelected = false
+    var isCompact = true
     var onToggleSelection: () -> Void = {}
 
     @State private var isConfirmingActivate = false
@@ -23,9 +24,7 @@ struct SmartPriceProductRowView: View {
     var body: some View {
         HStack(spacing: 12) {
             if isSelecting {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isBlocked ? Color.secondary.opacity(0.4) : (isSelected ? Color.accentColor : Color.secondary))
-                    .font(.title3)
+                selectionIndicator
             }
             ProductPhotoView(photoURL: item.photoURL, largePhotoURL: item.largePhotoURL, title: item.title)
 
@@ -36,11 +35,11 @@ struct SmartPriceProductRowView: View {
                 if isActivated {
                     Text("preço esperto ativado")
                         .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.statusSuccess)
                 } else {
                     Text(item.product.formattedPrice)
                         .productPriceFont()
-                        .foregroundStyle(.secondary)
+                        .fontWeight(.semibold)
                     if let statusText = item.product.statusText {
                         Text(statusText)
                             .font(.caption)
@@ -69,13 +68,19 @@ struct SmartPriceProductRowView: View {
                 moreMenu
             }
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, isCompact ? 16 : 24)
+        .padding(.vertical, 8)
         // Fundo sólido pro scroll do mouse/trackpad funcionar em qualquer área da row no Mac
         // Catalyst, não só em cima da foto — ver o mesmo comentário em `MegaphoneRowView`.
         .background(.background)
         .contentShape(.rect)
         .onTapGesture {
             if isSelecting, !isBlocked { onToggleSelection() }
+        }
+        .contextMenu {
+            if !isSelecting {
+                menuContent
+            }
         }
         .confirmationDialog(
             "ativar o preço esperto deste produto?",
@@ -90,33 +95,52 @@ struct SmartPriceProductRowView: View {
         .opacity(isActivated ? 0.4 : 1)
     }
 
-    @ViewBuilder
+    /// Bloqueado nem mostra o círculo vazio — não dá pra marcar.
+    private var selectionIndicator: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.title2)
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(
+                isSelected ? AnyShapeStyle(Color.onTint) : AnyShapeStyle(Color(uiColor: .tertiaryLabel)),
+                isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear)
+            )
+            .opacity(isBlocked ? 0.3 : 1)
+            .accessibilityLabel(isBlocked ? "bloqueado" : (isSelected ? "selecionado" : "não selecionado"))
+    }
+
     private var moreMenu: some View {
         Menu {
-            if let storePageURL = item.storePageURL {
-                ShareLink(item: storePageURL) {
-                    Label("compartilhar", systemImage: "square.and.arrow.up")
-                }
-            }
-            if !isActivated, !isBlocked {
-                Button {
-                    isConfirmingActivate = true
-                } label: {
-                    if isActivating {
-                        Label("ativando…", systemImage: "arrow.triangle.2.circlepath")
-                    } else {
-                        Label("ativar preço esperto", systemImage: "sparkles")
-                    }
-                }
-                .disabled(isActivating)
-            }
+            menuContent
         } label: {
             if isActivating {
                 ProgressView()
             } else {
                 Image(systemName: "ellipsis.circle")
-                    .foregroundStyle(.secondary)
+                    .font(.title3)
+                    .foregroundStyle(.supportingText)
             }
+        }
+        .accessibilityLabel("mais ações")
+    }
+
+    @ViewBuilder
+    private var menuContent: some View {
+        if let storePageURL = item.storePageURL {
+            ShareLink(item: storePageURL) {
+                Label("compartilhar", systemImage: "square.and.arrow.up")
+            }
+        }
+        if !isActivated, !isBlocked {
+            Button {
+                isConfirmingActivate = true
+            } label: {
+                if isActivating {
+                    Label("ativando…", systemImage: "arrow.triangle.2.circlepath")
+                } else {
+                    Label("ativar preço esperto", systemImage: "sparkles")
+                }
+            }
+            .disabled(isActivating)
         }
     }
 }

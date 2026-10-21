@@ -170,7 +170,12 @@ struct MegaphoneRowView: View, Equatable {
         }
         .sheet(isPresented: $isShowingErrorDetail) {
             if let message = item.status.failureMessage {
-                MegaphoneErrorDetailSheet(product: item.product, message: message, detail: runner.failureDetails[item.id])
+                MegaphoneErrorDetailSheet(
+                    product: item.product,
+                    message: message,
+                    detail: runner.failureDetails[item.id],
+                    onRetry: { runner.retryMegaphone(productID: item.id) }
+                )
             }
         }
         .opacity(isGone ? 0.4 : 1)

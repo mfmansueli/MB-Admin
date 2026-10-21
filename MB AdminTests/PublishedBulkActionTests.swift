@@ -18,6 +18,14 @@ struct PublishedBulkActionTests {
         #expect(PublishedBulkAction.allCases.filter(\.isDestructive) == [.delete])
     }
 
+    @Test("cor de cada ação na barra: desconto pede decisão, apagar é destrutivo, o resto é comum")
+    func papelDeCadaAcao() {
+        #expect(PublishedBulkAction.applyDiscount.role == .decision)
+        #expect(PublishedBulkAction.delete.role == .destructive)
+        #expect(PublishedBulkAction.repost.role == .standard)
+        #expect(PublishedBulkAction.inactivate.role == .standard)
+    }
+
     @Test("apagar avisa que é irreversível")
     func apagarAvisaQueEIrreversivel() {
         #expect(PublishedBulkAction.delete.confirmationMessage.hasPrefix("ação irreversível"))

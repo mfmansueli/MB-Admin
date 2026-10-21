@@ -3,7 +3,7 @@ import Foundation
 /// Uma das ações da barra de baixo na seleção múltipla de "publicados". "Aplicar desconto" só
 /// aparece quando a seleção tem algum produto que pede desconto — os outros não têm preço sugerido
 /// pra aplicar (ver `AccountPublishedTabView.availableBulkActions`).
-nonisolated enum PublishedBulkAction: Identifiable, CaseIterable, Sendable {
+nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable {
     case applyDiscount
     case repost
     case inactivate
@@ -28,6 +28,14 @@ nonisolated enum PublishedBulkAction: Identifiable, CaseIterable, Sendable {
         case .repost: "doc.on.doc"
         case .inactivate: "archivebox"
         case .delete: "trash"
+        }
+    }
+
+    var role: SelectionBarActionRole {
+        switch self {
+        case .applyDiscount: .decision
+        case .delete: .destructive
+        case .repost, .inactivate: .standard
         }
     }
 

@@ -88,6 +88,29 @@ struct CrossAccountPosterTests {
         #expect(poster.failureDetails[target(1, destination: destination)]?.serverMessage == "o enjoei caiu")
     }
 
+    @Test("esquecer a falha deixa postar de novo; num produto já postado, não mexe em nada")
+    func esquecerFalhaSoMexeEmFalha() async {
+        let source = makeAccount(client: StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)]))
+        let destination = makeAccount(
+            client: StubEnjoeiClient(createProductError: .http(status: 422, message: "preço mínimo não atingido"))
+        )
+        let poster = CrossAccountPoster()
+        poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destination)
+        await waitUntil { poster.statuses[target(1, destination: destination)] == .failed("preço mínimo não atingido") }
+
+        poster.clearFailure(for: target(1, destination: destination))
+
+        #expect(poster.statuses[target(1, destination: destination)] == nil)
+        #expect(poster.failureDetails[target(1, destination: destination)] == nil)
+
+        let okDestination = makeAccount(client: StubEnjoeiClient())
+        poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: okDestination)
+        await waitUntil { poster.statuses[target(1, destination: okDestination)] == .succeeded }
+        poster.clearFailure(for: target(1, destination: okDestination))
+
+        #expect(poster.statuses[target(1, destination: okDestination)] == .succeeded)
+    }
+
     @Test("erro ao criar no destino vira falha")
     func falhaAoCriar() async {
         let source = makeAccount(client: StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1)]))

@@ -65,6 +65,36 @@ struct MegaphoneFailureDetailTests {
         #expect(text.contains("descrição técnica:"))
     }
 
+    @Test("cada ação diz em vermelho o que deixou de acontecer")
+    func fraseDaFalhaPorAcao() {
+        #expect(MegaphoneFailureDetail.Action.megaphone.failureHeadline == "megafone não foi")
+        #expect(MegaphoneFailureDetail.Action.applyDiscount.failureHeadline == "desconto não foi aplicado")
+        #expect(MegaphoneFailureDetail.Action.post.failureHeadline == "não deu pra postar")
+        #expect(MegaphoneFailureDetail.Action.delete.failureHeadline == "não deu pra apagar")
+        #expect(MegaphoneFailureDetail.Action.inactivate.failureHeadline == "não deu pra inativar")
+        #expect(MegaphoneFailureDetail.Action.activate.failureHeadline == "não deu pra ativar")
+    }
+
+    @Test("diagnóstico técnico na ordem da tela, com status HTTP e resposta quando o erro traz")
+    func linhasDoDiagnosticoComHTTP() {
+        let detail = MegaphoneFailureDetail(action: .megaphone, error: EnjoeiError.http(status: 504, message: "Gateway Time-out"))
+
+        let rows = detail.diagnosticRows
+
+        #expect(rows.map(\.label) == ["ação", "hora", "status HTTP", "resposta", "descrição"])
+        #expect(rows[0].value == "megafonar")
+        #expect(rows[2].value == "504")
+        #expect(rows[3].value == "Gateway Time-out")
+        #expect(rows[4].value == detail.technicalDescription)
+    }
+
+    @Test("sem status HTTP nem resposta, o diagnóstico fica só com ação, hora e descrição")
+    func linhasDoDiagnosticoSemHTTP() {
+        let detail = MegaphoneFailureDetail(action: .post, syntheticMessage: "conta não está mais logada")
+
+        #expect(detail.diagnosticRows.map(\.label) == ["ação", "hora", "descrição"])
+    }
+
     @Test("shareText omite status HTTP e resposta do servidor quando não existem")
     func shareTextOmiteCamposAusentes() {
         let detail = MegaphoneFailureDetail(action: .megaphone, error: EnjoeiError.notAuthenticated)

@@ -28,6 +28,19 @@ nonisolated struct MegaphoneFailureDetail: Equatable, Sendable, Codable {
             }
         }
 
+        /// A frase curta em vermelho embaixo do produto no detalhe do erro — o que deixou de
+        /// acontecer, antes da mensagem do servidor explicar o porquê.
+        var failureHeadline: String {
+            switch self {
+            case .megaphone: "megafone não foi"
+            case .applyDiscount: "desconto não foi aplicado"
+            case .post: "não deu pra postar"
+            case .delete: "não deu pra apagar"
+            case .inactivate: "não deu pra inativar"
+            case .activate: "não deu pra ativar"
+            }
+        }
+
         init(kind: PostQueueItem.Kind) {
             switch kind {
             case .post: self = .post
@@ -79,6 +92,25 @@ nonisolated struct MegaphoneFailureDetail: Equatable, Sendable, Codable {
         technicalDescription = syntheticMessage
         httpStatus = nil
         serverMessage = nil
+    }
+
+    /// Uma linha do diagnóstico técnico no detalhe do erro — rótulo à esquerda, valor à direita.
+    struct DiagnosticRow: Equatable, Sendable {
+        let label: String
+        let value: String
+    }
+
+    /// As linhas do diagnóstico técnico, na ordem da tela — status HTTP e resposta só quando o erro
+    /// trouxe os dois.
+    var diagnosticRows: [DiagnosticRow] {
+        var rows = [
+            DiagnosticRow(label: "ação", value: action.label),
+            DiagnosticRow(label: "hora", value: occurredAt.formatted(date: .numeric, time: .standard))
+        ]
+        if let httpStatus { rows.append(DiagnosticRow(label: "status HTTP", value: String(httpStatus))) }
+        if let serverMessage { rows.append(DiagnosticRow(label: "resposta", value: serverMessage)) }
+        rows.append(DiagnosticRow(label: "descrição", value: technicalDescription))
+        return rows
     }
 
     /// Texto único, pronto pra compartilhar/copiar — reúne tudo que o sheet mostra separado, num

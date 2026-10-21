@@ -66,6 +66,15 @@ final class CrossAccountPoster {
         await run(product: product, from: source, to: destination, target: target)
     }
 
+    /// Esquece a falha de uma postagem, pra ela poder rodar de novo — o "tentar de novo" de um item
+    /// da fila (`PostQueue.retry(id:)`). Só mexe numa falha: uma postagem em voo ou já feita fica
+    /// como está (repetir criaria um anúncio duplicado).
+    func clearFailure(for target: PostTarget) {
+        guard statuses[target]?.failureMessage != nil else { return }
+        statuses[target] = nil
+        failureDetails[target] = nil
+    }
+
     private func run(
         product: EnjoeiProduct,
         from source: AccountSession,
