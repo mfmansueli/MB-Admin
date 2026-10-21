@@ -127,6 +127,24 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         currentUserError = error
     }
 
+    /// Pra testes de "tentar de novo": a primeira tentativa falha, a seguinte não (ou falha de outro
+    /// jeito).
+    func setMegaphoneFailure(_ error: EnjoeiError?, for productID: Int) {
+        failuresByProductID[productID] = error
+    }
+
+    func setDeleteProductError(_ error: EnjoeiError?) {
+        deleteProductError = error
+    }
+
+    func setTemplateError(_ error: EnjoeiError?) {
+        templateError = error
+    }
+
+    func setTemplate(_ template: ProductTemplate, for productID: Int) {
+        templatesByProductID[productID] = template
+    }
+
     func currentUser(reloadingPage: Bool) async throws -> EnjoeiUser {
         reloadingPageCalls.append(reloadingPage)
         if currentUserDelay > .zero { try? await Task.sleep(for: currentUserDelay) }

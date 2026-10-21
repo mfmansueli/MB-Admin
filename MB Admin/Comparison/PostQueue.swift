@@ -211,6 +211,27 @@ final class PostQueue {
         persistPendingItems()
     }
 
+    /// O "tentar de novo" do detalhe do erro: devolve um item que falhou pra "esperando a vez", no
+    /// mesmo lugar da fila, esquecendo a falha onde ela mora (o `poster` pra postar, o `runner` da
+    /// conta pras outras três ações). Respeita a pausa e o intervalo como qualquer outro item. Um
+    /// item que não falhou não muda — em especial uma postagem já feita, que repetida criaria um
+    /// anúncio duplicado.
+    func retry(id: UUID) {
+        guard let item = items.first(where: { $0.id == id }),
+              status(for: item).failureMessage != nil else { return }
+        failureOverrides[id] = nil
+        switch item.kind {
+        case .post:
+            poster.clearFailure(for: item.postTarget)
+        case .delete, .inactivate, .activate:
+            if let account = accountsProvider().first(where: { $0.id == item.sourceAccountID }) {
+                account.runner.clearFailure(of: item.kind, productID: item.product.id)
+            }
+        }
+        persistPendingItems()
+        startIfNeeded()
+    }
+
     /// Tira tudo da fila de uma vez — pro botão "limpar fila". Mesmo raciocínio do `remove(id:)`:
     /// uma chamada de rede já em voo termina sozinha, só não sobra nada pro laço processar depois
     /// dela.

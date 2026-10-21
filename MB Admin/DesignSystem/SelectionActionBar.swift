@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Barra de vidro com as ações em massa da seleção múltipla de "publicados" — ícone em cima do
-/// rótulo, uma ao lado da outra. Tocar só pede a confirmação (quem usa mostra o alerta); nada entra
-/// na fila sem ela.
-struct PublishedSelectionActionBar: View {
-    let actions: [PublishedBulkAction]
+/// Barra de vidro com as ações em massa de uma seleção múltipla ("publicados", "inativos") — ícone
+/// em cima do rótulo, uma ao lado da outra. Tocar só pede a confirmação (quem usa mostra o alerta);
+/// nada entra na fila sem ela.
+struct SelectionActionBar<Action: SelectionBarAction>: View {
+    let actions: [Action]
     let isEnabled: Bool
-    let onSelect: (PublishedBulkAction) -> Void
+    let onSelect: (Action) -> Void
 
     var body: some View {
         HStack(spacing: 0) {
@@ -25,7 +25,7 @@ struct PublishedSelectionActionBar: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(color(for: action))
+                .foregroundStyle(color(for: action.role))
                 // Sem isso, o VoiceOver lê o nome do símbolo junto ("lixeira, apagar").
                 .accessibilityLabel(action.label)
             }
@@ -35,15 +35,16 @@ struct PublishedSelectionActionBar: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .glassSurface(in: .capsule)
+        .frame(maxWidth: 660)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
     }
 
-    private func color(for action: PublishedBulkAction) -> Color {
-        switch action {
-        case .applyDiscount: .statusDecision
-        case .delete: .statusFailure
-        case .repost, .inactivate: .primary
+    private func color(for role: SelectionBarActionRole) -> Color {
+        switch role {
+        case .standard: .primary
+        case .decision: .statusDecision
+        case .destructive: .statusFailure
         }
     }
 }
@@ -51,7 +52,7 @@ struct PublishedSelectionActionBar: View {
 #Preview {
     VStack {
         Spacer()
-        PublishedSelectionActionBar(actions: PublishedBulkAction.allCases, isEnabled: true) { _ in }
-        PublishedSelectionActionBar(actions: [.repost, .inactivate, .delete], isEnabled: false) { _ in }
+        SelectionActionBar(actions: PublishedBulkAction.allCases, isEnabled: true) { _ in }
+        SelectionActionBar(actions: InactiveBulkAction.allCases, isEnabled: false) { _ in }
     }
 }

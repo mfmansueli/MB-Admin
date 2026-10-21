@@ -120,6 +120,12 @@ struct AccountDetailView: View {
         .onChange(of: filter) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: filterKey(account.id))
         }
+        // Busca e seleção são de uma aba só — a lista da outra aba não tem os mesmos produtos.
+        .onChange(of: selectedTab) { _, _ in
+            searchText = ""
+            isSelecting = false
+            selectedIDs = []
+        }
         // Selecionando, o título conta a seleção — como título de verdade, não um item `.principal`
         // na toolbar: no iPad, com o título grande à esquerda, o `.principal` nem aparece.
         .navigationTitle(isSelecting ? selectionTitle : account.user.name)
@@ -129,8 +135,10 @@ struct AccountDetailView: View {
         .toolbarTitleDisplayMode(isCompact ? .inline : .inlineLarge)
         .toolbar {
             // A aba "publicados" monta o próprio recarregar (junto do filtro e da seleção, ver
-            // `AccountPublishedTabView`); nas outras duas ele fica sozinho aqui.
-            if selectedTab != .published {
+            // `AccountPublishedTabView`), e no iPhone a de preço esperto também (dentro do filtro,
+            // ver `SmartPriceProductsListView`); no resto ele fica aqui. Selecionando, sai da barra
+            // — recarregar trocaria a lista por baixo da seleção.
+            if showsReloadButton {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
                         // Sempre mexe nos publicados também — bloqueado em qualquer aba enquanto o
@@ -160,6 +168,15 @@ struct AccountDetailView: View {
             if account.smartPriceProductsLoader.items.isEmpty, account.smartPriceProductsLoader.phase == .idle {
                 account.smartPriceProductsLoader.load()
             }
+        }
+    }
+
+    private var showsReloadButton: Bool {
+        guard !isSelecting else { return false }
+        switch selectedTab {
+        case .published: return false
+        case .inactive: return true
+        case .smartPrice: return !isCompact
         }
     }
 
@@ -213,15 +230,21 @@ struct AccountDetailView: View {
     // arquivo) — cada uma zera seu próprio estado local internamente via
     // `onChange(of: account.id, initial: true)`, sem precisar de `.id(account.id)` aqui.
     private var inactiveContent: some View {
-        InactiveProductsListView(account: account)
-            .padding(.horizontal, isCompact ? 16 : 24)
-            .padding(.top, 8)
+        InactiveProductsListView(
+            account: account,
+            searchText: $searchText,
+            isSelecting: $isSelecting,
+            selectedIDs: $selectedIDs
+        )
     }
 
     private var smartPriceContent: some View {
-        SmartPriceProductsListView(account: account)
-            .padding(.horizontal, isCompact ? 16 : 24)
-            .padding(.top, 8)
+        SmartPriceProductsListView(
+            account: account,
+            searchText: $searchText,
+            isSelecting: $isSelecting,
+            selectedIDs: $selectedIDs
+        )
     }
 
     /// No iPhone, só o nome da aba — os três rótulos com quantidade não cabem lado a lado. No

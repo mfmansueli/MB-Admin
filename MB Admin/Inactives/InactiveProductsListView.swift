@@ -4,136 +4,129 @@ import SwiftUI
 /// loja e deixa selecionar vários pra repostar (cria de novo), ativar (volta o mesmo anúncio) ou
 /// apagar de vez, entrando na mesma fila de ações usada pela comparação entre contas — aqui origem
 /// e destino são sempre a própria conta.
+///
+/// Mesmo padrão da aba "publicados": "selecionar" na barra de cima; selecionando, o título conta a
+/// seleção (`AccountDetailView`, dona desse estado — por isso as `@Binding`), "todos"/"nenhum" e o
+/// "concluir" ficam em cima, e as ações numa barra de vidro embaixo, cada uma confirmada por alerta.
+/// A busca fica na barra do sistema (no iPhone, a lupa embaixo) e some durante a seleção.
 struct InactiveProductsListView: View {
     let account: AccountSession
+    @Binding var searchText: String
+    @Binding var isSelecting: Bool
+    @Binding var selectedIDs: Set<Int>
 
-    @State private var isSelecting = false
-    @State private var selectedIDs: Set<Int> = []
-    @State private var bulkAction: BulkAction = .repost
-    @State private var isConfirmingBulkRepost = false
-    @State private var isConfirmingBulkActivate = false
-    @State private var isConfirmingBulkDelete = false
-    @State private var searchText = ""
+    @State private var pendingBulkAction: InactiveBulkAction?
     /// Cache de `filteredItems` (ver `recomputeFilteredItems`) — sem isso, cada leitura (lista,
-    /// "selecionar todos", contagem) refiltrava a lista inteira do zero, várias vezes por
-    /// digitação, numa loja com muitos produtos inativos.
+    /// "todos", contagem) refiltrava a lista inteira do zero, várias vezes por digitação, numa loja
+    /// com muitos produtos inativos.
     @State private var filteredItems: [InactiveProduct] = []
     @State private var searchDebounceTask: Task<Void, Never>?
-    @FocusState private var isSearchFocused: Bool
     @Environment(AccountsStore.self) private var accountsStore
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var loader: InactiveProductsLoader { account.inactiveProductsLoader }
-
-    /// Ação escolhida pro botão de confirmar da seleção múltipla — repostar (cria de novo, sem
-    /// mexer no status de inativo), ativar (volta o mesmo anúncio pra vitrine de publicados) ou
-    /// apagar (some do enjoei de vez).
-    private enum BulkAction: BulkActionOption {
-        case repost
-        case activate
-        case delete
-
-        var label: String {
-            switch self {
-            case .repost: "repostar"
-            case .activate: "ativar"
-            case .delete: "apagar"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .repost: "doc.on.doc.fill"
-            case .activate: "tray.and.arrow.up.fill"
-            case .delete: "trash.fill"
-            }
-        }
-
-        var tint: Color {
-            switch self {
-            case .repost, .activate: .accentColor
-            case .delete: .statusFailure
-            }
-        }
-    }
+    private var isCompact: Bool { horizontalSizeClass != .regular }
 
     var body: some View {
-        VStack(spacing: 12) {
-            switch loader.phase {
-            // Itens persistidos de uma abertura anterior já chegam prontos no `init` do loader,
-            // mas a fase continua `.idle` até `load()` ser chamado de novo — sem esse caso, a tela
-            // ficava presa num spinner pra sempre nesse cenário (o `.task` abaixo, corretamente,
-            // não chama `load()` de novo só porque já tem itens).
-            case .idle where !loader.items.isEmpty:
-                searchField
-                selectionBar
-                list
-            case .idle:
-                Spacer()
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                Spacer()
-            case .loadingPage(let page, let total) where loader.items.isEmpty:
-                Spacer()
-                ProgressView("carregando página \(page) de \(total)…")
-                    .frame(maxWidth: .infinity)
-                Spacer()
-            case .loadingPage, .finished:
-                if loader.items.isEmpty {
-                    ContentUnavailableView(
-                        "nenhum produto inativo",
-                        systemImage: "archivebox",
-                        description: Text("não há produtos inativos nessa loja agora.")
-                    )
-                    .frame(maxHeight: .infinity)
-                } else {
-                    searchField
-                    selectionBar
-                    list
+        content
+            .toolbar { toolbarContent }
+            // Mesmo esquema da aba "publicados": a busca só existe fora da seleção, num fundo vazio
+            // (pôr/tirar `.searchable` da própria lista trocaria a identidade dela).
+            .background {
+                if !isSelecting {
+                    Color.clear
+                        .searchable(text: $searchText, prompt: "buscar por título")
+                        .modifier(MinimizedSearchOnCompact(isCompact: isCompact))
                 }
-            case .failed(let message):
-                ContentUnavailableView(
-                    "não deu pra carregar os inativos",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(message)
-                )
-                .frame(maxHeight: .infinity)
-                Button("tentar de novo") { loader.load() }
-                    .buttonStyle(.bordered)
             }
-        }
-        // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
-        // conta na barra lateral mantendo a mesma aba selecionada — sem `.id(account.id)` (esta
-        // view não é mais destruída/reconstruída a cada troca de conta, ver `AccountDetailView`),
-        // o switch/case em `AccountDetailView.body` só desmonta esta view quando a ABA muda, não
-        // quando só a conta muda — por isso este `onChange` é o único gatilho que sobra pra zerar
-        // busca/seleção/ação em massa antes que vazem de uma conta pra outra.
-        .onChange(of: account.id, initial: true) { _, _ in
-            isSelecting = false
-            selectedIDs = []
-            bulkAction = .repost
-            isConfirmingBulkRepost = false
-            isConfirmingBulkActivate = false
-            isConfirmingBulkDelete = false
-            searchText = ""
-            searchDebounceTask?.cancel()
-            searchDebounceTask = nil
-            if loader.items.isEmpty, loader.phase == .idle {
-                loader.load()
+            .floatingBottomBar {
+                if isSelecting {
+                    SelectionActionBar(actions: InactiveBulkAction.allCases, isEnabled: !selectedIDs.isEmpty) { action in
+                        pendingBulkAction = action
+                    }
+                }
             }
-            recomputeFilteredItems()
-        }
-        // `loader.items` muda várias vezes durante o carregamento (uma página de cada vez) — cada
-        // mudança recalcula o filtro uma vez só, em vez de a cada leitura de `filteredItems`.
-        .onChange(of: loader.items) { _, _ in recomputeFilteredItems() }
-        // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer o
-        // filtro (potencialmente sobre centenas de produtos) a cada tecla.
-        .onChange(of: searchText) { _, _ in
-            searchDebounceTask?.cancel()
-            searchDebounceTask = Task {
-                try? await Task.sleep(for: .milliseconds(200))
-                guard !Task.isCancelled else { return }
+            // Selecionando, sair pela seta de voltar largaria a seleção pela metade.
+            .navigationBarBackButtonHidden(isSelecting)
+            .toolbar(isSelecting ? .hidden : .automatic, for: .bottomBar)
+            .alert(
+                pendingBulkAction?.confirmationTitle(count: selectedLiveProducts.count) ?? "",
+                isPresented: Binding(
+                    get: { pendingBulkAction != nil },
+                    set: { if !$0 { pendingBulkAction = nil } }
+                ),
+                presenting: pendingBulkAction
+            ) { action in
+                Button("cancelar", role: .cancel) {}
+                Button(action.confirmationButtonLabel, role: action.isDestructive ? .destructive : nil) {
+                    perform(action)
+                }
+            } message: { action in
+                Text(action.confirmationMessage)
+            }
+            // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
+            // conta na barra lateral mantendo a mesma aba selecionada — sem `.id(account.id)` (ver
+            // `AccountDetailView`), é o único gatilho que sobra pra carregar a conta nova. Busca e
+            // seleção quem zera é `AccountDetailView.loadState`, dona delas.
+            .onChange(of: account.id, initial: true) { _, _ in
+                pendingBulkAction = nil
+                searchDebounceTask?.cancel()
+                searchDebounceTask = nil
+                if loader.items.isEmpty, loader.phase == .idle {
+                    loader.load()
+                }
                 recomputeFilteredItems()
             }
+            // `loader.items` muda várias vezes durante o carregamento (uma página de cada vez) —
+            // cada mudança recalcula o filtro uma vez só, em vez de a cada leitura.
+            .onChange(of: loader.items) { _, _ in recomputeFilteredItems() }
+            // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer o
+            // filtro (potencialmente sobre centenas de produtos) a cada tecla.
+            .onChange(of: searchText) { _, _ in
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    guard !Task.isCancelled else { return }
+                    recomputeFilteredItems()
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch loader.phase {
+        // Itens persistidos de uma abertura anterior já chegam prontos no `init` do loader, mas a
+        // fase continua `.idle` até `load()` ser chamado de novo — sem esse caso, a tela ficava
+        // presa num spinner pra sempre nesse cenário.
+        case .idle where !loader.items.isEmpty:
+            list
+        case .idle:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loadingPage(let page, let total) where loader.items.isEmpty:
+            ProgressView("carregando página \(page) de \(total)…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loadingPage, .finished:
+            if loader.items.isEmpty {
+                ContentUnavailableView(
+                    "nenhum produto inativo",
+                    systemImage: "archivebox",
+                    description: Text("não há produtos inativos nessa loja agora.")
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                list
+            }
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("não deu pra carregar os inativos", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("tentar de novo") { loader.load() }
+                    .glassButtonStyle()
+            }
+            .frame(maxHeight: .infinity)
         }
     }
 
@@ -144,82 +137,6 @@ struct InactiveProductsListView: View {
     private func recomputeFilteredItems() {
         let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         filteredItems = trimmed.isEmpty ? loader.items : loader.search(matching: trimmed)
-    }
-
-    private var searchField: some View {
-        SearchField(placeholder: "buscar por título", text: $searchText, isFocused: $isSearchFocused)
-            .padding(.horizontal, 20)
-    }
-
-    private var selectionBar: some View {
-        SelectionToggleBar(
-            isSelecting: $isSelecting,
-            hasItems: !filteredItems.isEmpty,
-            isAllSelected: isAllFilteredSelected,
-            hasSelection: !selectedIDs.isEmpty,
-            onToggleSelecting: {
-                isSelecting.toggle()
-                if !isSelecting {
-                    selectedIDs.removeAll()
-                    bulkAction = .repost
-                }
-            },
-            onToggleSelectAll: { toggleSelectAll() }
-        ) {
-            BulkActionSelector(selection: $bulkAction, selectedCount: selectedIDs.count) {
-                switch bulkAction {
-                case .repost: isConfirmingBulkRepost = true
-                case .activate: isConfirmingBulkActivate = true
-                case .delete: isConfirmingBulkDelete = true
-                }
-            }
-        }
-        .padding(.horizontal, 20)
-        .confirmationDialog(
-            "repostar \(selectedIDs.count) produtos?",
-            isPresented: $isConfirmingBulkRepost,
-            titleVisibility: .visible
-        ) {
-            Button("repostar") { repostarSelecionados() }
-            Button("cancelar", role: .cancel) {}
-        } message: {
-            Text("entra na fila de ações, reaproveitando título, descrição, preço e fotos de cada um — acompanhe o andamento por lá.")
-        }
-        .confirmationDialog(
-            "ativar \(selectedIDs.count) produtos de novo?",
-            isPresented: $isConfirmingBulkActivate,
-            titleVisibility: .visible
-        ) {
-            Button("ativar") { ativarSelecionados() }
-            Button("cancelar", role: .cancel) {}
-        } message: {
-            Text("cada anúncio selecionado entra na fila de ações e volta pra vitrine de publicados.")
-        }
-        .confirmationDialog(
-            "apagar \(selectedIDs.count) produtos?",
-            isPresented: $isConfirmingBulkDelete,
-            titleVisibility: .visible
-        ) {
-            Button("apagar", role: .destructive) { apagarSelecionados() }
-            Button("cancelar", role: .cancel) {}
-        } message: {
-            Text("ação irreversível: cada anúncio selecionado entra na fila de ações e é apagado do enjoei de vez, sem chance de recuperar.")
-        }
-    }
-
-    /// Considera só os itens que a busca deixa passar — "selecionar todos" com um texto digitado
-    /// pega só o que está visível na lista, não a loja inteira por trás do filtro.
-    private var isAllFilteredSelected: Bool {
-        !filteredItems.isEmpty && filteredItems.allSatisfy { selectedIDs.contains($0.id) }
-    }
-
-    private func toggleSelectAll() {
-        let filteredIDs = filteredItems.map(\.id)
-        if isAllFilteredSelected {
-            selectedIDs.subtract(filteredIDs)
-        } else {
-            selectedIDs.formUnion(filteredIDs)
-        }
     }
 
     @ViewBuilder
@@ -239,15 +156,60 @@ struct InactiveProductsListView: View {
                             account: account,
                             isSelecting: isSelecting,
                             isSelected: selectedIDs.contains(product.id),
+                            isCompact: isCompact,
                             onToggleSelection: { toggleSelection(productID: product.id) }
                         )
                         if product.id != filteredItems.last?.id {
                             Divider()
+                                .padding(.leading, (isCompact ? 16 : 24) + 64 + 12 + (isSelecting ? 36 : 0))
                         }
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Toolbar
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if isSelecting {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(isAllFilteredSelected ? "nenhum" : "todos") {
+                    selectedIDs = PublishedProductSections.togglingAll(filteredItems.map(\.id), in: selectedIDs)
+                }
+                .fixedSize()
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    endSelection()
+                } label: {
+                    Image(systemName: "checkmark")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.onTint)
+                }
+                .prominentGlassButtonStyle()
+                .accessibilityLabel("concluir seleção")
+            }
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("selecionar") {
+                    // No Mac o botão nunca fica desabilitado (ver `ToolbarItemDisabled`).
+                    guard !filteredItems.isEmpty else { return }
+                    isSelecting = true
+                }
+                .fixedSize()
+                .toolbarItemDisabled(filteredItems.isEmpty)
+            }
+        }
+    }
+
+    // MARK: - Seleção
+
+    /// Considera só os itens que a busca deixa passar — "todos" com um texto digitado pega só o que
+    /// está visível na lista, não a loja inteira por trás do filtro.
+    private var isAllFilteredSelected: Bool {
+        !filteredItems.isEmpty && filteredItems.allSatisfy { selectedIDs.contains($0.id) }
     }
 
     private func toggleSelection(productID: Int) {
@@ -258,29 +220,26 @@ struct InactiveProductsListView: View {
         }
     }
 
-    private func repostarSelecionados() {
-        for product in selectedLiveProducts {
-            accountsStore.postQueue.enqueue(product: placeholder(for: product), source: account, destination: account)
-        }
+    private func endSelection() {
         selectedIDs.removeAll()
         isSelecting = false
     }
 
-    private func ativarSelecionados() {
+    private func perform(_ action: InactiveBulkAction) {
         for product in selectedLiveProducts {
-            accountsStore.postQueue.enqueueActivate(product: placeholder(for: product), account: account)
+            let placeholder = placeholder(for: product)
+            switch action {
+            case .repost:
+                accountsStore.postQueue.enqueue(product: placeholder, source: account, destination: account)
+            case .activate:
+                accountsStore.postQueue.enqueueActivate(product: placeholder, account: account)
+            case .delete:
+                // Mesma fila de ações usada pelo "apagar produto" de cada linha (e pela aba de
+                // publicados).
+                accountsStore.postQueue.enqueueDelete(product: placeholder, account: account)
+            }
         }
-        selectedIDs.removeAll()
-        isSelecting = false
-    }
-
-    /// Mesma fila de ações usada pelo "apagar produto" de cada linha (e pela aba de publicados).
-    private func apagarSelecionados() {
-        for product in selectedLiveProducts {
-            accountsStore.postQueue.enqueueDelete(product: placeholder(for: product), account: account)
-        }
-        selectedIDs.removeAll()
-        isSelecting = false
+        endSelection()
     }
 
     /// Os selecionados que ainda existem no enjoei — um já apagado nesta sessão continua na lista

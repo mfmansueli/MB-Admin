@@ -105,6 +105,10 @@ final class MegaphoneRunner {
     /// Chamado quando a sessão do Enjoei caiu no meio da rodada, para sinalizar a conta como
     /// precisando logar de novo sem depender de a tela estar aberta observando `phase`.
     var onSessionExpired: (() -> Void)?
+    /// Chamado a cada `progressSnapshot` publicado (mesmo lote — ver
+    /// `refreshProgressSnapshot(force:)`), pra quem acompanha a rodada fora da tela: a Live
+    /// Activity (`MegaphoneLiveActivities`).
+    var onProgressSnapshotChange: ((MegaphoneProgressSnapshot) -> Void)?
 
     // Também sem `private` — usado pelos métodos movidos pros arquivos de extensão (ver
     // comentário acima, nas propriedades).
@@ -370,6 +374,7 @@ final class MegaphoneRunner {
             round: round,
             discountDecisionCount: discountDecisionCount
         )
+        onProgressSnapshotChange?(progressSnapshot)
     }
 
     /// Mesmo O(catálogo) de `processedCount` — só roda quando o snapshot é publicado de fato (em

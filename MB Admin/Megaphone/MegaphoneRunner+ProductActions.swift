@@ -37,6 +37,39 @@ extension MegaphoneRunner {
         refreshProgressSnapshot()
     }
 
+    /// O "tentar de novo" do detalhe do erro: refaz o que falhou por último nesse produto — aplicar
+    /// o desconto sugerido, se foi isso que falhou; senão, só o megafone, sem mexer no preço.
+    /// Funciona com a rodada rodando, pelo mesmo motivo de `applyDiscount`. Os somatórios contam
+    /// produto, não tentativa: dando certo, a falha antiga sai da conta; falhando de novo, não soma
+    /// outra.
+    func retryMegaphone(productID: Int) {
+        guard let index = items.firstIndex(where: { $0.id == productID }),
+              items[index].status.failureMessage != nil else { return }
+        let action: MegaphoneFailureDetail.Action = failureDetails[productID]?.action == .applyDiscount
+            ? .applyDiscount
+            : .megaphone
+        let newPrice = action == .applyDiscount ? items[index].exposure?.priceToIncreaseExposure : nil
+        items[index].status = .megaphoning
+        Task { [weak self] in
+            await self?.performRetry(productID: productID, newPrice: newPrice, action: action)
+        }
+    }
+
+    func performRetry(productID: Int, newPrice: Double?, action: MegaphoneFailureDetail.Action) async {
+        do {
+            let token = try await client.csrfToken()
+            _ = try await megaphone(productID: productID, newPrice: newPrice, token: token)
+            setStatus(.succeeded, for: productID)
+            failureDetails[productID] = nil
+            totalSucceeded += 1
+            totalFailed = max(0, totalFailed - 1)
+        } catch {
+            setStatus(.failed(error.localizedDescription), for: productID)
+            failureDetails[productID] = MegaphoneFailureDetail(action: action, error: error)
+        }
+        refreshProgressSnapshot()
+    }
+
     /// Procura de novo o índice em vez de guardar o de antes do `await`: uma rodada nova
     /// (`start`) recria `items` do zero enquanto isso estava em andamento.
     func setStatus(_ status: MegaphoneStatus, for productID: Int) {
@@ -158,6 +191,25 @@ extension MegaphoneRunner {
             activateStatuses[productID] = .failed(error.localizedDescription)
             failureDetails[productID] = MegaphoneFailureDetail(action: .activate, error: error)
         }
+    }
+
+    /// Esquece a falha de apagar/inativar/ativar um produto, pra fila de ações poder tentar de novo
+    /// (`PostQueue.retry(id:)`). Só mexe numa falha — em voo ou já feita, fica como está.
+    func clearFailure(of kind: PostQueueItem.Kind, productID: Int) {
+        switch kind {
+        case .delete:
+            guard deleteStatuses[productID]?.failureMessage != nil else { return }
+            deleteStatuses[productID] = nil
+        case .inactivate:
+            guard inactivateStatuses[productID]?.failureMessage != nil else { return }
+            inactivateStatuses[productID] = nil
+        case .activate:
+            guard activateStatuses[productID]?.failureMessage != nil else { return }
+            activateStatuses[productID] = nil
+        case .post:
+            return
+        }
+        failureDetails[productID] = nil
     }
 
     /// Lê o produto inteiro primeiro (mesma rota de "duplicar" que o repost usa, só pra leitura —

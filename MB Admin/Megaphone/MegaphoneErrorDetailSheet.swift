@@ -1,10 +1,10 @@
 import SwiftUI
 
-/// Sheet com o erro completo de uma ação que falhou (megafonar, postar, apagar, inativar ou
-/// ativar) — a row só mostra até duas linhas da mensagem (ícone ou texto vermelho, os dois abrem
-/// isso). Além do texto inteiro sem truncar, mostra o diagnóstico técnico completo por trás dessa
-/// mensagem curta (`detail`, quando disponível) — pra ajudar a resolver o problema depois, não só
-/// entender o que já apareceu na tela.
+/// Sheet com o erro completo de uma ação que falhou (megafonar, aplicar desconto, postar, apagar,
+/// inativar ou ativar) — a row só mostra até duas linhas da mensagem (ícone ou texto vermelho, os
+/// dois abrem isso). Em cima, o produto e o que deixou de acontecer; no meio, a mensagem inteira; e
+/// embaixo, recolhível, o diagnóstico técnico por trás dela (`detail`, quando disponível) — pra
+/// ajudar a resolver o problema depois, não só entender o que já apareceu na tela.
 struct MegaphoneErrorDetailSheet: View {
     let product: EnjoeiProduct
     let message: String
@@ -12,44 +12,45 @@ struct MegaphoneErrorDetailSheet: View {
     /// gravada antes dessa propriedade existir) — nesse caso o sheet só mostra a mensagem curta,
     /// como sempre mostrou.
     var detail: MegaphoneFailureDetail?
+    /// "tentar de novo" — `nil` esconde o botão: no histórico a ação já saiu da fila, e não tem o
+    /// que refazer dali.
+    var onRetry: (() -> Void)?
 
+    @State private var isShowingDiagnostics = true
     @Environment(\.dismiss) private var dismiss
+
+    private let cardShape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+    private let cardBackground = Color(uiColor: .secondarySystemGroupedBackground)
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    ProductPhotoView(product: product, size: 64)
-                    Text(product.title)
-                        .productTitleFont()
-                        .multilineTextAlignment(.center)
-                        .lineLimit(2)
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.largeTitle)
-                        .foregroundStyle(.statusFailure)
+                VStack(alignment: .leading, spacing: 16) {
+                    productCard
                     Text(message)
                         .font(.body)
-                        .multilineTextAlignment(.center)
-                        .foregroundStyle(.secondary)
                         .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                        .background(cardBackground, in: cardShape)
                     if let detail {
-                        Divider()
-                        technicalDetails(detail)
+                        diagnostics(detail)
                     }
-                    Spacer()
                 }
-                .padding(32)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
             }
+            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("detalhe do erro")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    // `.fixedSize()` evita o texto truncar ("fe...") no Mac (idiom otimizado) —
-                    // sem isso, o botão encolhe pro tamanho de uma "pill" fixa em vez de acompanhar
-                    // o texto.
-                    Button("fechar") { dismiss() }
-                        .fixedSize()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Label("fechar", systemImage: "xmark")
+                    }
                 }
                 if let detail {
                     ToolbarItem(placement: .primaryAction) {
@@ -59,40 +60,100 @@ struct MegaphoneErrorDetailSheet: View {
                     }
                 }
             }
+            .floatingBottomBar { bottomButtons }
         }
-        .presentationDetents(detail == nil ? [.medium] : [.medium, .large])
+        .presentationDetents([.medium, .large])
     }
 
-    /// Tudo que dá pra saber sobre o erro de verdade, além da mensagem curta acima — pensado pra
-    /// resolver o problema depois (ex.: colando isso numa conversa sobre o bug), não pro dia a dia
-    /// de quem só quer saber por que um produto falhou agora.
-    @ViewBuilder
-    private func technicalDetails(_ detail: MegaphoneFailureDetail) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("diagnóstico técnico")
+    private var productCard: some View {
+        HStack(spacing: 12) {
+            ProductPhotoView(product: product, size: 56)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(product.title)
+                    .productTitleFont()
+                    .lineLimit(3)
+                Label(detail?.action.failureHeadline ?? "deu erro", systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.statusFailure)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(16)
+        .background(cardBackground, in: cardShape)
+    }
+
+    /// Tudo que dá pra saber sobre o erro de verdade, além da mensagem acima — pensado pra resolver
+    /// o problema depois (ex.: colando isso numa conversa sobre o bug), não pro dia a dia de quem só
+    /// quer saber por que um produto falhou agora. Por isso dá pra recolher.
+    private func diagnostics(_ detail: MegaphoneFailureDetail) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation { isShowingDiagnostics.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.down")
+                        .rotationEffect(.degrees(isShowingDiagnostics ? 0 : -90))
+                    Text("diagnóstico técnico")
+                }
                 .font(.subheadline.weight(.semibold))
-            detailRow(label: "ação", value: detail.action.label)
-            detailRow(label: "quando", value: detail.occurredAt.formatted(date: .abbreviated, time: .standard))
-            if let httpStatus = detail.httpStatus {
-                detailRow(label: "status HTTP", value: String(httpStatus))
+                .foregroundStyle(.supportingText)
+                .padding(.horizontal, 16)
+                .contentShape(.rect)
             }
-            if let serverMessage = detail.serverMessage {
-                detailRow(label: "resposta do servidor", value: serverMessage)
+            .buttonStyle(.plain)
+            .accessibilityValue(isShowingDiagnostics ? "aberto" : "recolhido")
+
+            if isShowingDiagnostics {
+                VStack(spacing: 0) {
+                    ForEach(Array(detail.diagnosticRows.enumerated()), id: \.offset) { index, row in
+                        if index > 0 {
+                            Divider().padding(.leading, 16)
+                        }
+                        diagnosticRow(row)
+                    }
+                }
+                .background(cardBackground, in: cardShape)
+                .textSelection(.enabled)
             }
-            detailRow(label: "descrição técnica", value: detail.technicalDescription)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .textSelection(.enabled)
+        .padding(.top, 4)
     }
 
-    private func detailRow(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
+    private func diagnosticRow(_ row: MegaphoneFailureDetail.DiagnosticRow) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(row.label)
+                .layoutPriority(1)
+            Spacer(minLength: 0)
+            Text(row.value)
                 .font(.callout.monospaced())
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.trailing)
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+    }
+
+    private var bottomButtons: some View {
+        HStack(spacing: 10) {
+            Button {
+                dismiss()
+            } label: {
+                Text("fechar").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.neutral(size: 50))
+            if let onRetry {
+                Button {
+                    onRetry()
+                    dismiss()
+                } label: {
+                    Label("tentar de novo", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.tinted(.accentColor, size: 50))
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 }
 
@@ -111,8 +172,9 @@ struct MegaphoneErrorDetailSheet: View {
                 message: "o enjoei respondeu com erro 504.",
                 detail: MegaphoneFailureDetail(
                     action: .megaphone,
-                    error: EnjoeiError.http(status: 504, message: "o enjoei respondeu com erro 504.")
-                )
+                    error: EnjoeiError.http(status: 504, message: "Gateway Time-out")
+                ),
+                onRetry: {}
             )
         }
 }

@@ -3,7 +3,8 @@ import SwiftUI
 /// Conteúdo do sheet aberto pelo botão "comparar produtos" em "suas contas": escolhe duas contas
 /// logadas e mostra quais produtos parecem ser o mesmo item nas duas, e quais só existem numa. O
 /// resultado em si (busca, filtro, seleção múltipla, as três seções) vive em
-/// `ComparisonResultView` — só criado depois que uma comparação termina.
+/// `ComparisonResultView` — só criado depois que uma comparação termina, e aí ocupa a tela toda
+/// (as contas comparadas vão pro subtítulo); "nova comparação" volta pra escolha das contas.
 struct AccountComparisonView: View {
     let accounts: [AccountSession]
 
@@ -32,15 +33,25 @@ struct AccountComparisonView: View {
                     content
                 }
             }
+            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("comparar produtos")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    // `.fixedSize()` evita o texto truncar ("fe...") no Mac (idiom otimizado) —
-                    // sem isso, o botão encolhe pro tamanho de uma "pill" fixa em vez de acompanhar
-                    // o texto.
-                    Button("fechar") { dismiss() }
-                        .fixedSize()
+                    Button {
+                        dismiss()
+                    } label: {
+                        Label("fechar", systemImage: "xmark")
+                    }
+                }
+                if isShowingResult {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            loader.reset()
+                        } label: {
+                            Label("nova comparação", systemImage: "arrow.left.arrow.right")
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     // Mesmo círculo de tamanho fixo do botão equivalente em "suas contas" — sem
@@ -71,7 +82,31 @@ struct AccountComparisonView: View {
         }
     }
 
+    @ViewBuilder
     private var content: some View {
+        if case .finished(let result) = loader.phase, let accountA, let accountB {
+            ComparisonResultView(
+                result: result,
+                accountA: accountA,
+                accountB: accountB,
+                poster: poster,
+                postQueue: accountsStore.postQueue
+            )
+            // `result.id` é novo a cada comparação — sem isso, SwiftUI trata essa view como a
+            // mesma de antes e busca/filtro/seleção de uma comparação anterior (ex.: trocar a conta
+            // B e comparar de novo) sobrevivem pro resultado novo, mesmo sem fazer mais sentido nele.
+            .id(result.id)
+        } else {
+            setupContent
+        }
+    }
+
+    private var isShowingResult: Bool {
+        if case .finished = loader.phase { return true }
+        return false
+    }
+
+    private var setupContent: some View {
         VStack(spacing: 16) {
             VStack(spacing: 12) {
                 HStack(alignment: .top, spacing: 12) {
@@ -117,8 +152,15 @@ struct AccountComparisonView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(accountA == nil || accountB == nil || isLoadingProducts || isFetchingDetails)
+                // Distingue do "comparar" da lista de contas, por baixo da folha (testes de UI).
+                .accessibilityIdentifier("startComparison")
             }
-            .padding(.horizontal, 20)
+            .padding(16)
+            .background(
+                Color(uiColor: .secondarySystemGroupedBackground),
+                in: RoundedRectangle(cornerRadius: 26, style: .continuous)
+            )
+            .padding(.horizontal, 16)
             .padding(.top, 12)
 
             resultView
@@ -175,21 +217,9 @@ struct AccountComparisonView: View {
                 detailsFetchingPanel(for: accountB)
             }
             Spacer()
-        case .finished(let result):
-            if let accountA, let accountB {
-                ComparisonResultView(
-                    result: result,
-                    accountA: accountA,
-                    accountB: accountB,
-                    poster: poster,
-                    postQueue: accountsStore.postQueue
-                )
-                // `result.id` é novo a cada comparação — sem isso, SwiftUI trata essa view como a
-                // mesma de antes (mesma posição/tipo na `switch`) e busca/filtro/seleção de uma
-                // comparação anterior (ex.: trocar a conta B e comparar de novo) sobrevivem pro
-                // resultado novo, mesmo sem fazer mais sentido nele.
-                .id(result.id)
-            }
+        case .finished:
+            // Com resultado, `content` mostra `ComparisonResultView` no lugar desta tela inteira.
+            EmptyView()
         }
     }
 

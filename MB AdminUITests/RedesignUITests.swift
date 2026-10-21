@@ -29,6 +29,14 @@ final class RedesignUITests: XCTestCase {
         query.matching(NSPredicate(format: "label CONTAINS %@", text)).firstMatch
     }
 
+    /// Título da tela pela barra de navegação, não pelo texto: no iPad (título grande inline) o texto
+    /// que a acessibilidade expõe continua com o título anterior ("antonia") mesmo depois de a tela
+    /// trocar pra "N selecionados" — só o identificador da barra acompanha.
+    @MainActor
+    private func navigationTitle(_ title: String, in app: XCUIApplication) -> XCUIElement {
+        app.navigationBars[title]
+    }
+
     /// Abre a conta e espera os produtos carregarem (o botão "megafonar" só fica útil com a lista
     /// pronta — a seção "todos os anúncios" é o sinal).
     @MainActor
@@ -110,7 +118,7 @@ final class RedesignUITests: XCTestCase {
         let titles = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'prata 925'"))
         titles.element(boundBy: 0).tap()
         titles.element(boundBy: 1).tap()
-        XCTAssertTrue(app.staticTexts["2 selecionados"].waitForExistence(timeout: 5))
+        XCTAssertTrue(navigationTitle("2 selecionados", in: app).waitForExistence(timeout: 5))
         attachScreenshot("seleção", of: app)
 
         app.buttons["apagar"].tap()
@@ -120,7 +128,7 @@ final class RedesignUITests: XCTestCase {
 
         alert.buttons["cancelar"].tap()
         XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["2 selecionados"].exists)
+        XCTAssertTrue(navigationTitle("2 selecionados", in: app).exists)
 
         app.buttons["concluir seleção"].tap()
         XCTAssertTrue(app.buttons["selecionar"].waitForExistence(timeout: 5))
@@ -137,12 +145,12 @@ final class RedesignUITests: XCTestCase {
         XCTAssertTrue(element(in: app.staticTexts, containing: "desconto sugerido de").exists)
 
         app.buttons["selecionar todos em pedem desconto"].tap()
-        XCTAssertTrue(app.staticTexts["3 selecionados"].waitForExistence(timeout: 5))
+        XCTAssertTrue(navigationTitle("3 selecionados", in: app).waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["desmarcar todos em pedem desconto"].exists)
         attachScreenshot("seleção por seção", of: app)
 
         app.buttons["desmarcar todos em pedem desconto"].tap()
-        XCTAssertTrue(app.staticTexts["selecionar produtos"].waitForExistence(timeout: 5))
+        XCTAssertTrue(navigationTitle("selecionar produtos", in: app).waitForExistence(timeout: 5))
     }
 
     @MainActor

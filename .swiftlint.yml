@@ -4,12 +4,14 @@
 
 included:
   - MB Admin
+  - MB Admin LiveActivity
+  - Shared
   - MB AdminTests
   - MB AdminUITests
 
 disabled_rules:
   # Em SwiftUI, passar closures rotuladas + o conteúdo como trailing closure
-  # (`SelectionToggleBar(onToggleSelecting: {…}) { … }`, `Button(action:) { … }`) é o padrão.
+  # (`PublishedSectionHeader(onSelectAll: {…}) { … }`, `Button(action:) { … }`) é o padrão.
   - multiple_closures_with_trailing_closure
 
 # O código usa doc comments longos e strings de UI em português — 120 deixava ~140 linhas de fora.

@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// Uma linha nas seções "só nessa conta" — produto sem par na outra. Deixa compartilhar o link, ou
-/// postar o mesmo produto direto na conta que ainda não tem ele — em modo de seleção, vira uma
-/// linha marcável pra entrar na fila de ações junto com outras.
+/// Uma linha nas seções "só em loja A" — produto sem par na outra conta: foto, título, preço e, logo
+/// embaixo, o botão de postar o mesmo produto direto na conta que ainda não tem ele. Em modo de
+/// seleção, vira uma linha marcável pra entrar na fila de ações junto com outras. Compartilhar o
+/// link fica no menu de contexto.
 struct UnmatchedProductRowView: View {
     let product: EnjoeiProduct
     let sourceAccount: AccountSession
@@ -20,11 +21,10 @@ struct UnmatchedProductRowView: View {
     private var postStatus: MegaphoneStatus { poster.statuses[postTarget] ?? .pending }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(alignment: .top, spacing: 12) {
             if isSelecting {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
-                    .font(.title3)
+                selectionIndicator
+                    .frame(maxHeight: .infinity)
             }
             // Mesmo tamanho de foto de "publicados" e "inativos" — todas as listas de produto
             // usam o padrão de 64pt do `ProductPhotoView`.
@@ -37,29 +37,32 @@ struct UnmatchedProductRowView: View {
                 if let price = product.formattedPrice {
                     Text(price)
                         .productPriceFont()
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.supportingText)
+                }
+                if !isSelecting {
+                    postButton
+                        .padding(.top, 4)
                 }
             }
-            // Sempre presente, mesmo selecionando (sem os botões à direita) — sem isso, a `HStack`
-            // encolhe pro tamanho do conteúdo em vez de ocupar a largura da row, e o divisor da
-            // lista (que segue essa largura) fica curto em vez de ir de ponta a ponta.
-            Spacer(minLength: 8)
-            if !isSelecting {
-                ShareLink(item: product.storePageURL) {
-                    Image(systemName: "square.and.arrow.up")
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                postButton
-            }
+            // Sempre presente — sem isso, a `HStack` encolhe pro tamanho do conteúdo em vez de
+            // ocupar a largura da row, e o fundo do cartão fica com um buraco à direita.
+            Spacer(minLength: 0)
         }
-        .padding(.vertical, 2)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         // Fundo sólido pro scroll do mouse/trackpad funcionar em qualquer área da row no Mac
         // Catalyst, não só em cima da foto — ver o mesmo comentário em `MegaphoneRowView`.
-        .background(.background)
+        .background(Color(uiColor: .secondarySystemGroupedBackground))
         .contentShape(.rect)
         .onTapGesture {
             if isSelecting { onToggleSelection() }
+        }
+        .contextMenu {
+            if !isSelecting {
+                ShareLink(item: product.storePageURL) {
+                    Label("compartilhar", systemImage: "square.and.arrow.up")
+                }
+            }
         }
         .confirmationDialog(
             "postar este produto em \(destinationAccount.user.name)?",
@@ -83,38 +86,58 @@ struct UnmatchedProductRowView: View {
         }
     }
 
-    @ViewBuilder
+    private var selectionIndicator: some View {
+        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+            .font(.title2)
+            .symbolRenderingMode(.palette)
+            .foregroundStyle(
+                isSelected ? AnyShapeStyle(Color.onTint) : AnyShapeStyle(Color(uiColor: .tertiaryLabel)),
+                isSelected ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color.clear)
+            )
+            .accessibilityLabel(isSelected ? "selecionado" : "não selecionado")
+    }
+
+    /// Cápsula cinza com o destino no nome ("postar em loja B") — vira "postando…", "postado" (verde)
+    /// ou o mesmo convite em vermelho depois de uma falha.
+    /// `poster.isInCooldown` zera sozinho quando o bloqueio expira (ver
+    /// `CrossAccountPoster.scheduleCooldownExpiry`) — não precisa de um tick próprio aqui.
     private var postButton: some View {
-        // `poster.isInCooldown` zera sozinho quando o bloqueio expira (ver
-        // `CrossAccountPoster.scheduleCooldownExpiry`) — não precisa de um tick próprio aqui pra
-        // notar a hora certa, ao contrário de antes.
         Button {
             isConfirmingPost = true
         } label: {
-            switch postStatus {
-            case .megaphoning:
-                HStack {
+            HStack(spacing: 6) {
+                switch postStatus {
+                case .megaphoning:
                     ProgressView()
+                        .controlSize(.small)
                     Text("postando em \(destinationAccount.user.name)…")
+                case .succeeded:
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("postado em \(destinationAccount.user.name)")
+                case .failed, .pending:
+                    Image(systemName: "paperplane")
+                    Text("postar em \(destinationAccount.user.name)")
                 }
-            case .succeeded:
-                Label("postado em \(destinationAccount.user.name)", systemImage: "checkmark.circle.fill")
-            case .failed:
-                Label("postar em \(destinationAccount.user.name)", systemImage: "paperplane.fill")
-            case .pending:
-                Label("postar em \(destinationAccount.user.name)", systemImage: "paperplane.fill")
             }
+            .font(.subheadline.weight(.semibold))
+            .lineLimit(1)
+            .foregroundStyle(postButtonStyle)
+            .padding(.horizontal, 12)
+            .frame(minHeight: 34)
+            .background(Color(uiColor: .tertiarySystemFill), in: .capsule)
+            .contentShape(.capsule)
         }
-        .font(.footnote)
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .tint(postButtonTint)
+        .buttonStyle(.plain)
         .disabled(postStatus == .megaphoning || postStatus == .succeeded || poster.isInCooldown)
+        .opacity(poster.isInCooldown && postStatus == .pending ? 0.4 : 1)
     }
 
-    private var postButtonTint: Color {
-        if postStatus.failureMessage != nil { return .statusFailure }
-        return .statusSuccess
+    private var postButtonStyle: AnyShapeStyle {
+        switch postStatus {
+        case .succeeded: AnyShapeStyle(Color.statusSuccess)
+        case .failed: AnyShapeStyle(Color.statusFailure)
+        case .pending, .megaphoning: AnyShapeStyle(.primary)
+        }
     }
 }
 

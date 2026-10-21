@@ -45,6 +45,14 @@ final class AccountComparisonLoader {
         }
     }
 
+    /// Volta pra escolha das contas — o "nova comparação" da tela, depois de um resultado. Sem efeito
+    /// com uma comparação em andamento: ela terminaria por cima, trazendo de volta um resultado que
+    /// o usuário já tinha largado.
+    func reset() {
+        guard task == nil else { return }
+        phase = .idle
+    }
+
     /// Serve aos testes; a tela só observa `phase`.
     func waitUntilFinished() async {
         await task?.value

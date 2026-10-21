@@ -5,13 +5,17 @@ import SwiftUI
 /// (`GET /api/smart_price/v2`) não devolve título nem link do anúncio — só id e preço — então nome
 /// e link pra compartilhar vêm de cruzar o id com `account.runner.items` (os produtos publicados,
 /// já carregados quando a tela de detalhe abre; ver `SmartPriceListItem`).
+///
+/// Mesmo padrão das abas "publicados"/"inativos": filtro e "selecionar" na barra de cima, busca na
+/// barra do sistema, e selecionando, o título conta a seleção (`AccountDetailView`, dona desse
+/// estado) e a ação — uma só, ativar — fica num botão embaixo.
 struct SmartPriceProductsListView: View {
     let account: AccountSession
+    @Binding var searchText: String
+    @Binding var isSelecting: Bool
+    @Binding var selectedIDs: Set<Int>
 
-    @State private var isSelecting = false
-    @State private var selectedIDs: Set<Int> = []
     @State private var isConfirmingBulkActivate = false
-    @State private var searchText = ""
     @State private var statusFilter: SmartPriceStatusFilter = .all
     /// Cache de `filteredItems`/`selectableItems` (ver `recomputeFilteredItems`) — antes disso, uma
     /// cadeia inteira (`titlesByID` → `displayItems` → `statusFilteredItems` → `filteredItems` →
@@ -20,103 +24,128 @@ struct SmartPriceProductsListView: View {
     @State private var filteredItems: [SmartPriceListItem] = []
     @State private var selectableItems: [SmartPriceListItem] = []
     @State private var searchDebounceTask: Task<Void, Never>?
-    @FocusState private var isSearchFocused: Bool
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var loader: SmartPriceProductsLoader { account.smartPriceProductsLoader }
+    private var isCompact: Bool { horizontalSizeClass != .regular }
 
     var body: some View {
-        VStack(spacing: 12) {
-            switch loader.phase {
-            // Itens persistidos de uma abertura anterior já chegam prontos no `init` do loader,
-            // mas a fase continua `.idle` até `load()` ser chamado de novo — mesmo raciocínio de
-            // `InactiveProductsListView`.
-            case .idle where !loader.items.isEmpty:
-                searchAndFilterBar
-                selectionBar
-                list
-            case .idle:
-                Spacer()
-                ProgressView()
-                    .frame(maxWidth: .infinity)
-                Spacer()
-            case .loadingPage(let page, let total) where loader.items.isEmpty:
-                Spacer()
-                ProgressView("carregando página \(page) de \(total)…")
-                    .frame(maxWidth: .infinity)
-                Spacer()
-            case .loadingPage, .finished:
-                if loader.items.isEmpty {
-                    ContentUnavailableView(
-                        "tudo com preço esperto",
-                        systemImage: "sparkles",
-                        description: Text("não há produtos sem preço esperto nessa loja agora.")
-                    )
-                    .frame(maxHeight: .infinity)
-                } else {
-                    searchAndFilterBar
-                    selectionBar
-                    list
+        content
+            .toolbar { toolbarContent }
+            // Mesmo esquema da aba "publicados": a busca só existe fora da seleção, num fundo vazio
+            // (pôr/tirar `.searchable` da própria lista trocaria a identidade dela).
+            .background {
+                if !isSelecting {
+                    Color.clear
+                        .searchable(text: $searchText, prompt: "buscar por título")
+                        .modifier(MinimizedSearchOnCompact(isCompact: isCompact))
                 }
-            case .failed(let message):
-                ContentUnavailableView(
-                    "não deu pra carregar",
-                    systemImage: "exclamationmark.triangle",
-                    description: Text(message)
+            }
+            .floatingBottomBar {
+                if isSelecting {
+                    activateBar
+                }
+            }
+            // Selecionando, sair pela seta de voltar largaria a seleção pela metade.
+            .navigationBarBackButtonHidden(isSelecting)
+            .toolbar(isSelecting ? .hidden : .automatic, for: .bottomBar)
+            .alert(
+                "aplicar preço esperto em \(selectedIDs.count == 1 ? "1 produto" : "\(selectedIDs.count) produtos")?",
+                isPresented: $isConfirmingBulkActivate
+            ) {
+                Button("cancelar", role: .cancel) {}
+                Button("aplicar") { ativarSelecionados() }
+            } message: {
+                Text(
+                    "cada anúncio selecionado é ativado um de cada vez, com um intervalo entre um e o próximo — "
+                        + "acompanhe o andamento pelo ícone de cada linha."
                 )
-                .frame(maxHeight: .infinity)
-                Button("tentar de novo") { loader.load() }
-                    .buttonStyle(.bordered)
             }
-        }
-        // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
-        // conta na barra lateral mantendo a mesma aba selecionada — sem `.id(account.id)` (esta
-        // view não é mais destruída/reconstruída a cada troca de conta, ver `AccountDetailView`),
-        // o switch/case em `AccountDetailView.body` só desmonta esta view quando a ABA muda, não
-        // quando só a conta muda — por isso este `onChange` é o único gatilho que sobra pra zerar
-        // busca/seleção/filtro antes que vazem de uma conta pra outra.
-        .onChange(of: account.id, initial: true) { _, _ in
-            isSelecting = false
-            selectedIDs = []
-            isConfirmingBulkActivate = false
-            searchText = ""
-            statusFilter = .all
-            searchDebounceTask?.cancel()
-            searchDebounceTask = nil
-            if loader.items.isEmpty, loader.phase == .idle {
-                loader.load()
-            }
-            loader.refreshPersistedTitles()
-            recomputeFilteredItems()
-        }
-        // `loader.items` muda a cada página carregada; `account.runner.progressSnapshot` é quem
-        // avisa que os publicados (título/link) chegaram ou mudaram — qualquer um dos dois
-        // mudando recalcula o filtro uma vez só. Quando é o snapshot que muda, também conserta
-        // (`refreshPersistedTitles`) os registros que ficaram com título vazio por terem sido
-        // gravados antes da aba "publicados" responder.
-        //
-        // De propósito NÃO é `account.runner.items` direto: aquele array muda uma vez por produto
-        // megafonado (até 1500+ vezes por rodada), e `Equatable` de `[MegaphoneItem]` compara
-        // campo a campo (incluindo strings) — um `onChange` nele custa O(catálogo) a cada produto
-        // processado, mesmo bug que travava a aba "publicados" (ver o comentário lá em
-        // `AccountPublishedTabView.swift`), só que aqui só morde se esta aba ficar aberta enquanto
-        // o megafone roda em segundo plano. `progressSnapshot` é a struct pequena e barata que já
-        // existe exatamente pra isso, atualizada em lote (`progressSnapshotBatchSize`), não a cada
-        // item.
-        .onChange(of: loader.items) { _, _ in recomputeFilteredItems() }
-        .onChange(of: account.runner.progressSnapshot) { _, _ in
-            loader.refreshPersistedTitles()
-            recomputeFilteredItems()
-        }
-        .onChange(of: statusFilter) { _, _ in recomputeFilteredItems() }
-        // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer a
-        // cadeia inteira (potencialmente sobre centenas de produtos) a cada tecla.
-        .onChange(of: searchText) { _, _ in
-            searchDebounceTask?.cancel()
-            searchDebounceTask = Task {
-                try? await Task.sleep(for: .milliseconds(200))
-                guard !Task.isCancelled else { return }
+            // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
+            // conta na barra lateral mantendo a mesma aba selecionada — sem `.id(account.id)` (ver
+            // `AccountDetailView`), é o único gatilho que sobra pra carregar a conta nova e zerar o
+            // filtro. Busca e seleção quem zera é `AccountDetailView.loadState`, dona delas.
+            .onChange(of: account.id, initial: true) { _, _ in
+                isConfirmingBulkActivate = false
+                statusFilter = .all
+                searchDebounceTask?.cancel()
+                searchDebounceTask = nil
+                if loader.items.isEmpty, loader.phase == .idle {
+                    loader.load()
+                }
+                loader.refreshPersistedTitles()
                 recomputeFilteredItems()
             }
+            // `loader.items` muda a cada página carregada; `account.runner.progressSnapshot` é quem
+            // avisa que os publicados (título/link) chegaram ou mudaram — qualquer um dos dois
+            // mudando recalcula o filtro uma vez só. Quando é o snapshot que muda, também conserta
+            // (`refreshPersistedTitles`) os registros que ficaram com título vazio por terem sido
+            // gravados antes da aba "publicados" responder.
+            //
+            // De propósito NÃO é `account.runner.items` direto: aquele array muda uma vez por
+            // produto megafonado (até 1500+ vezes por rodada), e `Equatable` de `[MegaphoneItem]`
+            // compara campo a campo (incluindo strings) — um `onChange` nele custa O(catálogo) a cada
+            // produto processado, mesmo bug que travava a aba "publicados" (ver o comentário lá em
+            // `AccountPublishedTabView.swift`). `progressSnapshot` é a struct pequena e barata que
+            // já existe exatamente pra isso, atualizada em lote, não a cada item.
+            .onChange(of: loader.items) { _, _ in recomputeFilteredItems() }
+            .onChange(of: account.runner.progressSnapshot) { _, _ in
+                loader.refreshPersistedTitles()
+                recomputeFilteredItems()
+            }
+            .onChange(of: statusFilter) { _, _ in
+                // Trocar de filtro com itens marcados deixaria parte da seleção escondida, mas
+                // ainda sendo ativada.
+                selectedIDs.removeAll()
+                recomputeFilteredItems()
+            }
+            // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer a
+            // cadeia inteira (potencialmente sobre centenas de produtos) a cada tecla.
+            .onChange(of: searchText) { _, _ in
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    guard !Task.isCancelled else { return }
+                    recomputeFilteredItems()
+                }
+            }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch loader.phase {
+        // Itens persistidos de uma abertura anterior já chegam prontos no `init` do loader, mas a
+        // fase continua `.idle` até `load()` ser chamado de novo — mesmo raciocínio de
+        // `InactiveProductsListView`.
+        case .idle where !loader.items.isEmpty:
+            list
+        case .idle:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loadingPage(let page, let total) where loader.items.isEmpty:
+            ProgressView("carregando página \(page) de \(total)…")
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .loadingPage, .finished:
+            if loader.items.isEmpty {
+                ContentUnavailableView(
+                    "tudo com preço esperto",
+                    systemImage: "sparkles",
+                    description: Text("não há produtos sem preço esperto nessa loja agora.")
+                )
+                .frame(maxHeight: .infinity)
+            } else {
+                list
+            }
+        case .failed(let message):
+            ContentUnavailableView {
+                Label("não deu pra carregar", systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(message)
+            } actions: {
+                Button("tentar de novo") { loader.load() }
+                    .glassButtonStyle()
+            }
+            .frame(maxHeight: .infinity)
         }
     }
 
@@ -136,91 +165,9 @@ struct SmartPriceProductsListView: View {
         }
         filteredItems = items
         // Só os itens não bloqueados entram na seleção — um item `blocked` não aceita a ação de
-        // ativar, então nem "selecionar todos" nem o toque na linha deixam marcá-lo (mesma checagem
-        // em `SmartPriceProductRowView`).
+        // ativar, então nem "todos" nem o toque na linha deixam marcá-lo (mesma checagem em
+        // `SmartPriceProductRowView`).
         selectableItems = items.filter { !$0.product.blocked }
-    }
-
-    private var searchAndFilterBar: some View {
-        HStack(spacing: 12) {
-            SearchField(placeholder: "buscar por título", text: $searchText, isFocused: $isSearchFocused)
-                .frame(maxWidth: .infinity)
-            statusFilterPicker
-        }
-        .padding(.horizontal, 20)
-    }
-
-    private var statusFilterPicker: some View {
-        Menu {
-            Picker("filtro", selection: $statusFilter) {
-                ForEach(SmartPriceStatusFilter.allCases, id: \.self) { filter in
-                    Text(filter.label).tag(filter)
-                }
-            }
-            .pickerStyle(.inline)
-        } label: {
-            HStack(spacing: 4) {
-                // Tamanho mínimo fixo — mesmo raciocínio de `AccountPublishedTabView.filterPicker`:
-                // sem isso, trocar pro rótulo mais longo ("preço alto, venda lenta") empurrava o
-                // campo de busca ao lado no meio da animação de seleção.
-                Text(statusFilter.label)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .frame(minWidth: 90, minHeight: 32)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            .contentShape(.rect)
-        }
-    }
-
-    private var selectionBar: some View {
-        SelectionToggleBar(
-            isSelecting: $isSelecting,
-            hasItems: !selectableItems.isEmpty,
-            isAllSelected: isAllSelectableSelected,
-            hasSelection: !selectedIDs.isEmpty,
-            onToggleSelecting: {
-                isSelecting.toggle()
-                if !isSelecting { selectedIDs.removeAll() }
-            },
-            onToggleSelectAll: { toggleSelectAll() }
-        ) {
-            BulkConfirmButton(
-                systemImage: "sparkles",
-                tint: .accentColor,
-                label: "ativar preço esperto",
-                accessibilityLabel: "ativar preço esperto em \(selectedIDs.count) produtos"
-            ) {
-                isConfirmingBulkActivate = true
-            }
-        }
-        .padding(.horizontal, 20)
-        .confirmationDialog(
-            "aplicar preço esperto em \(selectedIDs.count) produtos?",
-            isPresented: $isConfirmingBulkActivate,
-            titleVisibility: .visible
-        ) {
-            Button("aplicar") { ativarSelecionados() }
-            Button("cancelar", role: .cancel) {}
-        } message: {
-            Text("cada anúncio selecionado é ativado um de cada vez, com um intervalo entre um e o próximo — acompanhe o andamento pelo ícone de cada linha.")
-        }
-    }
-
-    private var isAllSelectableSelected: Bool {
-        !selectableItems.isEmpty && selectableItems.allSatisfy { selectedIDs.contains($0.id) }
-    }
-
-    private func toggleSelectAll() {
-        let ids = selectableItems.map(\.id)
-        if isAllSelectableSelected {
-            selectedIDs.subtract(ids)
-        } else {
-            selectedIDs.formUnion(ids)
-        }
     }
 
     @ViewBuilder
@@ -249,15 +196,112 @@ struct SmartPriceProductsListView: View {
                             loader: loader,
                             isSelecting: isSelecting,
                             isSelected: selectedIDs.contains(item.id),
+                            isCompact: isCompact,
                             onToggleSelection: { toggleSelection(item: item) }
                         )
                         if item.id != filteredItems.last?.id {
                             Divider()
+                                .padding(.leading, (isCompact ? 16 : 24) + 64 + 12 + (isSelecting ? 36 : 0))
                         }
                     }
                 }
             }
         }
+    }
+
+    // MARK: - Barras
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        if isSelecting {
+            ToolbarItem(placement: .topBarLeading) {
+                Button(isAllSelectableSelected ? "nenhum" : "todos") {
+                    selectedIDs = PublishedProductSections.togglingAll(selectableItems.map(\.id), in: selectedIDs)
+                }
+                .fixedSize()
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    endSelection()
+                } label: {
+                    Image(systemName: "checkmark")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.onTint)
+                }
+                .prominentGlassButtonStyle()
+                .accessibilityLabel("concluir seleção")
+            }
+        } else {
+            ToolbarItem(placement: .topBarTrailing) {
+                filterMenu
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("selecionar") {
+                    // No Mac o botão nunca fica desabilitado (ver `ToolbarItemDisabled`).
+                    guard !selectableItems.isEmpty else { return }
+                    isSelecting = true
+                }
+                .fixedSize()
+                .toolbarItemDisabled(selectableItems.isEmpty)
+            }
+        }
+    }
+
+    /// Mesmo padrão do filtro de "publicados": no iPhone, o "recarregar" mora aqui dentro (não cabe
+    /// um botão à parte na barra de cima); o ícone não muda com o filtro ligado no Mac (ver
+    /// `AccountPublishedTabView.filterSymbol`).
+    private var filterMenu: some View {
+        Menu {
+            Picker("filtro", selection: $statusFilter) {
+                ForEach(SmartPriceStatusFilter.allCases, id: \.self) { filter in
+                    Text(filter.label).tag(filter)
+                }
+            }
+            .pickerStyle(.inline)
+            if isCompact {
+                Section {
+                    Button {
+                        account.reloadAllProducts()
+                    } label: {
+                        Label("recarregar produtos", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(account.runner.isRunning)
+                }
+            }
+        } label: {
+            Label("filtrar produtos", systemImage: filterSymbol)
+        }
+    }
+
+    private var filterSymbol: String {
+        #if targetEnvironment(macCatalyst)
+        "line.3.horizontal.decrease"
+        #else
+        statusFilter == .all ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill"
+        #endif
+    }
+
+    private var activateBar: some View {
+        Button {
+            isConfirmingBulkActivate = true
+        } label: {
+            Label(
+                selectedIDs.isEmpty ? "ativar preço esperto" : "ativar preço esperto em \(selectedIDs.count)",
+                systemImage: "sparkles"
+            )
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.tinted(.accentColor, size: 50))
+        .disabled(selectedIDs.isEmpty)
+        .frame(maxWidth: 520)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+
+    // MARK: - Seleção
+
+    private var isAllSelectableSelected: Bool {
+        !selectableItems.isEmpty && selectableItems.allSatisfy { selectedIDs.contains($0.id) }
     }
 
     private func toggleSelection(item: SmartPriceListItem) {
@@ -269,9 +313,13 @@ struct SmartPriceProductsListView: View {
         }
     }
 
-    private func ativarSelecionados() {
-        loader.activate(productIDs: Array(selectedIDs))
+    private func endSelection() {
         selectedIDs.removeAll()
         isSelecting = false
+    }
+
+    private func ativarSelecionados() {
+        loader.activate(productIDs: Array(selectedIDs))
+        endSelection()
     }
 }
