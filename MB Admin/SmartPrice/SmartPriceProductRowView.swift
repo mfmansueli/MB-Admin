@@ -49,7 +49,7 @@ struct SmartPriceProductRowView: View {
                     if isBlocked {
                         Text("bloqueado para essa ação")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.supportingText)
                     }
                 }
                 // Faixa em que o preço esperto pode variar — mostrada mesmo já ativado, já que é
@@ -57,7 +57,7 @@ struct SmartPriceProductRowView: View {
                 // de ativar (essa também aparece na confirmação de ativar, mais abaixo).
                 Text("varia de \(item.product.formattedMinPrice) a \(item.product.formattedMaxPrice)")
                     .font(.caption)
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.supportingText)
             }
 
             // Sempre presente, mesmo selecionando (sem o menu à direita) — sem isso, a `HStack`

@@ -116,4 +116,52 @@ struct MegaphoneStatusTextTests {
         #expect(status.headline == "sua sessão do enjoei expirou. entre de novo.")
         #expect(status.progress == nil)
     }
+
+    // MARK: - contagem, rodada e linha curta (painel do megafone e row da conta)
+
+    @Test("megafonando numa rodada única: só a contagem, sem rodada")
+    func linhaCurtaRodadaUnica() {
+        let status = statusText(phase: .megaphoning(round: 1, of: .once), itemsCount: 340, processedCount: 11)
+        #expect(status.count == "12 de 340")
+        #expect(status.roundLabel == nil)
+        #expect(status.compactLine == "12 de 340")
+    }
+
+    @Test("megafonando com várias rodadas: rodada e contagem na linha curta")
+    func linhaCurtaVariasRodadas() {
+        let status = statusText(phase: .megaphoning(round: 2, of: .times(5)), itemsCount: 340, processedCount: 11)
+        #expect(status.count == "12 de 340")
+        #expect(status.roundLabel == "rodada 2 de 5")
+        #expect(status.compactLine == "rodada 2 de 5 · 12 de 340")
+    }
+
+    @Test("megafonando no infinito: rodada sem total")
+    func linhaCurtaInfinito() {
+        let status = statusText(phase: .megaphoning(round: 3, of: .unlimited), itemsCount: 10, processedCount: 0)
+        #expect(status.roundLabel == "rodada 3")
+        #expect(status.compactLine == "rodada 3 · 1 de 10")
+    }
+
+    @Test("pausado avisa na frente da linha curta")
+    func linhaCurtaPausado() {
+        let status = statusText(
+            phase: .paused(round: 2, of: .times(5), reason: .user),
+            itemsCount: 340,
+            processedCount: 11
+        )
+        #expect(status.count == "12 de 340")
+        #expect(status.compactLine == "pausado · rodada 2 de 5 · 12 de 340")
+    }
+
+    @Test("fora de megafonando/pausado, sem contagem — a linha curta é o próprio texto")
+    func linhaCurtaForaDaRodada() {
+        let waiting = statusText(phase: .waitingInQueue)
+        #expect(waiting.count == nil)
+        #expect(waiting.roundLabel == nil)
+        #expect(waiting.compactLine == waiting.headline)
+
+        let loading = statusText(phase: .loadingProducts(loaded: 20, total: 80))
+        #expect(loading.count == nil)
+        #expect(loading.compactLine == "buscando seus produtos… 20 de 80")
+    }
 }

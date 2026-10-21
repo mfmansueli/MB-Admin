@@ -28,6 +28,11 @@ nonisolated struct MegaphoneRounds: Equatable, Hashable, Identifiable, Sendable 
         }
     }
 
+    /// Versão curta pro botão da barra de baixo no iPhone ("5× · 0,9s"), onde `label` não cabe.
+    var shortLabel: String {
+        rawValue <= 0 ? "∞" : "\(rawValue)×"
+    }
+
     /// A rodada `round` ainda faz parte do combinado?
     func includes(round: Int) -> Bool {
         isUnlimited || round <= rawValue

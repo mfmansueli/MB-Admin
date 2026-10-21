@@ -1,9 +1,11 @@
 # Regras padrão do SwiftLint, com os limites ajustados ao estilo do projeto. Os testes têm uma
-# config própria (`MB AdminTests/.swiftlint.yml`) que afrouxa mais algumas regras só pra eles.
+# config própria (`MB AdminTests/.swiftlint.yml`, `MB AdminUITests/.swiftlint.yml`) que afrouxa mais
+# algumas regras só pra eles.
 
 included:
   - MB Admin
   - MB AdminTests
+  - MB AdminUITests
 
 disabled_rules:
   # Em SwiftUI, passar closures rotuladas + o conteúdo como trailing closure

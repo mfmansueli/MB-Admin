@@ -113,8 +113,8 @@ struct UnmatchedProductRowView: View {
     }
 
     private var postButtonTint: Color {
-        if postStatus.failureMessage != nil { return .red }
-        return .green
+        if postStatus.failureMessage != nil { return .statusFailure }
+        return .statusSuccess
     }
 }
 

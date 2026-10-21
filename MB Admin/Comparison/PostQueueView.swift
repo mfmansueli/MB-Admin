@@ -145,7 +145,7 @@ struct PostQueueView: View {
             if let label = inFlightActionLabel {
                 Label(label, systemImage: "arrow.triangle.2.circlepath")
                     .font(.footnote)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.statusInProgress)
             } else if let nextActionAt = postQueue.nextActionAt, nextActionAt > .now {
                 let remaining = Int(nextActionAt.timeIntervalSinceNow.rounded(.up))
                 Label(
@@ -153,11 +153,11 @@ struct PostQueueView: View {
                     systemImage: "clock"
                 )
                 .font(.footnote)
-                .foregroundStyle(.orange)
+                .foregroundStyle(.supportingText)
             } else {
                 Label("processando agora…", systemImage: "arrow.triangle.2.circlepath")
                     .font(.footnote)
-                    .foregroundStyle(.blue)
+                    .foregroundStyle(.statusInProgress)
             }
         }
     }

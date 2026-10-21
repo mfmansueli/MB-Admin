@@ -26,7 +26,7 @@ struct MegaphoneErrorDetailSheet: View {
                         .lineLimit(2)
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.largeTitle)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.statusFailure)
                     Text(message)
                         .font(.body)
                         .multilineTextAlignment(.center)

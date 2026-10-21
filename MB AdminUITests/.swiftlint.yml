@@ -1,0 +1,24 @@
+# Mesma config dos testes de unidade (`../MB AdminTests/.swiftlint.yml`) — herda `../.swiftlint.yml`.
+
+disabled_rules:
+  # Uma suíte cresce junto com o tipo que testa — dividir só pra caber no limite espalha casos
+  # relacionados em vários arquivos.
+  - file_length
+  - type_body_length
+  # `try!` em helper de teste (ex.: criar um `ModelContainer` em memória) só derruba aquele teste.
+  - force_try
+
+# `a`/`b`, `a1`/`b1`… — conta/produto A vs. B nas comparações.
+identifier_name:
+  min_length: 1
+
+# Nome de suíte = nome do tipo testado + "Tests".
+type_name:
+  max_length: 50
+
+# Logs de chamadas dos stubs (`[(productID: Int, request: …, token: String)]`).
+large_tuple:
+  warning: 3
+
+function_body_length:
+  warning: 80

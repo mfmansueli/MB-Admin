@@ -98,6 +98,16 @@ final class AccountSession: Identifiable {
         status = .checkFailed
     }
 
+    /// Recarrega as três abas do detalhe de uma vez, não só a que está na tela — publicados busca a
+    /// loja de novo do zero, inativos e preço esperto refazem as páginas (é o único jeito de tentar
+    /// de novo manualmente, além do "tentar de novo" que só aparece quando dá erro de verdade). Não
+    /// mexe nos publicados com uma rodada em aberto (`MegaphoneRunner.reload` ignora).
+    func reloadAllProducts() {
+        runner.reload(sellerID: user.id)
+        inactiveProductsLoader.load()
+        smartPriceProductsLoader.load()
+    }
+
     func applyRoundFinished(_ summary: MegaphoneRoundSummary) {
         lastRoundSummary = summary
     }

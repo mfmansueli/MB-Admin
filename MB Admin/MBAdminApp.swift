@@ -2,7 +2,18 @@ import SwiftUI
 
 @main
 struct MBAdminApp: App {
-    @State private var accountsStore = AccountsStore()
+    @State private var accountsStore = Self.makeAccountsStore()
+
+    /// Em DEBUG, `-demo-mode` troca as contas de verdade pelas inventadas de `DemoMode` (simulador e
+    /// testes de UI). Em Release esse caminho nem compila.
+    private static func makeAccountsStore() -> AccountsStore {
+        #if DEBUG
+        if DemoMode.isEnabled {
+            return DemoMode.makeAccountsStore()
+        }
+        #endif
+        return AccountsStore()
+    }
 
     var body: some Scene {
         WindowGroup {

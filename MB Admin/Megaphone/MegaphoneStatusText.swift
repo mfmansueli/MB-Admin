@@ -7,6 +7,15 @@ import Foundation
 nonisolated struct MegaphoneStatusText: Equatable, Sendable {
     let headline: String
     let progress: Double?
+    /// Só a contagem do produto da vez ("12 de 340") — o número grande do painel de andamento.
+    /// `nil` fora de `.megaphoning`/`.paused`, onde não existe "produto da vez".
+    let count: String?
+    /// "rodada 2 de 5" (ou "rodada 3", no infinito) — `nil` numa rodada única, mesmo critério de
+    /// `headline`, que também não menciona rodada nesse caso.
+    let roundLabel: String?
+    /// Linha curta da row da conta na lista ("rodada 2 de 5 · 12 de 340") — cabe numa linha só no
+    /// iPhone, ao contrário de `headline`. Fora de megafonando/pausado, cai no próprio `headline`.
+    let compactLine: String
 
     /// - Parameter round: rodada em andamento guardada pelo runner — necessária à parte porque
     ///   `.cancelled` não carrega rodada no próprio `MegaphonePhase`.
@@ -39,6 +48,30 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
             message
         }
         progress = Self.makeProgress(phase: phase, itemsCount: itemsCount, processedCount: processedCount)
+        (count, roundLabel) = Self.makeCountAndRound(phase: phase, itemsCount: itemsCount, processedCount: processedCount)
+        compactLine = Self.makeCompactLine(phase: phase, headline: headline, count: count, roundLabel: roundLabel)
+    }
+
+    private static func makeCompactLine(phase: MegaphonePhase, headline: String, count: String?, roundLabel: String?) -> String {
+        switch phase {
+        case .megaphoning: [roundLabel, count].compactMap { $0 }.joined(separator: " · ")
+        case .paused: ["pausado", roundLabel, count].compactMap { $0 }.joined(separator: " · ")
+        case .idle, .waitingInQueue, .loadingProducts, .checkingExposure, .finished, .cancelled, .failed: headline
+        }
+    }
+
+    /// `count`/`roundLabel` — só existem com um produto da vez (megafonando ou pausado).
+    private static func makeCountAndRound(
+        phase: MegaphonePhase,
+        itemsCount: Int,
+        processedCount: Int
+    ) -> (count: String?, roundLabel: String?) {
+        switch phase {
+        case .megaphoning(let round, let rounds), .paused(let round, let rounds, _):
+            ("\(processedCount + 1) de \(itemsCount)", roundName(round, of: rounds))
+        case .idle, .waitingInQueue, .loadingProducts, .checkingExposure, .finished, .cancelled, .failed:
+            (nil, nil)
+        }
     }
 
     /// Fração concluída. Com repetição infinita não existe fim, então mostramos só a rodada atual.
@@ -68,8 +101,12 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
     }
 
     private static func roundLabel(_ round: Int, of rounds: MegaphoneRounds) -> String {
-        if rounds.isUnlimited { return "rodada \(round) · " }
-        if rounds.rawValue == 1 { return "" }
-        return "rodada \(round) de \(rounds.rawValue) · "
+        roundName(round, of: rounds).map { "\($0) · " } ?? ""
+    }
+
+    private static func roundName(_ round: Int, of rounds: MegaphoneRounds) -> String? {
+        if rounds.isUnlimited { return "rodada \(round)" }
+        if rounds.rawValue == 1 { return nil }
+        return "rodada \(round) de \(rounds.rawValue)"
     }
 }

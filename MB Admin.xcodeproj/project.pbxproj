@@ -14,11 +14,19 @@
 			remoteGlobalIDString = 9DE924C8304394D600659336;
 			remoteInfo = "MB Admin";
 		};
+		AB1000000000000000000026 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9DE924C1304394D600659336 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9DE924C8304394D600659336;
+			remoteInfo = "MB Admin";
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		9DE924C9304394D600659336 /* MB Admin.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "MB Admin.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		AB1000000000000000000001 /* MB AdminTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "MB AdminTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AB1000000000000000000020 /* MB AdminUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "MB AdminUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -45,6 +53,11 @@
 			path = "MB AdminTests";
 			sourceTree = "<group>";
 		};
+		AB1000000000000000000021 /* MB AdminUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "MB AdminUITests";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -62,6 +75,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AB1000000000000000000024 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -70,6 +90,7 @@
 			children = (
 				9DE924CB304394D600659336 /* MB Admin */,
 				AB1000000000000000000002 /* MB AdminTests */,
+				AB1000000000000000000021 /* MB AdminUITests */,
 				9DE924CA304394D600659336 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -79,6 +100,7 @@
 			children = (
 				9DE924C9304394D600659336 /* MB Admin.app */,
 				AB1000000000000000000001 /* MB AdminTests.xctest */,
+				AB1000000000000000000020 /* MB AdminUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -132,6 +154,29 @@
 			productReference = AB1000000000000000000001 /* MB AdminTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		AB1000000000000000000022 /* MB AdminUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AB100000000000000000002A /* Build configuration list for PBXNativeTarget "MB AdminUITests" */;
+			buildPhases = (
+				AB1000000000000000000023 /* Sources */,
+				AB1000000000000000000024 /* Frameworks */,
+				AB1000000000000000000025 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				AB1000000000000000000027 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				AB1000000000000000000021 /* MB AdminUITests */,
+			);
+			name = "MB AdminUITests";
+			packageProductDependencies = (
+			);
+			productName = "MB AdminUITests";
+			productReference = AB1000000000000000000020 /* MB AdminUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -146,6 +191,10 @@
 						CreatedOnToolsVersion = 26.6;
 					};
 					AB1000000000000000000003 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 9DE924C8304394D600659336;
+					};
+					AB1000000000000000000022 = {
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = 9DE924C8304394D600659336;
 					};
@@ -167,6 +216,7 @@
 			targets = (
 				9DE924C8304394D600659336 /* MB Admin */,
 				AB1000000000000000000003 /* MB AdminTests */,
+				AB1000000000000000000022 /* MB AdminUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -180,6 +230,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		AB1000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AB1000000000000000000025 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -225,6 +282,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AB1000000000000000000023 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -232,6 +296,11 @@
 			isa = PBXTargetDependency;
 			target = 9DE924C8304394D600659336 /* MB Admin */;
 			targetProxy = AB1000000000000000000007 /* PBXContainerItemProxy */;
+		};
+		AB1000000000000000000027 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9DE924C8304394D600659336 /* MB Admin */;
+			targetProxy = AB1000000000000000000026 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -489,6 +558,44 @@
 			};
 			name = Release;
 		};
+		AB1000000000000000000028 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = X5392U638Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.mbadmin.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "MB Admin";
+			};
+			name = Debug;
+		};
+		AB1000000000000000000029 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = X5392U638Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = br.com.mbadmin.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = "MB Admin";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -515,6 +622,15 @@
 			buildConfigurations = (
 				AB1000000000000000000009 /* Debug */,
 				AB100000000000000000000A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AB100000000000000000002A /* Build configuration list for PBXNativeTarget "MB AdminUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AB1000000000000000000028 /* Debug */,
+				AB1000000000000000000029 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

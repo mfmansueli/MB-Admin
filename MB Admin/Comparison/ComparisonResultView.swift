@@ -69,8 +69,12 @@ struct ComparisonResultView: View {
                     Spacer()
 
                     if isSelecting, !selectedProductIDs.isEmpty {
-                        Button("adicionar \(selectedProductIDs.count) à fila") {
+                        Button {
                             enqueueSelected()
+                        } label: {
+                            // `.onTint`: ver o mesmo caso no botão "comparar" de
+                            // `AccountComparisonView`.
+                            Text("adicionar \(selectedProductIDs.count) à fila").foregroundStyle(.onTint)
                         }
                         .font(.footnote.weight(.semibold))
                         .buttonStyle(.borderedProminent)

@@ -72,22 +72,22 @@ struct PostQueueRowView: View {
         case .pending:
             Label("esperando a vez", systemImage: "clock")
                 .font(.caption)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.supportingText)
         case .megaphoning:
             Label(actionVerb.inProgress, systemImage: "arrow.triangle.2.circlepath")
                 .font(.caption)
-                .foregroundStyle(.blue)
+                .foregroundStyle(.statusInProgress)
         case .succeeded:
             Label(actionVerb.done, systemImage: "checkmark.circle.fill")
                 .font(.caption)
-                .foregroundStyle(.green)
+                .foregroundStyle(.statusSuccess)
         case .failed(let message):
             Button {
                 isShowingErrorDetail = true
             } label: {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.statusFailure)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }

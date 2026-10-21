@@ -80,6 +80,8 @@ extension MegaphoneRunner {
             let token = try await client.csrfToken()
             try await deleteProduct(productID: productID, token: token)
             deleteStatuses[productID] = .succeeded
+            // Apagado sai da contagem de "pedem desconto" — ação avulsa e rara, publica na hora.
+            refreshProgressSnapshot()
         } catch {
             deleteStatuses[productID] = .failed(error.localizedDescription)
             failureDetails[productID] = MegaphoneFailureDetail(action: .delete, error: error)
@@ -121,6 +123,8 @@ extension MegaphoneRunner {
         do {
             try await sendProductStateUpdate(productID: productID, state: .disable)
             inactivateStatuses[productID] = .succeeded
+            // Mesmo raciocínio de `performDelete` — inativado sai da contagem de "pedem desconto".
+            refreshProgressSnapshot()
         } catch {
             inactivateStatuses[productID] = .failed(error.localizedDescription)
             failureDetails[productID] = MegaphoneFailureDetail(action: .inactivate, error: error)

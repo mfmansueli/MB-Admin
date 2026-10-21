@@ -6,9 +6,10 @@ struct LoggedOutView: View {
 
     var body: some View {
         VStack(spacing: 24) {
+            // A cor da marca só aparece de enfeite — aqui, no ícone da tela de boas-vindas.
             Image(systemName: "megaphone.fill")
                 .font(.system(size: 64))
-                .foregroundStyle(.tint)
+                .foregroundStyle(.brandCoral)
 
             VStack(spacing: 8) {
                 Text("megafone em série")
@@ -22,7 +23,10 @@ struct LoggedOutView: View {
             Button {
                 accountsStore.beginAddingAccount()
             } label: {
+                // `.onTint`: o estilo proeminente pinta o texto de branco, que some em cima da ação
+                // principal no modo escuro (`#F2F2F7`).
                 Text("entrar no enjoei")
+                    .foregroundStyle(.onTint)
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
