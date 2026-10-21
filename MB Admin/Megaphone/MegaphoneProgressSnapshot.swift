@@ -16,6 +16,9 @@ nonisolated struct MegaphoneProgressSnapshot: Equatable {
     var totalSucceeded = 0
     var totalFailed = 0
     var round = 0
+    /// Quantos produtos ainda vivos (nem apagados, nem inativados) pedem decisão de desconto — o
+    /// selo "N pedem desconto" da lista de contas lê daqui, pra não precisar varrer `items`.
+    var discountDecisionCount = 0
 
     var statusText: MegaphoneStatusText {
         MegaphoneStatusText(

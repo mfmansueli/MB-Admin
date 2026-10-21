@@ -79,9 +79,10 @@ struct ProductMatchRowView: View {
     }
 
     /// Quanto mais parecido, mais "certeza" a cor passa — abaixo do threshold padrão o par nem
-    /// aparece aqui, então essas duas faixas já são as únicas relevantes.
+    /// aparece aqui, então essas duas faixas já são as únicas relevantes. Ação principal pra quem
+    /// é quase certo, texto de apoio pro resto: verde/laranja ficam reservados pra status.
     private var similarityColor: Color {
-        match.similarity >= 0.8 ? .green : .orange
+        match.similarity >= 0.8 ? .accentColor : .supportingText
     }
 }
 

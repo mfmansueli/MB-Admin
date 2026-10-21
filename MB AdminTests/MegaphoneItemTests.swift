@@ -48,4 +48,49 @@ struct MegaphoneItemTests {
         let item = MegaphoneItem(product: product)
         #expect(item.computedDiscountPercent == nil)
     }
+
+    @Test("pede decisão de desconto só quando a exposição pede")
+    func pedeDecisaoDeDesconto() {
+        #expect(makeItem(originalPrice: 200, suggestedPrice: 100).needsDiscountDecision)
+
+        let semExposicao = MegaphoneItem(product: EnjoeiFixtures.product(id: 2))
+        #expect(!semExposicao.needsDiscountDecision)
+
+        let deGraca = MegaphoneItem(
+            product: EnjoeiFixtures.product(id: 3),
+            exposure: MegaphoneExposure(productID: 3, kind: .maximumForFree, priceToIncreaseExposure: nil, discountLabel: nil)
+        )
+        #expect(!deGraca.needsDiscountDecision)
+    }
+
+    // MARK: - desconto já aplicado (original → atual)
+
+    private func product(currentPrice: Double?, originalPrice: Double?) -> MegaphoneItem {
+        MegaphoneItem(product: EnjoeiProduct(
+            id: 7,
+            title: "anel",
+            path: "anel-7",
+            photoPublicID: nil,
+            currentPrice: currentPrice,
+            originalPrice: originalPrice
+        ))
+    }
+
+    @Test("desconto já aplicado vem do original pro atual")
+    func descontoJaAplicado() {
+        #expect(product(currentPrice: 684, originalPrice: 799).appliedDiscountPercent == 14)
+        #expect(product(currentPrice: 399, originalPrice: 798).appliedDiscountPercent == 50)
+    }
+
+    @Test("sem desconto (atual igual ou acima do original) não mostra percentual")
+    func semDescontoAplicado() {
+        #expect(product(currentPrice: 799, originalPrice: 799).appliedDiscountPercent == nil)
+        #expect(product(currentPrice: 900, originalPrice: 799).appliedDiscountPercent == nil)
+        #expect(product(currentPrice: 100, originalPrice: nil).appliedDiscountPercent == nil)
+    }
+
+    @Test("desconto que arredonda pra 0% não aparece")
+    func descontoQueArredondaPraZero() {
+        #expect(product(currentPrice: 998, originalPrice: 1000).appliedDiscountPercent == nil)
+    }
 }

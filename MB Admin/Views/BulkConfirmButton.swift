@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Botão "confirmar" da seleção múltipla — ícone (e, opcionalmente, um texto ao lado) branco sobre
-/// um fundo colorido (vidro líquido a partir do iOS/Mac Catalyst 26, cor sólida antes disso). Sem
+/// Botão "confirmar" da seleção múltipla — ícone (e, opcionalmente, um texto ao lado) em `.onTint`
+/// (branco no claro, preto no escuro, onde a ação principal fica quase branca) sobre um fundo
+/// colorido (vidro líquido a partir do iOS/Mac Catalyst 26, cor sólida antes disso). Sem
 /// `label`, vira um círculo só com o ícone — usado por `BulkActionSelector` (a ação já aparece no
 /// menu ao lado, então o botão de confirmar não repete o texto). Com `label`, vira uma cápsula
 /// ícone + texto — usado por telas com uma ação em massa só, sem menu de escolha (ex.:
@@ -49,7 +50,7 @@ struct BulkConfirmButton: View {
             .resizable()
             .scaledToFit()
             .fontWeight(.semibold)
-            .foregroundStyle(.white)
+            .foregroundStyle(.onTint)
             .frame(width: 18, height: 18)
             .frame(width: 38, height: 38)
     }
@@ -60,7 +61,7 @@ struct BulkConfirmButton: View {
             Text(label)
         }
         .fontWeight(.semibold)
-        .foregroundStyle(.white)
+        .foregroundStyle(.onTint)
         .frame(height: 38)
         .padding(.horizontal, 14)
     }

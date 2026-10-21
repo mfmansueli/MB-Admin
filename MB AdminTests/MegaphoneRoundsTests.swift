@@ -28,4 +28,11 @@ struct MegaphoneRoundsTests {
         // Valor inválido vira uma volta só, em vez de nenhuma.
         #expect(MegaphoneRounds.times(-2).rawValue == 1)
     }
+
+    @Test("rótulo curto da barra de baixo")
+    func rotuloCurto() {
+        #expect(MegaphoneRounds.once.shortLabel == "1×")
+        #expect(MegaphoneRounds.times(5).shortLabel == "5×")
+        #expect(MegaphoneRounds.unlimited.shortLabel == "∞")
+    }
 }

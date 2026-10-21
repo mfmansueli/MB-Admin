@@ -51,7 +51,7 @@ struct InactiveProductsListView: View {
         var tint: Color {
             switch self {
             case .repost, .activate: .accentColor
-            case .delete: .red
+            case .delete: .statusFailure
             }
         }
     }

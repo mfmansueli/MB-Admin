@@ -23,7 +23,7 @@ struct RepostStatusSheet: View {
             case .succeeded:
                 Image(systemName: "checkmark.circle.fill")
                     .font(.largeTitle)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(.statusSuccess)
                 Text("produto repostado com sucesso.")
                     .font(.headline)
                     .multilineTextAlignment(.center)
@@ -31,9 +31,13 @@ struct RepostStatusSheet: View {
                     Button("ok", action: onDismiss)
                         .buttonStyle(.bordered)
                     if let productURL {
-                        Button("visualizar") {
+                        Button {
                             openURL(productURL)
                             onDismiss()
+                        } label: {
+                            // `.onTint`: o estilo proeminente pinta o texto de branco, que some em
+                            // cima da ação principal no modo escuro (`#F2F2F7`).
+                            Text("visualizar").foregroundStyle(.onTint)
                         }
                         .buttonStyle(.borderedProminent)
                     }
@@ -41,12 +45,14 @@ struct RepostStatusSheet: View {
             case .failed(let message):
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.largeTitle)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.statusFailure)
                 Text(message)
                     .font(.headline)
                     .multilineTextAlignment(.center)
-                Button("ok", action: onDismiss)
-                    .buttonStyle(.borderedProminent)
+                Button(action: onDismiss) {
+                    Text("ok").foregroundStyle(.onTint)
+                }
+                .buttonStyle(.borderedProminent)
             }
         }
         .padding(32)

@@ -21,7 +21,7 @@ struct PostHistoryRowView: View {
             Spacer(minLength: 8)
             Text(entry.completedAt, format: .relative(presentation: .named))
                 .font(.caption2)
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.supportingText)
         }
         .padding(.vertical, 2)
         // Fundo sólido pro scroll do mouse/trackpad funcionar em qualquer área da row no Mac
@@ -52,14 +52,14 @@ struct PostHistoryRowView: View {
         case .succeeded:
             Label(actionVerbDone, systemImage: "checkmark.circle.fill")
                 .font(.caption)
-                .foregroundStyle(.green)
+                .foregroundStyle(.statusSuccess)
         case .failed(let message):
             Button {
                 isShowingErrorDetail = true
             } label: {
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.statusFailure)
                     .lineLimit(2)
                     .multilineTextAlignment(.leading)
             }

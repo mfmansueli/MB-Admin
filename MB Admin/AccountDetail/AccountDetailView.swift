@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Detalhe de uma conta: identifica o usuário e conduz o megafone da loja dele. A aba "publicados"
-/// (megafonar, busca, filtro, seleção múltipla) vive em `AccountPublishedTabView` — o estado dela
-/// que também importa aqui (pro toolbar, ou pra sobreviver a trocar de aba e voltar) fica com esta
-/// view, passado pra lá por `@Binding`.
+/// Detalhe de uma conta: o nome (e quantos megafones/erros) na barra de navegação, o seletor de
+/// abas logo abaixo e o conteúdo da aba. A aba "publicados" (megafonar, busca, filtro, seleção
+/// múltipla — e a toolbar/barra de baixo que vêm com eles) vive em `AccountPublishedTabView` — o
+/// estado dela que também importa aqui (esconder o seletor de abas durante a seleção, ou sobreviver
+/// a trocar de aba e voltar) fica com esta view, passado pra lá por `@Binding`.
 ///
 /// Identidade estável entre contas de propósito — `AccountsListView` NÃO dá `.id(account.id)` a
 /// esta view. Um `.id()` aqui forçaria o SwiftUI a destruir e reconstruir a árvore inteira (incluindo
@@ -26,6 +27,7 @@ struct AccountDetailView: View {
     let account: AccountSession
 
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     /// Aba e filtro escolhidos, lembrados por conta — ver o comentário no topo do arquivo sobre por
     /// que não são mais `@AppStorage`.
@@ -36,11 +38,10 @@ struct AccountDetailView: View {
     @State private var isFollowing = true
     @State private var isSelecting = false
     @State private var selectedIDs: Set<Int> = []
-    @State private var bulkAction: AccountBulkAction = .repost
-    @State private var discountBulkAction: AccountDiscountBulkAction = .applyDiscount
 
     private var runner: MegaphoneRunner { account.runner }
     private var keepAlive: MegaphoneKeepAlive { account.keepAlive }
+    private var isCompact: Bool { horizontalSizeClass != .regular }
 
     private enum DetailTab: String, CaseIterable {
         case published = "publicados"
@@ -68,29 +69,10 @@ struct AccountDetailView: View {
         isFollowing = true
         isSelecting = false
         selectedIDs = []
-        bulkAction = .repost
-        discountBulkAction = .applyDiscount
     }
 
     var body: some View {
-        VStack(spacing: 16) {
-            // `progressSnapshot.totalSucceeded/.totalFailed`, não `runner.totalSucceeded/.totalFailed`
-            // direto — mesmos campos, mas os direto no runner mudam a cada produto megafonado (até
-            // 1500+ vezes por rodada), prendendo o `body` inteiro (toolbar, aba selecionada) a
-            // reavaliar nessa frequência; o snapshot já é a versão em lote pra isso.
-            UserHeaderView(
-                user: account.user,
-                megaphoneCount: runner.progressSnapshot.totalSucceeded,
-                errorCount: runner.progressSnapshot.totalFailed
-            )
-
-            Picker("", selection: $selectedTab) {
-                ForEach(DetailTab.allCases, id: \.self) { tab in
-                    Text(tabLabel(tab)).tag(tab)
-                }
-            }
-            .pickerStyle(.segmented)
-
+        Group {
             switch selectedTab {
             case .published:
                 AccountPublishedTabView(
@@ -99,8 +81,6 @@ struct AccountDetailView: View {
                     searchText: $searchText,
                     isSelecting: $isSelecting,
                     selectedIDs: $selectedIDs,
-                    bulkAction: $bulkAction,
-                    discountBulkAction: $discountBulkAction,
                     isFollowing: $isFollowing
                 )
             case .inactive:
@@ -109,8 +89,16 @@ struct AccountDetailView: View {
                 smartPriceContent
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 16)
+        // Barra presa no topo (em vez de só empilhada em cima da lista): a lista rola por baixo
+        // do seletor, com o efeito de borda do sistema, como embaixo da barra de navegação.
+        .floatingTopBar {
+            // Selecionando, a tela inteira é sobre a seleção — trocar de aba no meio largaria ela
+            // pela metade.
+            if !isSelecting {
+                tabPicker
+            }
+        }
+        .animation(.default, value: isSelecting)
         // Enquanto roda, o app segura a tela acesa e um áudio silencioso para não ser congelado
         // ao você trocar de app.
         .onChange(of: runner.isRunning) { _, isRunning in
@@ -132,62 +120,34 @@ struct AccountDetailView: View {
         .onChange(of: filter) { _, newValue in
             UserDefaults.standard.set(newValue.rawValue, forKey: filterKey(account.id))
         }
-        .navigationTitle(account.user.name)
-        .navigationBarTitleDisplayMode(.inline)
+        // Selecionando, o título conta a seleção — como título de verdade, não um item `.principal`
+        // na toolbar: no iPad, com o título grande à esquerda, o `.principal` nem aparece.
+        .navigationTitle(isSelecting ? selectionTitle : account.user.name)
+        .navigationSubtitleIfAvailable(subtitle)
+        // iPad/Mac: título grande alinhado à esquerda, com a busca e os botões na mesma faixa;
+        // iPhone: título centralizado, como no resto do sistema.
+        .toolbarTitleDisplayMode(isCompact ? .inline : .inlineLarge)
         .toolbar {
-            ToolbarItem(placement: .primaryAction) {
-                // Recarrega as duas abas de uma vez, não só a que está na tela agora — publicados
-                // busca a loja de novo do zero, inativos refaz a raspagem das páginas de novo (é
-                // o único jeito de tentar de novo manualmente, além do botão "tentar de novo" que
-                // só aparece quando dá erro de verdade).
-                Button {
-                    runner.reload(sellerID: account.user.id)
-                    account.inactiveProductsLoader.load()
-                    account.smartPriceProductsLoader.load()
-                } label: {
-                    // Círculo com tamanho mínimo (em vez do bezel padrão de toolbar, que no Mac
-                    // idiom otimizado saía pequeno e num "squircle" em vez de redondo) — largura e
-                    // altura mínimas iguais garantem o círculo perfeito independente da fonte do
-                    // sistema, sem impor um frame fixo que brigue com o dimensionamento próprio do
-                    // `_UIButtonBarButton` por trás do item de toolbar no Mac Catalyst (`.frame`
-                    // fixo aqui gerava "Unable to simultaneously satisfy constraints" toda vez que
-                    // este botão re-renderizava — historicamente frequente durante o megafone,
-                    // já que o corpo da view lia `runner.totalSucceeded`/`totalFailed`/`items.count`
-                    // direto (agora vem de `progressSnapshot`, bem menos frequente — ver abaixo —,
-                    // mas o fix de layout continua valendo pra qualquer outro re-render).
-                    Label("recarregar produtos", systemImage: "arrow.clockwise")
-                        .labelStyle(.iconOnly)
-                        .font(.body.weight(.semibold))
-                        .frame(minWidth: 34, minHeight: 34)
-                        .background(.quaternary, in: .circle)
-                }
-                .buttonStyle(.plain)
-                // Sempre mexe nos publicados agora, mesmo vendo "inativos" — desabilita em
-                // qualquer aba enquanto o megafone está rodando, não só na de publicados.
-                .disabled(runner.isRunning)
-            }
-            ToolbarItem(placement: .bottomBar) {
-                Spacer()
-            }
-            // "Acompanhar" só faz sentido pro fluxo de megafonar (publicados) — na aba de
-            // inativos não tem nada acontecendo em segundo plano pra seguir o progresso.
-            if selectedTab == .published {
-                ToolbarItem(placement: .bottomBar) {
+            // A aba "publicados" monta o próprio recarregar (junto do filtro e da seleção, ver
+            // `AccountPublishedTabView`); nas outras duas ele fica sozinho aqui.
+            if selectedTab != .published {
+                ToolbarItem(placement: .primaryAction) {
                     Button {
-                        isFollowing.toggle()
+                        // Sempre mexe nos publicados também — bloqueado em qualquer aba enquanto o
+                        // megafone está rodando, não só na de publicados. Checado aqui também porque
+                        // no Mac o botão nunca fica desabilitado (ver `ToolbarItemDisabled`).
+                        guard !runner.isRunning else { return }
+                        account.reloadAllProducts()
                     } label: {
-                        Label(
-                            "acompanhar",
-                            systemImage: isFollowing ? "location.fill" : "location"
-                        )
+                        Label("recarregar produtos", systemImage: "arrow.clockwise")
                     }
-                    .tint(isFollowing ? .accentColor : .secondary)
+                    .toolbarItemDisabled(runner.isRunning)
                 }
             }
         }
         // Entrar na conta (primeira vez OU troca na barra lateral, já que a identidade desta view
         // não muda mais — ver `onChange(of: account.id)`) já busca sozinho os produtos publicados
-        // (com a exposição de cada um, pro filtro "pede desconto" já vir pronto) e os inativos, em
+        // (com a exposição de cada um, pra seção "pedem desconto" já vir pronta) e os inativos, em
         // paralelo — sem começar a megafonar por conta própria (isso continua exigindo o toque
         // explícito no botão "megafonar", em nenhuma hipótese disparado sozinho por aqui).
         .task(id: account.id) {
@@ -203,26 +163,77 @@ struct AccountDetailView: View {
         }
     }
 
+    private var selectionTitle: String {
+        switch selectedIDs.count {
+        case 0: "selecionar produtos"
+        case 1: "1 selecionado"
+        default: "\(selectedIDs.count) selecionados"
+        }
+    }
+
+    private var tabPicker: some View {
+        Picker("aba", selection: $selectedTab) {
+            ForEach(DetailTab.allCases, id: \.self) { tab in
+                Text(tabLabel(tab)).tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, isCompact ? 16 : 24)
+        .padding(.top, 8)
+        .padding(.bottom, 4)
+        .frame(maxWidth: isCompact ? .infinity : 620, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// "351 megafones · 2 com erro" — no iPad/Mac, com o @apelido na frente. No iPhone, sem erro
+    /// nenhum fica só "351 megafones": embaixo do nome, ao lado dos botões, o texto inteiro não
+    /// cabe no tamanho de letra do app. Selecionando, o título vira "N selecionados" e aqui fica
+    /// só a busca que continua filtrando a lista (o campo some durante a seleção), se houver.
+    ///
+    /// `progressSnapshot.totalSucceeded/.totalFailed`, não `runner.totalSucceeded/.totalFailed`
+    /// direto — mesmos campos, mas os direto no runner mudam a cada produto megafonado (até 1500+
+    /// vezes por rodada), prendendo o `body` inteiro (toolbar, aba selecionada) a reavaliar nessa
+    /// frequência; o snapshot já é a versão em lote pra isso.
+    private var subtitle: String {
+        guard !isSelecting else {
+            let search = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            return search.isEmpty ? "" : "buscando \"\(search)\""
+        }
+        let snapshot = runner.progressSnapshot
+        let megaphones = "\(snapshot.totalSucceeded.formatted()) megafones"
+        let errors = "\(snapshot.totalFailed.formatted()) com erro"
+        if isCompact {
+            return snapshot.totalFailed > 0 ? "\(megaphones) · \(errors)" : megaphones
+        }
+        return "@\(account.user.nickname) · \(megaphones) · \(errors)"
+    }
+
     // Identidade estável entre contas, igual `AccountPublishedTabView` (ver o comentário no topo do
     // arquivo) — cada uma zera seu próprio estado local internamente via
     // `onChange(of: account.id, initial: true)`, sem precisar de `.id(account.id)` aqui.
     private var inactiveContent: some View {
         InactiveProductsListView(account: account)
+            .padding(.horizontal, isCompact ? 16 : 24)
+            .padding(.top, 8)
     }
 
     private var smartPriceContent: some View {
         SmartPriceProductsListView(account: account)
+            .padding(.horizontal, isCompact ? 16 : 24)
+            .padding(.top, 8)
     }
 
-    /// Só mostra a quantidade depois de já ter dado carregado (produtos publicados ou inativos) —
-    /// antes disso, o rótulo fica sem número, sem sugerir uma contagem de "0" que ainda não é real.
+    /// No iPhone, só o nome da aba — os três rótulos com quantidade não cabem lado a lado. No
+    /// iPad/Mac, a quantidade aparece depois de já ter carregado (produtos publicados ou inativos)
+    /// — antes disso, o rótulo fica sem número, sem sugerir uma contagem de "0" que ainda não é real.
     private func tabLabel(_ tab: DetailTab) -> String {
+        guard !isCompact else { return tab.rawValue }
         switch tab {
         case .published:
             // `progressSnapshot.itemsCount`, não `runner.items.count` direto — ler `items` aqui
             // prenderia esta view (dona do toolbar/segmented control) a reavaliar a cada produto
-            // megafonado, mesmo só lendo `.count`/`.isEmpty` (O(1)) — ver o comentário em
-            // `AccountPublishedTabView.swift` sobre o mesmo raciocínio aplicado ao `onChange`.
+            // megafonado, mesmo só lendo `.count`/`.isEmpty` (O(1)).
             let itemsCount = runner.progressSnapshot.itemsCount
             guard itemsCount > 0 else { return tab.rawValue }
             return "\(tab.rawValue) (\(itemsCount.formatted()))"

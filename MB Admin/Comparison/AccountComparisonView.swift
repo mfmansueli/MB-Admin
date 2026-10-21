@@ -109,7 +109,10 @@ struct AccountComparisonView: View {
                     guard let accountA, let accountB else { return }
                     loader.compare(accountA: accountA, accountB: accountB, fullComparison: isFullComparison)
                 } label: {
+                    // `.onTint`: o estilo proeminente pinta o texto de branco, que some em cima da
+                    // ação principal no modo escuro (`#F2F2F7`).
                     Text("comparar")
+                        .foregroundStyle(.onTint)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -130,7 +133,7 @@ struct AccountComparisonView: View {
                 let remaining = Int(cooldownUntil.timeIntervalSinceNow.rounded(.up))
                 Text(String(format: "%d:%02d", remaining / 60, remaining % 60))
                     .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(.supportingText)
                     .multilineTextAlignment(.center)
             }
         }

@@ -5,6 +5,13 @@ import SwiftUI
 struct ProductPhotoFullSizeView: View {
     let photoURL: URL?
     let title: String
+    /// A miniatura que a row já mostra (e já tem decodificada em cache) — vira o placeholder
+    /// enquanto a foto grande chega, pra a transição de zoom (ver `ProductPhotoView`) crescer a
+    /// própria foto em vez de um spinner. `nil` cai no spinner de antes.
+    var thumbnailURL: URL?
+    /// Mesmo `maxPixelSize` da miniatura na row — é parte da chave do `ImageMemoryCache`, então
+    /// precisa bater pra achar a imagem já pronta.
+    var thumbnailPixelSize: CGFloat = 0
 
     @Environment(\.dismiss) private var dismiss
     @State private var scale: CGFloat = 1
@@ -26,10 +33,12 @@ struct ProductPhotoFullSizeView: View {
                         .scaleEffect(scale)
                         .offset(offset)
                         .gesture(magnification)
-                        .simultaneousGesture(drag)
+                        // Arrastar só move a foto ampliada — sem zoom, o gesto fica livre pro
+                        // arrastar-pra-baixo do sistema que fecha a tela de volta pra miniatura.
+                        .simultaneousGesture(drag, including: scale > minScale ? .all : .none)
                         .onTapGesture(count: 2, perform: toggleZoom)
                 } placeholder: {
-                    ProgressView()
+                    thumbnailPlaceholder
                         .frame(width: proxy.size.width, height: proxy.size.height)
                 }
             }
@@ -45,6 +54,22 @@ struct ProductPhotoFullSizeView: View {
                         .fixedSize()
                 }
             }
+        }
+        // Fundo sempre preto, como num visualizador de fotos — título e "fechar" no estilo escuro
+        // também no modo claro, senão ficavam pretos em cima do preto.
+        .environment(\.colorScheme, .dark)
+    }
+
+    @ViewBuilder
+    private var thumbnailPlaceholder: some View {
+        if let thumbnailURL, thumbnailPixelSize > 0 {
+            CachedAsyncImage(url: thumbnailURL, maxPixelSize: thumbnailPixelSize) { image in
+                image.resizable().scaledToFit()
+            } placeholder: {
+                ProgressView()
+            }
+        } else {
+            ProgressView()
         }
     }
 

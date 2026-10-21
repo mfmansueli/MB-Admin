@@ -52,7 +52,7 @@ struct InactiveProductRowView: View {
                     if let inactiveSince = product.inactiveSince {
                         Text("inativo desde \(inactiveSince)")
                             .font(.caption)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.supportingText)
                     }
                 }
             }
@@ -66,7 +66,7 @@ struct InactiveProductRowView: View {
                 // Nada mais a fazer com um produto que não existe mais no enjoei — no lugar do
                 // menu, o mesmo ícone que a aba de publicados mostra pra um produto apagado.
                 Image(systemName: "trash.fill")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(.statusFailure)
             } else if !isSelecting {
                 moreMenu
             }

@@ -19,8 +19,13 @@ final class MegaphoneRunner {
     /// `refreshProgressSnapshot(force:)`. Só muda por esse método (mesmo de arquivos diferentes,
     /// que só conseguem chamá-lo — a atribuição em si mora dentro dele, neste arquivo).
     private(set) var progressSnapshot = MegaphoneProgressSnapshot()
-    /// Produto sendo megafonado agora — a lista rola até ele.
+    /// Último produto que o laço terminou de megafonar (sucesso ou falha).
     private(set) var currentItemID: Int?
+    /// Produto que o laço em JS está megafonando agora — o próximo do pedaço em voo depois de
+    /// `currentItemID`. Diferente de `items[].status == .megaphoning`, que marca o pedaço inteiro
+    /// (até `megaphoneBatchChunkSize` produtos) de uma vez: só este é "o da vez" na tela, e é até ele
+    /// que a lista rola acompanhando. `nil` entre um pedaço e o próximo, e com a rodada parada.
+    private(set) var activeItemID: Int?
     /// Rodada em andamento e quantas foram pedidas.
     private(set) var round = 0
     private(set) var rounds: MegaphoneRounds = .once
@@ -127,6 +132,10 @@ final class MegaphoneRunner {
         self.itemsPersistence = itemsPersistence
         self.megaphoneQueue = megaphoneQueue
         items = itemsPersistence.loadItems()
+        // Sem isso, uma lista restaurada do disco ficava invisível pra quem lê só o resumo (a aba
+        // de publicados mostrava "nenhum produto", a lista de contas não sabia quantos pedem
+        // desconto) até a primeira troca de fase — que nunca vem sem um toque em megafonar.
+        refreshProgressSnapshot()
     }
 
     var isRunning: Bool { task != nil }
@@ -143,6 +152,7 @@ final class MegaphoneRunner {
     func start(sellerID: Int, rounds: MegaphoneRounds = .once) {
         guard task == nil else { return }
         currentItemID = nil
+        activeItemID = nil
         round = 0
         self.rounds = rounds
         pauseReason = nil
@@ -357,8 +367,17 @@ final class MegaphoneRunner {
             processedCount: processedCount,
             totalSucceeded: totalSucceeded,
             totalFailed: totalFailed,
-            round: round
+            round: round,
+            discountDecisionCount: discountDecisionCount
         )
+    }
+
+    /// Mesmo O(catálogo) de `processedCount` — só roda quando o snapshot é publicado de fato (em
+    /// lote, ver acima), nunca a cada produto.
+    private var discountDecisionCount: Int {
+        items.filter {
+            $0.needsDiscountDecision && deleteStatuses[$0.id] != .succeeded && inactivateStatuses[$0.id] != .succeeded
+        }.count
     }
 
     /// Quantos milissegundos `delayBetweenProducts` representa — é o que `megaphoneAll` manda pro
@@ -403,6 +422,7 @@ final class MegaphoneRunner {
             for id in liveChunk {
                 setStatus(.megaphoning, for: id)
             }
+            activeItemID = liveChunk.first
 
             var sessionExpired = false
             token = try await client.megaphoneBatch(
@@ -412,6 +432,7 @@ final class MegaphoneRunner {
             ) { [weak self] productID, response in
                 guard let self else { return }
                 self.currentItemID = productID
+                self.activeItemID = Self.activeItemID(after: productID, in: liveChunk)
                 if let error = response.failure {
                     self.setStatus(.failed(error.localizedDescription), for: productID)
                     self.failureDetails[productID] = MegaphoneFailureDetail(action: .megaphone, error: error)
@@ -427,6 +448,7 @@ final class MegaphoneRunner {
 
             if sessionExpired {
                 currentItemID = nil
+                activeItemID = nil
                 throw EnjoeiError.notAuthenticated
             }
 
@@ -446,7 +468,15 @@ final class MegaphoneRunner {
         }
 
         currentItemID = nil
+        activeItemID = nil
         return token
+    }
+
+    /// O laço em JS passa pelo pedaço em ordem, um de cada vez — terminado `productID`, o da vez
+    /// passa a ser o seguinte dele no pedaço; depois do último, nenhum (até o próximo pedaço).
+    nonisolated static func activeItemID(after productID: Int, in chunk: [Int]) -> Int? {
+        guard let index = chunk.firstIndex(of: productID), chunk.indices.contains(index + 1) else { return nil }
+        return chunk[index + 1]
     }
 
     /// Ids que `megaphoneAll` ainda tem que megafonar nesta rodada — nem já megafonados (ou em
@@ -503,5 +533,6 @@ final class MegaphoneRunner {
             items[index].status = .pending
         }
         currentItemID = nil
+        activeItemID = nil
     }
 }

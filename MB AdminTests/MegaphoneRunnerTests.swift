@@ -1030,7 +1030,68 @@ struct MegaphoneRunnerTests {
         #expect(runner.inactivateStatuses[1] == nil)
     }
 
+    // MARK: - produto da vez (activeItemID)
+
+    @Test("terminado um produto, o da vez passa a ser o seguinte do pedaço; depois do último, nenhum")
+    func produtoDaVezAvancaNoPedaco() {
+        #expect(MegaphoneRunner.activeItemID(after: 1, in: [1, 2, 3]) == 2)
+        #expect(MegaphoneRunner.activeItemID(after: 2, in: [1, 2, 3]) == 3)
+        #expect(MegaphoneRunner.activeItemID(after: 3, in: [1, 2, 3]) == nil)
+        #expect(MegaphoneRunner.activeItemID(after: 9, in: [1, 2, 3]) == nil)
+    }
+
+    @Test("rodada terminada não deixa produto da vez pra trás")
+    func produtoDaVezZeraAoTerminar() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
+        let runner = makeRunner(client: client)
+
+        runner.start(sellerID: 1)
+        await runner.waitUntilFinished()
+
+        #expect(runner.phase == .finished)
+        #expect(runner.activeItemID == nil)
+    }
+
     // MARK: - progressSnapshot (resumo em lote pra telas de visão geral)
+
+    private func discountItem(id: Int) -> MegaphoneItem {
+        MegaphoneItem(
+            product: EnjoeiFixtures.product(id: id),
+            exposure: MegaphoneExposure(
+                productID: id,
+                kind: .maximumAfterDiscount,
+                priceToIncreaseExposure: 50,
+                discountLabel: "- 50%"
+            )
+        )
+    }
+
+    @Test("lista restaurada do disco já aparece no resumo, sem esperar uma troca de fase")
+    func progressSnapshotRefleteListaRestaurada() {
+        let persistence = InMemoryMegaphoneItemsPersistence()
+        persistence.saveItems([
+            discountItem(id: 1),
+            MegaphoneItem(product: EnjoeiFixtures.product(id: 2)),
+            discountItem(id: 3)
+        ])
+
+        let runner = makeRunner(client: StubEnjoeiClient(), itemsPersistence: persistence)
+
+        #expect(runner.progressSnapshot.itemsCount == 3)
+        #expect(runner.progressSnapshot.discountDecisionCount == 2)
+    }
+
+    @Test("produto apagado sai da contagem de quem pede desconto")
+    func progressSnapshotDescontaApagadoDaContagemDeDesconto() async {
+        let persistence = InMemoryMegaphoneItemsPersistence()
+        persistence.saveItems([discountItem(id: 1), discountItem(id: 2)])
+        let runner = makeRunner(client: StubEnjoeiClient(), itemsPersistence: persistence)
+
+        runner.deleteProduct(productID: 1)
+        await waitUntil { runner.deleteStatuses[1] == .succeeded }
+
+        #expect(runner.progressSnapshot.discountDecisionCount == 1)
+    }
 
     @Test("progressSnapshot muda de fase na hora, mesmo em pleno lote sem ter batido o tamanho dele")
     func progressSnapshotAcompanhaTransicaoDeFaseNaHora() async {
