@@ -90,6 +90,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 9DE924D6304394D800659336 /* Build configuration list for PBXNativeTarget "MB Admin" */;
 			buildPhases = (
+				AB1000000000000000000010 /* SwiftLint */,
 				9DE924C5304394D600659336 /* Sources */,
 				9DE924C6304394D600659336 /* Frameworks */,
 				9DE924C7304394D600659336 /* Resources */,
@@ -186,6 +187,28 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		AB1000000000000000000010 /* SwiftLint */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = SwiftLint;
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Homebrew no Apple Silicon fica fora do PATH que o Xcode passa pros scripts.\nexport PATH=\"/opt/homebrew/bin:$PATH\"\ncd \"$SRCROOT\"\n\nif command -v swiftlint >/dev/null 2>&1; then\n  swiftlint lint --quiet\nelif [ -n \"$CI\" ]; then\n  # Xcode Cloud nao tem SwiftLint instalado: o lint roda so na maquina local.\n  exit 0\nelse\n  echo \"warning: SwiftLint nao instalado (brew install swiftlint)\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		9DE924C5304394D600659336 /* Sources */ = {
@@ -346,6 +369,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "MB Admin/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "MB Admin";
@@ -390,6 +414,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "MB Admin/Info.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "MB Admin";

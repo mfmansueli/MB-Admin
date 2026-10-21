@@ -6,7 +6,7 @@ nonisolated struct MegaphoneItem: Identifiable, Equatable, Sendable, Codable {
     var status: MegaphoneStatus = .pending
     /// Como esse produto se encaixa no megafone — `nil` até a exposição ser conferida, ou quando a
     /// conferência não trouxe resposta pra ele.
-    var exposure: MegaphoneExposure? = nil
+    var exposure: MegaphoneExposure?
 
     var id: Int { product.id }
 

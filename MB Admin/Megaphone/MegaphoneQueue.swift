@@ -59,7 +59,9 @@ final class MegaphoneQueue {
                 waitersByRunnerID[id] = continuation
             }
         } onCancel: { [weak self] in
-            Task { @MainActor in self?.cancelWaiting(id: id) }
+            // `[weak self]` de novo na `Task`: captura uma cópia, não a `var self` (fraca) da closure
+            // de fora — capturar a `var` em código concorrente vira erro no Swift 6.
+            Task { @MainActor [weak self] in self?.cancelWaiting(id: id) }
         }
         // Chega aqui tanto por ter sido promovida (chegou a vez) quanto por ter sido cancelada
         // enquanto esperava. Promovida: a vaga já foi ocupada por `promoteWaiters()`, no instante da

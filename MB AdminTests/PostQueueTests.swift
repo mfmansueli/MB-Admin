@@ -627,7 +627,10 @@ struct PostQueueTests {
         // `processaEmSequencia` sobre por que não dá pra confiar num único `waitUntil` pra dois
         // itens seguidos sob carga pesada.
         await waitUntil { queue.status(for: queue.items[0]) != .pending }
-        await waitUntil { poster.statuses[target(2, destination: stableDestination)] != nil && poster.statuses[target(2, destination: stableDestination)] != .megaphoning }
+        await waitUntil {
+            poster.statuses[target(2, destination: stableDestination)] != nil
+                && poster.statuses[target(2, destination: stableDestination)] != .megaphoning
+        }
         await waitUntil { !queue.isRunning }
 
         #expect(queue.status(for: queue.items[0]) == .failed("conta não está mais logada"))

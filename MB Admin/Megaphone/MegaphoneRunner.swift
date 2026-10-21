@@ -10,12 +10,11 @@ final class MegaphoneRunner {
     /// transição force uma publicação de `progressSnapshot` na hora (ver esse método), inclusive
     /// as que acontecem em `MegaphoneRunner+ProductLoading.swift`.
     private(set) var phase: MegaphonePhase = .idle
-    // `internal(set)` em vez de `private(set)` na propriedade abaixo — sem isso, os métodos
+    // Sem `private(set)` nesta e nas propriedades de status/totais abaixo — sem isso, os métodos
     // movidos pra `MegaphoneRunner+ProductLoading.swift`/`MegaphoneRunner+ProductActions.swift`
     // (mesmo tipo, arquivos diferentes) não conseguiriam escrever aqui: `private` em Swift vale
-    // por arquivo, não por tipo. Continua só de leitura pra fora do módulo (a UI só lê, nunca
-    // atribui direto).
-    internal(set) var items: [MegaphoneItem] = []
+    // por arquivo, não por tipo. A UI só lê, nunca atribui direto.
+    var items: [MegaphoneItem] = []
     /// Resumo pra quem só mostra visão geral — ver `MegaphoneProgressSnapshot` e
     /// `refreshProgressSnapshot(force:)`. Só muda por esse método (mesmo de arquivos diferentes,
     /// que só conseguem chamá-lo — a atribuição em si mora dentro dele, neste arquivo).
@@ -28,25 +27,25 @@ final class MegaphoneRunner {
     /// Por que está parado, quando está. Uma pausa do usuário não é desfeita pela volta do app.
     private(set) var pauseReason: MegaphonePauseReason?
     /// Somatórios de todas as rodadas (os status em `items` valem só para a rodada atual).
-    internal(set) var totalSucceeded = 0
-    internal(set) var totalFailed = 0
+    var totalSucceeded = 0
+    var totalFailed = 0
     /// Andamento de apagar cada produto, por id — separado de `items[].status` de propósito:
     /// apagar não é megafonar, e reaproveitar o mesmo campo faria o laço automático pular um
     /// produto só porque ele está sendo apagado.
-    internal(set) var deleteStatuses: [Int: MegaphoneStatus] = [:]
+    var deleteStatuses: [Int: MegaphoneStatus] = [:]
     /// Andamento de inativar cada produto, por id — mesmo raciocínio de `deleteStatuses`: inativar
     /// não é megafonar, e reaproveitar `items[].status` faria o laço automático pular o produto só
     /// por causa disso.
-    internal(set) var inactivateStatuses: [Int: MegaphoneStatus] = [:]
+    var inactivateStatuses: [Int: MegaphoneStatus] = [:]
     /// Andamento de ativar cada produto, por id — separado de `inactivateStatuses` porque essa
     /// ação parte da aba "inativos" (produtos fora de `items`), não da lista de publicados.
-    internal(set) var activateStatuses: [Int: MegaphoneStatus] = [:]
+    var activateStatuses: [Int: MegaphoneStatus] = [:]
     /// Diagnóstico completo da última falha de cada produto, qualquer que seja a ação (megafonar,
     /// aplicar desconto, apagar, inativar ou ativar) — só em memória, ao contrário do que os
     /// quatro dicionários de status acima guardam. Um produto só tem uma falha "visível" por vez
     /// na tela (a row prioriza apagado > inativado > mensagem de erro do megafone), então um
     /// dicionário só, sobrescrito a cada falha nova, já basta.
-    internal(set) var failureDetails: [Int: MegaphoneFailureDetail] = [:]
+    var failureDetails: [Int: MegaphoneFailureDetail] = [:]
 
     /// Intervalo entre um megafone e o próximo, para não martelar o Enjoei. `megaphoneAll` manda
     /// esse valor para dentro do laço em JS (ver `delayBetweenProductsMilliseconds`) — não dá mais
@@ -334,8 +333,8 @@ final class MegaphoneRunner {
     /// Único ponto que muda `phase` — publica `progressSnapshot` junto, sempre, pra transições de
     /// fase (raras) nunca ficarem escondidas atrás do lote usado pelas atualizações item a item
     /// (ver `refreshProgressSnapshot(force:)`). Sem `private`: chamado também pelos métodos de
-    /// carregamento movidos pra `MegaphoneRunner+ProductLoading.swift` (mesmo raciocínio do
-    /// `internal(set)` nas propriedades no topo deste arquivo).
+    /// carregamento movidos pra `MegaphoneRunner+ProductLoading.swift` (mesmo raciocínio das
+    /// propriedades sem `private(set)` no topo deste arquivo).
     func setPhase(_ newPhase: MegaphonePhase) {
         phase = newPhase
         refreshProgressSnapshot()
@@ -386,16 +385,8 @@ final class MegaphoneRunner {
     private func megaphoneAll(token: String) async throws -> String {
         var token = token
 
-        let pendingIDs = items
-            .filter { $0.status != .succeeded && $0.status != .megaphoning }
-            .filter { deleteStatuses[$0.id] != .succeeded }
-            .filter { inactivateStatuses[$0.id] != .succeeded }
-            .map(\.id)
-        guard !pendingIDs.isEmpty else { return token }
-
-        let chunks = stride(from: 0, to: pendingIDs.count, by: megaphoneBatchChunkSize).map {
-            Array(pendingIDs[$0..<Swift.min($0 + megaphoneBatchChunkSize, pendingIDs.count)])
-        }
+        let chunks = pendingMegaphoneChunks()
+        guard !chunks.isEmpty else { return token }
 
         for (chunkIndex, chunk) in chunks.enumerated() {
             // Único ponto em que dá pra interromper um lote em andamento — o `callAsyncJavaScript`
@@ -456,6 +447,19 @@ final class MegaphoneRunner {
 
         currentItemID = nil
         return token
+    }
+
+    /// Ids que `megaphoneAll` ainda tem que megafonar nesta rodada — nem já megafonados (ou em
+    /// andamento), nem apagados/inativados — em pedaços de `megaphoneBatchChunkSize`.
+    private func pendingMegaphoneChunks() -> [[Int]] {
+        let pendingIDs = items
+            .filter { $0.status != .succeeded && $0.status != .megaphoning }
+            .filter { deleteStatuses[$0.id] != .succeeded }
+            .filter { inactivateStatuses[$0.id] != .succeeded }
+            .map(\.id)
+        return stride(from: 0, to: pendingIDs.count, by: megaphoneBatchChunkSize).map {
+            Array(pendingIDs[$0..<Swift.min($0 + megaphoneBatchChunkSize, pendingIDs.count)])
+        }
     }
 
     /// Megafona um produto, renovando o token CSRF e tentando de novo quando o servidor recusa o

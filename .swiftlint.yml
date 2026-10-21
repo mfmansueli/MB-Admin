@@ -1,0 +1,37 @@
+# Regras padrão do SwiftLint, com os limites ajustados ao estilo do projeto. Os testes têm uma
+# config própria (`MB AdminTests/.swiftlint.yml`) que afrouxa mais algumas regras só pra eles.
+
+included:
+  - MB Admin
+  - MB AdminTests
+
+disabled_rules:
+  # Em SwiftUI, passar closures rotuladas + o conteúdo como trailing closure
+  # (`SelectionToggleBar(onToggleSelecting: {…}) { … }`, `Button(action:) { … }`) é o padrão.
+  - multiple_closures_with_trailing_closure
+
+# O código usa doc comments longos e strings de UI em português — 120 deixava ~140 linhas de fora.
+line_length:
+  warning: 160
+  error: 200
+  ignores_urls: true
+
+# Payloads `Decodable` espelham o JSON da API com tipos aninhados (ex.: `StoreProductsPage.Node
+# .RegularPrice.Values.Price`) — preferível a espalhar um tipo de top-level por nível.
+nesting:
+  type_level: 4
+
+identifier_name:
+  excluded:
+    - id
+    - of # rótulo de associated value: `.loadingPage(1, of: 3)`
+
+# Comentários (bem frequentes aqui) não contam no tamanho de arquivo/tipo.
+file_length:
+  warning: 600
+  error: 1000
+  ignore_comment_only_lines: true
+
+type_body_length:
+  warning: 450
+  error: 600

@@ -226,11 +226,17 @@ struct CrossAccountPosterTests {
         let poster = CrossAccountPoster(cooldownDuration: .zero)
 
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destinationB)
-        await waitUntil { poster.statuses[target(1, destination: destinationB)] != .megaphoning && poster.statuses[target(1, destination: destinationB)] != nil }
+        await waitUntil {
+            poster.statuses[target(1, destination: destinationB)] != .megaphoning
+                && poster.statuses[target(1, destination: destinationB)] != nil
+        }
         // Sem isso, `post` pra C via a mesma chave (só `product.id`) veria `.succeeded` da postagem
         // em B e nunca chamaria `run` de verdade — reproduz o bug antes da correção.
         poster.post(product: EnjoeiFixtures.product(id: 1), from: source, to: destinationC)
-        await waitUntil { poster.statuses[target(1, destination: destinationC)] != .megaphoning && poster.statuses[target(1, destination: destinationC)] != nil }
+        await waitUntil {
+            poster.statuses[target(1, destination: destinationC)] != .megaphoning
+                && poster.statuses[target(1, destination: destinationC)] != nil
+        }
 
         #expect(poster.statuses[target(1, destination: destinationB)] == .succeeded)
         #expect(poster.statuses[target(1, destination: destinationC)] == .succeeded)

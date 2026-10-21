@@ -28,7 +28,12 @@ enum PerAccountModelContainer {
             MegaphoneItemRecord.self
         ])
         let configuration = ModelConfiguration(schema: schema, url: storeURL(for: accountID))
-        let container = try! ModelContainer(for: schema, configurations: [configuration])
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(for: schema, configurations: [configuration])
+        } catch {
+            fatalError("não deu pra abrir o ModelContainer da conta: \(error)")
+        }
         containersByAccountID[accountID] = container
         return container
     }

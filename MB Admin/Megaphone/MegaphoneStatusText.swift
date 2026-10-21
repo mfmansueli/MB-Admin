@@ -18,26 +18,7 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
         totalFailed: Int,
         round: Int
     ) {
-        headline = Self.makeHeadline(
-            phase: phase,
-            itemsCount: itemsCount,
-            processedCount: processedCount,
-            totalSucceeded: totalSucceeded,
-            totalFailed: totalFailed,
-            round: round
-        )
-        progress = Self.makeProgress(phase: phase, itemsCount: itemsCount, processedCount: processedCount)
-    }
-
-    private static func makeHeadline(
-        phase: MegaphonePhase,
-        itemsCount: Int,
-        processedCount: Int,
-        totalSucceeded: Int,
-        totalFailed: Int,
-        round: Int
-    ) -> String {
-        switch phase {
+        headline = switch phase {
         case .idle:
             "pronto para megafonar."
         case .waitingInQueue:
@@ -47,9 +28,9 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
         case .checkingExposure(let checked, let total):
             "conferindo quais pedem desconto… \(checked) de \(total)"
         case .megaphoning(let round, let rounds):
-            "\(roundLabel(round, of: rounds))megafonando \(processedCount + 1) de \(itemsCount)…"
+            "\(Self.roundLabel(round, of: rounds))megafonando \(processedCount + 1) de \(itemsCount)…"
         case .paused(let round, let rounds, let reason):
-            roundLabel(round, of: rounds) + pausedText(reason)
+            Self.roundLabel(round, of: rounds) + Self.pausedText(reason)
         case .finished:
             "fim: \(totalSucceeded) megafones, \(totalFailed) com erro."
         case .cancelled:
@@ -57,6 +38,7 @@ nonisolated struct MegaphoneStatusText: Equatable, Sendable {
         case .failed(let message):
             message
         }
+        progress = Self.makeProgress(phase: phase, itemsCount: itemsCount, processedCount: processedCount)
     }
 
     /// Fração concluída. Com repetição infinita não existe fim, então mostramos só a rodada atual.

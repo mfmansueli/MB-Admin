@@ -11,7 +11,7 @@ nonisolated struct EnjoeiProduct: Identifiable, Equatable, Sendable, Codable {
     /// `nil` até `ProductDetailsLoader` buscar o produto inteiro (`EnjoeiClientProtocol
     /// .productTemplate`) — nenhuma das rotas usadas pra listar a loja devolve descrição, só esse
     /// pedido avulso por produto.
-    var description: String? = nil
+    var description: String?
 
     /// Cópia com a descrição preenchida — usado por `MegaphoneRunner.applyDescription` depois que
     /// `ProductDetailsLoader` busca o produto inteiro.

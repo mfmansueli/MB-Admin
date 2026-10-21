@@ -17,42 +17,9 @@ nonisolated enum AccountProductMatcher {
         threshold: Double = defaultThreshold
     ) -> AccountComparisonResult {
         // Tokeniza uma vez por produto, não uma vez por par — O(N+M) em vez de O(N×M) tokenizações.
-        let tokensA = productsA.map { ($0, ProductSimilarity.tokenize(comparableText(for: $0))) }
-        let tokensB = productsB.map { ($0, ProductSimilarity.tokenize(comparableText(for: $0))) }
-
-        // Índice invertido — cada palavra de B aponta pros índices dos produtos que a contêm.
-        // Sem isso, o laço abaixo calculava interseção/união pra TODO par (A×B) só pra descartar a
-        // esmagadora maioria por não compartilhar palavra nenhuma (`intersection > 0`) — numa loja
-        // variada, isso é praticamente todos os pares. Com o índice, só os pares que já sabemos
-        // compartilhar pelo menos uma palavra chegam a calcular interseção/união de verdade; o
-        // resultado final é idêntico (mesmos pares passavam pelo `guard intersection > 0` de
-        // qualquer jeito), só sem o trabalho descartado.
-        var indexByWord: [String: [Int]] = [:]
-        for (indexB, (_, wordsB)) in tokensB.enumerated() {
-            for word in wordsB {
-                indexByWord[word, default: []].append(indexB)
-            }
-        }
-
-        var candidates: [(indexA: Int, indexB: Int, score: Double)] = []
-        for (indexA, (_, wordsA)) in tokensA.enumerated() {
-            guard !wordsA.isEmpty else { continue }
-            var candidateIndicesB: Set<Int> = []
-            for word in wordsA {
-                if let matches = indexByWord[word] {
-                    candidateIndicesB.formUnion(matches)
-                }
-            }
-            for indexB in candidateIndicesB {
-                let wordsB = tokensB[indexB].1
-                let intersection = wordsA.intersection(wordsB).count
-                guard intersection > 0 else { continue }
-                let union = wordsA.union(wordsB).count
-                let score = Double(intersection) / Double(union)
-                guard score >= threshold else { continue }
-                candidates.append((indexA, indexB, score))
-            }
-        }
+        let wordsA = productsA.map { ProductSimilarity.tokenize(comparableText(for: $0)) }
+        let wordsB = productsB.map { ProductSimilarity.tokenize(comparableText(for: $0)) }
+        var candidates = scoredCandidates(wordsA: wordsA, wordsB: wordsB, threshold: threshold)
 
         // Maior score primeiro; empate desempatado pelos ids, só pra ordem sair determinística
         // (e portanto testável) mesmo quando dois pares empatam.
@@ -84,6 +51,48 @@ nonisolated enum AccountProductMatcher {
         let onlyInB = productsB.enumerated().filter { !usedB.contains($0.offset) }.map(\.element)
 
         return AccountComparisonResult(matches: matches, onlyInA: onlyInA, onlyInB: onlyInB)
+    }
+
+    private struct Candidate {
+        let indexA: Int
+        let indexB: Int
+        let score: Double
+    }
+
+    /// Todo par (A, B) com score a partir de `threshold`, ainda sem resolver conflitos.
+    ///
+    /// Usa um índice invertido — cada palavra de B aponta pros índices dos produtos que a contêm.
+    /// Sem isso, calculava interseção/união pra cada par (A×B) só pra descartar a esmagadora maioria
+    /// por não compartilhar palavra nenhuma (`intersection > 0`) — numa loja variada, isso é
+    /// praticamente todos os pares. Com o índice, só os pares que já sabemos compartilhar pelo menos
+    /// uma palavra chegam a calcular interseção/união de verdade; o resultado final é idêntico
+    /// (mesmos pares passavam pelo `guard intersection > 0` de qualquer jeito), só sem o trabalho
+    /// descartado.
+    private static func scoredCandidates(
+        wordsA: [Set<String>],
+        wordsB: [Set<String>],
+        threshold: Double
+    ) -> [Candidate] {
+        var indexByWord: [String: [Int]] = [:]
+        for (indexB, words) in wordsB.enumerated() {
+            for word in words {
+                indexByWord[word, default: []].append(indexB)
+            }
+        }
+
+        var candidates: [Candidate] = []
+        for (indexA, wordsOfA) in wordsA.enumerated() where !wordsOfA.isEmpty {
+            let candidateIndicesB = Set(wordsOfA.flatMap { indexByWord[$0] ?? [] })
+            for indexB in candidateIndicesB {
+                let wordsOfB = wordsB[indexB]
+                let intersection = wordsOfA.intersection(wordsOfB).count
+                guard intersection > 0 else { continue }
+                let score = Double(intersection) / Double(wordsOfA.union(wordsOfB).count)
+                guard score >= threshold else { continue }
+                candidates.append(Candidate(indexA: indexA, indexB: indexB, score: score))
+            }
+        }
+        return candidates
     }
 
     /// Título sozinho por padrão; com descrição já buscada (comparação completa, ver

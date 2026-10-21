@@ -16,6 +16,10 @@ import SwiftData
 nonisolated enum SharedModelContainer {
     static let shared: ModelContainer = {
         let schema = Schema([PostHistoryRecord.self])
-        return try! ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema)])
+        do {
+            return try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema)])
+        } catch {
+            fatalError("não deu pra abrir o SharedModelContainer: \(error)")
+        }
     }()
 }

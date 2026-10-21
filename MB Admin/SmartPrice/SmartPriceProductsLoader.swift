@@ -36,14 +36,14 @@ final class SmartPriceProductsLoader {
     var pageConcurrency = 4
 
     /// Situação de ativar o preço esperto de cada produto, por id — separado de `phase` (que é só
-    /// do carregamento da listagem em si). Métodos em `SmartPriceProductsLoader+Activation.swift`.
-    internal(set) var activationStatuses: [Int: MegaphoneStatus] = [:]
+    /// do carregamento da listagem em si). Métodos em `SmartPriceProductsLoader+Activation.swift`
+    /// — por isso sem `private(set)`: `private` em Swift vale por arquivo, não por tipo.
+    var activationStatuses: [Int: MegaphoneStatus] = [:]
     /// Intervalo entre uma ativação e a próxima, pra não martelar a API — mesmo valor padrão do
     /// megafone (`MegaphoneRunner.delayBetweenProducts`). `var` pros testes zerarem.
     var delayBetweenActivations: Duration = .milliseconds(900)
     // Sem `private` nas duas linhas abaixo: usadas pelos métodos movidos pra
-    // `SmartPriceProductsLoader+Activation.swift` (mesmo raciocínio do `internal(set)` acima —
-    // `private` em Swift vale por arquivo, não por tipo).
+    // `SmartPriceProductsLoader+Activation.swift` (mesmo raciocínio de `activationStatuses` acima).
     var activationQueue: [Int] = []
     var isProcessingActivations = false
 

@@ -34,8 +34,9 @@ struct ProductMatchDifferenceTests {
     @Test("descrições quase idênticas: número decimal aparece separado em dois tokens")
     func descricoesQuaseIdenticasNumeroDecimalSeparaEmDoisTokens() {
         let title = "brinco oval zircônia lavanda cravejado - prata 925"
-        let descriptionA = "brinco oval zircônia lavanda cravejado com zircônia crystal - prata 925\ncódigo: x379249\npeso: 2.6 gramas o par\nmedidas: 1.0 cm x 0.9 mm"
-        let descriptionB = "brinco oval zircônia lavanda cravejado com zircônia crystal - prata 925\ncódigo: x379249\npeso: 1 grama o par\nmedidas: 1.0 cm x 0.9 mm"
+        let commonDescription = "brinco oval zircônia lavanda cravejado com zircônia crystal - prata 925\ncódigo: x379249"
+        let descriptionA = commonDescription + "\npeso: 2.6 gramas o par\nmedidas: 1.0 cm x 0.9 mm"
+        let descriptionB = commonDescription + "\npeso: 1 grama o par\nmedidas: 1.0 cm x 0.9 mm"
         let a = EnjoeiFixtures.product(id: 1, title: title).withDescription(descriptionA)
         let b = EnjoeiFixtures.product(id: 2, title: title).withDescription(descriptionB)
         let match = ProductMatch(productA: a, productB: b, similarity: 0.92)
