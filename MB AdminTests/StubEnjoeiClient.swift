@@ -199,10 +199,10 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
                     try await megaphone(productID: productID, csrfToken: currentToken, newPrice: nil)
                     response = MegaphoneWebResponse(status: 200)
                 } catch {
-                    response = MegaphoneWebResponse(status: (error as? EnjoeiError)?.stubHTTPStatus ?? 500)
+                    response = (error as? EnjoeiError)?.stubWebResponse ?? MegaphoneWebResponse(status: 500)
                 }
             } catch {
-                response = MegaphoneWebResponse(status: (error as? EnjoeiError)?.stubHTTPStatus ?? 500)
+                response = (error as? EnjoeiError)?.stubWebResponse ?? MegaphoneWebResponse(status: 500)
             }
             onProgress(productID, response)
             if response.status == 401 { break }
@@ -308,5 +308,17 @@ private extension EnjoeiError {
         case .http(let status, _): status
         default: 500
         }
+    }
+
+    /// A resposta que o laço em JS devolveria pra esse erro — com a mensagem do servidor no corpo,
+    /// como o Enjoei manda (`{"message": "..."}`), pra `MegaphoneWebResponse.failure` extrair do
+    /// mesmo jeito que faz com uma resposta de verdade.
+    var stubWebResponse: MegaphoneWebResponse {
+        guard case .http(_, let message?) = self,
+              let data = try? JSONSerialization.data(withJSONObject: ["message": message]),
+              let body = String(bytes: data, encoding: .utf8) else {
+            return MegaphoneWebResponse(status: stubHTTPStatus)
+        }
+        return MegaphoneWebResponse(status: stubHTTPStatus, body: body)
     }
 }
