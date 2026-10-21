@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Conteúdo da aba "inativos" da tela de detalhe da conta: lista os produtos inativos da própria
-/// loja e deixa selecionar vários pra repostar (cria de novo) ou ativar (volta o mesmo anúncio)
-/// de uma vez, entrando na mesma fila de ações usada pela comparação entre contas — aqui origem e
-/// destino são sempre a própria conta.
+/// loja e deixa selecionar vários pra repostar (cria de novo), ativar (volta o mesmo anúncio) ou
+/// apagar de vez, entrando na mesma fila de ações usada pela comparação entre contas — aqui origem
+/// e destino são sempre a própria conta.
 struct InactiveProductsListView: View {
     let account: AccountSession
 
@@ -12,6 +12,7 @@ struct InactiveProductsListView: View {
     @State private var bulkAction: BulkAction = .repost
     @State private var isConfirmingBulkRepost = false
     @State private var isConfirmingBulkActivate = false
+    @State private var isConfirmingBulkDelete = false
     @State private var searchText = ""
     /// Cache de `filteredItems` (ver `recomputeFilteredItems`) — sem isso, cada leitura (lista,
     /// "selecionar todos", contagem) refiltrava a lista inteira do zero, várias vezes por
@@ -24,15 +25,18 @@ struct InactiveProductsListView: View {
     private var loader: InactiveProductsLoader { account.inactiveProductsLoader }
 
     /// Ação escolhida pro botão de confirmar da seleção múltipla — repostar (cria de novo, sem
-    /// mexer no status de inativo) ou ativar (volta o mesmo anúncio pra vitrine de publicados).
+    /// mexer no status de inativo), ativar (volta o mesmo anúncio pra vitrine de publicados) ou
+    /// apagar (some do enjoei de vez).
     private enum BulkAction: BulkActionOption {
         case repost
         case activate
+        case delete
 
         var label: String {
             switch self {
             case .repost: "repostar"
             case .activate: "ativar"
+            case .delete: "apagar"
             }
         }
 
@@ -40,10 +44,16 @@ struct InactiveProductsListView: View {
             switch self {
             case .repost: "doc.on.doc.fill"
             case .activate: "tray.and.arrow.up.fill"
+            case .delete: "trash.fill"
             }
         }
 
-        var tint: Color { .accentColor }
+        var tint: Color {
+            switch self {
+            case .repost, .activate: .accentColor
+            case .delete: .red
+            }
+        }
     }
 
     var body: some View {
@@ -103,6 +113,7 @@ struct InactiveProductsListView: View {
             bulkAction = .repost
             isConfirmingBulkRepost = false
             isConfirmingBulkActivate = false
+            isConfirmingBulkDelete = false
             searchText = ""
             searchDebounceTask?.cancel()
             searchDebounceTask = nil
@@ -159,6 +170,7 @@ struct InactiveProductsListView: View {
                 switch bulkAction {
                 case .repost: isConfirmingBulkRepost = true
                 case .activate: isConfirmingBulkActivate = true
+                case .delete: isConfirmingBulkDelete = true
                 }
             }
         }
@@ -182,6 +194,16 @@ struct InactiveProductsListView: View {
             Button("cancelar", role: .cancel) {}
         } message: {
             Text("cada anúncio selecionado entra na fila de ações e volta pra vitrine de publicados.")
+        }
+        .confirmationDialog(
+            "apagar \(selectedIDs.count) produtos?",
+            isPresented: $isConfirmingBulkDelete,
+            titleVisibility: .visible
+        ) {
+            Button("apagar", role: .destructive) { apagarSelecionados() }
+            Button("cancelar", role: .cancel) {}
+        } message: {
+            Text("ação irreversível: cada anúncio selecionado entra na fila de ações e é apagado do enjoei de vez, sem chance de recuperar.")
         }
     }
 
@@ -237,7 +259,7 @@ struct InactiveProductsListView: View {
     }
 
     private func repostarSelecionados() {
-        for product in loader.items where selectedIDs.contains(product.id) {
+        for product in selectedLiveProducts {
             accountsStore.postQueue.enqueue(product: placeholder(for: product), source: account, destination: account)
         }
         selectedIDs.removeAll()
@@ -245,11 +267,28 @@ struct InactiveProductsListView: View {
     }
 
     private func ativarSelecionados() {
-        for product in loader.items where selectedIDs.contains(product.id) {
+        for product in selectedLiveProducts {
             accountsStore.postQueue.enqueueActivate(product: placeholder(for: product), account: account)
         }
         selectedIDs.removeAll()
         isSelecting = false
+    }
+
+    /// Mesma fila de ações usada pelo "apagar produto" de cada linha (e pela aba de publicados).
+    private func apagarSelecionados() {
+        for product in selectedLiveProducts {
+            accountsStore.postQueue.enqueueDelete(product: placeholder(for: product), account: account)
+        }
+        selectedIDs.removeAll()
+        isSelecting = false
+    }
+
+    /// Os selecionados que ainda existem no enjoei — um já apagado nesta sessão continua na lista
+    /// (marcado, até o próximo carregamento), mas qualquer ação nele só falharia na fila.
+    private var selectedLiveProducts: [InactiveProduct] {
+        loader.items.filter {
+            selectedIDs.contains($0.id) && account.runner.deleteStatuses[$0.id] != .succeeded
+        }
     }
 
     /// A fila só usa `id` (pra ler o template de novo), `title` e `photoPublicID` (pra exibir) — o

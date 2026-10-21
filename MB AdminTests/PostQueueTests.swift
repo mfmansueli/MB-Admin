@@ -43,6 +43,17 @@ struct PostQueueTests {
         )
     }
 
+    private func makeInactiveProduct(id: Int) -> InactiveProduct {
+        InactiveProduct(
+            id: id,
+            path: "produto-\(id)",
+            title: "produto \(id)",
+            price: 100,
+            photoPublicID: nil,
+            inactiveSince: "01/01/2026"
+        )
+    }
+
     @Test("enfileira e processa os itens em sequência, um de cada vez")
     func processaEmSequencia() async {
         let sourceClient = StubEnjoeiClient(
@@ -256,6 +267,48 @@ struct PostQueueTests {
         #expect(account.runner.deleteStatuses[1] == .succeeded)
         #expect(queue.status(for: queue.items[0]) == .succeeded)
         #expect(await client.deleteProductCalls.map(\.productID) == [1])
+    }
+
+    @Test("apagar um inativo pela fila tira ele do cache de inativos, mas a linha continua na tela")
+    func apagarInativoPelaFilaTiraDoCache() async {
+        let client = StubEnjoeiClient(inactivePagesByNumber: [
+            1: InactiveProductsPage(
+                products: [makeInactiveProduct(id: 1), makeInactiveProduct(id: 2)],
+                maxPage: 1
+            )
+        ])
+        let account = makeAccount(name: "conta", client: client)
+        account.inactiveProductsLoader.load()
+        await waitUntil { account.inactiveProductsLoader.phase == .finished }
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [account] }, interval: .zero)
+
+        queue.enqueueDelete(product: EnjoeiFixtures.product(id: 1), account: account)
+        await waitUntil { !queue.isRunning }
+
+        #expect(account.runner.deleteStatuses[1] == .succeeded)
+        #expect(account.inactiveProductsLoader.items.map(\.id) == [1, 2])
+        // `search` com texto vazio lê direto da persistência — é o que uma abertura nova do app veria.
+        #expect(account.inactiveProductsLoader.search(matching: "").map(\.id) == [2])
+    }
+
+    @Test("apagar que falha não tira o inativo do cache")
+    func apagarQueFalhaNaoTiraDoCache() async {
+        let client = StubEnjoeiClient(
+            deleteProductError: .http(status: 500, message: "o enjoei caiu"),
+            inactivePagesByNumber: [
+                1: InactiveProductsPage(products: [makeInactiveProduct(id: 1)], maxPage: 1)
+            ]
+        )
+        let account = makeAccount(name: "conta", client: client)
+        account.inactiveProductsLoader.load()
+        await waitUntil { account.inactiveProductsLoader.phase == .finished }
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [account] }, interval: .zero)
+
+        queue.enqueueDelete(product: EnjoeiFixtures.product(id: 1), account: account)
+        await waitUntil { !queue.isRunning }
+
+        #expect(account.runner.deleteStatuses[1] == .failed("o enjoei caiu"))
+        #expect(account.inactiveProductsLoader.search(matching: "").map(\.id) == [1])
     }
 
     @Test("inativar pela fila delega pro runner da conta e aparece como succeeded")

@@ -11,10 +11,15 @@ struct InactiveProductRowView: View {
 
     @State private var isConfirmingActivate = false
     @State private var isConfirmingRepost = false
+    @State private var isConfirmingDelete = false
     @Environment(AccountsStore.self) private var accountsStore
 
     private var activateStatus: MegaphoneStatus { account.runner.activateStatuses[product.id] ?? .pending }
     private var isActivated: Bool { activateStatus == .succeeded }
+    /// Mesma fonte da aba de publicados (`MegaphoneRowView`): apagar passa pela fila, que delega
+    /// pro `MegaphoneRunner` da conta — o status mora lá, chaveado só pelo id do produto.
+    private var deleteStatus: MegaphoneStatus { account.runner.deleteStatuses[product.id] ?? .pending }
+    private var isDeleted: Bool { deleteStatus == .succeeded }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -30,7 +35,11 @@ struct InactiveProductRowView: View {
                 Text(product.title)
                     .productTitleFont()
                     .lineLimit(2)
-                if isActivated {
+                if isDeleted {
+                    Text("produto apagado")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else if isActivated {
                     Text("produto ativado")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -53,7 +62,12 @@ struct InactiveProductRowView: View {
             // lista (que segue essa largura) fica curto em vez de ir de ponta a ponta.
             Spacer(minLength: 8)
 
-            if !isSelecting {
+            if isDeleted {
+                // Nada mais a fazer com um produto que não existe mais no enjoei — no lugar do
+                // menu, o mesmo ícone que a aba de publicados mostra pra um produto apagado.
+                Image(systemName: "trash.fill")
+                    .foregroundStyle(.red)
+            } else if !isSelecting {
                 moreMenu
             }
         }
@@ -89,7 +103,19 @@ struct InactiveProductRowView: View {
         } message: {
             Text("entra na fila de ações, reaproveitando título, descrição, preço e fotos — acompanhe o andamento por lá.")
         }
-        .opacity(isActivated ? 0.4 : 1)
+        .confirmationDialog(
+            "apagar este produto?",
+            isPresented: $isConfirmingDelete,
+            titleVisibility: .visible
+        ) {
+            Button("apagar", role: .destructive) {
+                accountsStore.postQueue.enqueueDelete(product: placeholderProduct, account: account)
+            }
+            Button("cancelar", role: .cancel) {}
+        } message: {
+            Text("ação irreversível: entra na fila de ações e o anúncio é apagado do enjoei de vez, sem chance de recuperar.")
+        }
+        .opacity(isActivated || isDeleted ? 0.4 : 1)
     }
 
     @ViewBuilder
@@ -120,8 +146,18 @@ struct InactiveProductRowView: View {
                 }
                 .disabled(activateStatus == .megaphoning)
             }
+            Button(role: .destructive) {
+                isConfirmingDelete = true
+            } label: {
+                if deleteStatus == .megaphoning {
+                    Label("apagando…", systemImage: "trash")
+                } else {
+                    Label("apagar produto", systemImage: "trash")
+                }
+            }
+            .disabled(deleteStatus == .megaphoning)
         } label: {
-            if activateStatus == .megaphoning {
+            if activateStatus == .megaphoning || deleteStatus == .megaphoning {
                 ProgressView()
             } else {
                 Image(systemName: "ellipsis.circle")

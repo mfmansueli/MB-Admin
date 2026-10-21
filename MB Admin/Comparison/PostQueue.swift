@@ -360,10 +360,15 @@ final class PostQueue {
 
     /// Delega a exclusão de verdade pro `MegaphoneRunner` da própria conta — ele já sabe renovar
     /// token CSRF e marcar `deleteStatuses`, que é a mesma fonte que a linha do produto usa pra se
-    /// mostrar apagada. A fila só decide a vez de cada item.
+    /// mostrar apagada. A fila só decide a vez de cada item. Apagado de verdade, sai também do cache
+    /// de inativos (sem efeito se veio de publicados) — `deleteStatuses` só vive em memória, então
+    /// sem isso o produto voltaria como inativo comum na próxima abertura do app.
     private func deleteAndTrack(item: PostQueueItem, account: AccountSession) async {
         currentItem = item
         await account.runner.deleteProductAndWait(productID: item.product.id)
+        if account.runner.deleteStatuses[item.product.id] == .succeeded {
+            account.inactiveProductsLoader.removeFromCache(productID: item.product.id)
+        }
         if currentItem?.id == item.id {
             currentItem = nil
         }

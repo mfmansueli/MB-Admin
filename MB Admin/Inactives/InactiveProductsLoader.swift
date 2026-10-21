@@ -64,50 +64,65 @@ final class InactiveProductsLoader {
         itemsPersistence.search(matching: query, limit: limit)
     }
 
+    /// Tira um produto do cache em disco sem mexer em `items` — pra um produto apagado (ver
+    /// `PostQueue.deleteAndTrack`) não voltar como inativo na próxima abertura do app, mas a linha
+    /// dele continuar na tela, marcada como apagada, até o próximo carregamento (mesmo
+    /// comportamento da aba de publicados).
+    func removeFromCache(productID: Int) {
+        itemsPersistence.removeItem(productID: productID)
+    }
+
     private func run() async {
         do {
-            // Página 1 sempre sozinha — só ela revela `maxPage`, então não tem o que paralelizar
-            // antes dela. Só limpa o que essa conta tinha persistido depois dela chegar de
-            // verdade — se a rede falhar logo aqui (`catch` abaixo), o cache antigo em disco
-            // continua intacto.
+            // Página 1 sempre sozinha — nada se sabe da paginação antes dela. Só limpa o que essa
+            // conta tinha persistido depois dela chegar de verdade — se a rede falhar logo aqui
+            // (`catch` abaixo), o cache antigo em disco continua intacto.
             phase = .loadingPage(1, of: 1)
             let first = try await client.inactiveProductsPage(page: 1)
             itemsPersistence.clearItems()
-            itemsPersistence.appendPage(first.products, startingAt: 0)
-            var collected = first.products
+            var seenIDs = Set<Int>()
+            var collected: [InactiveProduct] = []
+            appendNewProducts(first.products, to: &collected, seenIDs: &seenIDs)
             items = collected
-            let maxPage = first.maxPage
+            // `maxPage` de UMA página é só o maior link de paginação que ela mostra, não o total
+            // de verdade: no iPhone/iPad, confiar só no da página 1 parava na página 2 (20
+            // inativos) numa loja com muito mais — ao que tudo indica a WebView recebe ali o
+            // layout mobile do site, com uma paginação compacta que só aponta pra página
+            // seguinte. Por isso o maior número visto em QUALQUER página até agora: no layout
+            // desktop (Mac), a página 1 já revela o total e nada muda; numa paginação compacta,
+            // cada página revela a seguinte até a última.
+            var knownMaxPage = first.maxPage
 
             var nextPage = 2
-            while nextPage <= maxPage {
+            while nextPage <= knownMaxPage {
                 try Task.checkCancellation()
-                let chunkEnd = min(nextPage + pageConcurrency - 1, maxPage)
+                let chunkEnd = min(nextPage + pageConcurrency - 1, knownMaxPage)
                 let pageNumbers = Array(nextPage...chunkEnd)
-                phase = .loadingPage(chunkEnd, of: maxPage)
+                phase = .loadingPage(chunkEnd, of: knownMaxPage)
                 // Todo o pedaço em paralelo — pedidos concorrentes não terminam na ordem que
                 // foram disparados, então reordena por número de página antes de gravar, pra
                 // `appendPage(startingAt:)` continuar em sequência e a lista exibida continuar na
                 // ordem certa da loja.
-                let results = try await withThrowingTaskGroup(of: (Int, [InactiveProduct]).self) { group in
+                let results = try await withThrowingTaskGroup(of: (Int, InactiveProductsPage).self) { group in
                     for pageNumber in pageNumbers {
                         group.addTask { [client] in
                             let page = try await client.inactiveProductsPage(page: pageNumber)
-                            return (pageNumber, page.products)
+                            return (pageNumber, page)
                         }
                     }
-                    var collectedResults: [(Int, [InactiveProduct])] = []
+                    var collectedResults: [(Int, InactiveProductsPage)] = []
                     for try await result in group {
                         collectedResults.append(result)
                     }
                     return collectedResults.sorted { $0.0 < $1.0 }
                 }
-                for (_, products) in results {
-                    itemsPersistence.appendPage(products, startingAt: collected.count)
-                    collected += products
+                for (_, page) in results {
+                    appendNewProducts(page.products, to: &collected, seenIDs: &seenIDs)
+                    knownMaxPage = max(knownMaxPage, page.maxPage)
                 }
                 items = collected
                 nextPage = chunkEnd + 1
-                if nextPage <= maxPage, delayBetweenPages > .zero {
+                if nextPage <= knownMaxPage, delayBetweenPages > .zero {
                     try await Task.sleep(for: delayBetweenPages)
                 }
             }
@@ -115,5 +130,19 @@ final class InactiveProductsLoader {
         } catch {
             phase = .failed(error.localizedDescription)
         }
+    }
+
+    /// Grava e acumula só os produtos ainda não vistos neste carregamento — um produto inativado
+    /// no meio dele (megafone/fila rodando junto) empurra a lista da loja uma posição pra frente, e
+    /// o último de uma página reaparece como primeiro da seguinte; repetido, quebraria o
+    /// `ForEach` da tela (dois itens com o mesmo `id`).
+    private func appendNewProducts(
+        _ products: [InactiveProduct],
+        to collected: inout [InactiveProduct],
+        seenIDs: inout Set<Int>
+    ) {
+        let newProducts = products.filter { seenIDs.insert($0.id).inserted }
+        itemsPersistence.appendPage(newProducts, startingAt: collected.count)
+        collected += newProducts
     }
 }

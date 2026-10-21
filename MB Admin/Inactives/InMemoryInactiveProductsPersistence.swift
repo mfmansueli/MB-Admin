@@ -29,6 +29,10 @@ final class InMemoryInactiveProductsPersistence: InactiveProductsPersisting {
         return Array(matched.prefix(limit))
     }
 
+    func removeItem(productID: Int) {
+        items.removeAll { $0.id == productID }
+    }
+
     func clearItems() {
         items = []
     }

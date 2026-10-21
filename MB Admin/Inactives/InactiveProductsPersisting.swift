@@ -18,5 +18,8 @@ protocol InactiveProductsPersisting {
     /// `SwiftDataInactiveProductsPersistence`), em vez de decodificar tudo e filtrar em memória.
     /// `query` vazia devolve os primeiros `limit` itens sem filtrar.
     func search(matching query: String, limit: Int) -> [InactiveProduct]
+    /// Tira um produto só, sem mexer na ordem (`sortIndex`) dos outros — sem efeito se ele não
+    /// estiver guardado (ex.: um produto publicado, não inativo, apagado pela fila).
+    func removeItem(productID: Int)
     func clearItems()
 }

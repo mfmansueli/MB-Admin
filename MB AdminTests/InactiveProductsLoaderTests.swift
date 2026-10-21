@@ -68,6 +68,59 @@ struct InactiveProductsLoaderTests {
         #expect(await client.maxConcurrentPageRequests >= 2)
     }
 
+    @Test("paginação compacta (layout mobile): cada página só revela a seguinte, e mesmo assim busca até a última")
+    func paginacaoCompactaBuscaAteAUltima() async {
+        // Layout mobile do site (iPhone/iPad): a paginação mostra só "anterior/próxima" — a página
+        // 1 revela só a 2, a 2 só a 3, e a última só a anterior.
+        let client = StubEnjoeiClient(inactivePagesByNumber: [
+            1: InactiveProductsPage(products: [makeProduct(id: 1), makeProduct(id: 2)], maxPage: 2),
+            2: InactiveProductsPage(products: [makeProduct(id: 3), makeProduct(id: 4)], maxPage: 3),
+            3: InactiveProductsPage(products: [makeProduct(id: 5), makeProduct(id: 6)], maxPage: 4),
+            4: InactiveProductsPage(products: [makeProduct(id: 7)], maxPage: 3)
+        ])
+        let loader = makeLoader(client: client)
+
+        loader.load()
+        await waitUntil { loader.phase == .finished }
+
+        #expect(loader.items.map(\.id) == [1, 2, 3, 4, 5, 6, 7])
+        #expect(await client.requestedInactivePages == [1, 2, 3, 4])
+    }
+
+    @Test("produto repetido entre duas páginas aparece uma vez só, na lista e na persistência")
+    func produtoRepetidoEntrePaginasNaoDuplica() async {
+        let persistence = InMemoryInactiveProductsPersistence()
+        // Um produto inativado no meio do carregamento empurra a lista uma posição: o último da
+        // página 1 volta como primeiro da página 2.
+        let client = StubEnjoeiClient(inactivePagesByNumber: [
+            1: InactiveProductsPage(products: [makeProduct(id: 1), makeProduct(id: 2)], maxPage: 2),
+            2: InactiveProductsPage(products: [makeProduct(id: 2), makeProduct(id: 3)], maxPage: 2)
+        ])
+        let loader = makeLoader(client: client, itemsPersistence: persistence)
+
+        loader.load()
+        await waitUntil { loader.phase == .finished }
+
+        #expect(loader.items.map(\.id) == [1, 2, 3])
+        #expect(persistence.loadItems().map(\.id) == [1, 2, 3])
+    }
+
+    @Test("removeFromCache tira o produto da persistência, mas deixa ele em items até o próximo carregamento")
+    func removeFromCacheTiraSoDaPersistencia() async {
+        let persistence = InMemoryInactiveProductsPersistence()
+        let client = StubEnjoeiClient(inactivePagesByNumber: [
+            1: InactiveProductsPage(products: [makeProduct(id: 1), makeProduct(id: 2)], maxPage: 1)
+        ])
+        let loader = makeLoader(client: client, itemsPersistence: persistence)
+        loader.load()
+        await waitUntil { loader.phase == .finished }
+
+        loader.removeFromCache(productID: 1)
+
+        #expect(loader.items.map(\.id) == [1, 2])
+        #expect(persistence.loadItems().map(\.id) == [2])
+    }
+
     @Test("loja sem inativos termina com lista vazia, sem erro")
     func lojaSemInativos() async {
         let client = StubEnjoeiClient(inactivePagesByNumber: [1: InactiveProductsPage(products: [], maxPage: 1)])

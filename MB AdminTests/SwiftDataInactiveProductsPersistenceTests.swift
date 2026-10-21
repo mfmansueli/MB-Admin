@@ -75,6 +75,26 @@ struct SwiftDataInactiveProductsPersistenceTests {
         #expect(persistence.loadItems().isEmpty)
     }
 
+    @Test("removeItem tira só aquele produto, mantendo a ordem dos outros")
+    func removeItemTiraSoAquele() {
+        let persistence = SwiftDataInactiveProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([makeProduct(id: 1), makeProduct(id: 2), makeProduct(id: 3)])
+
+        persistence.removeItem(productID: 2)
+
+        #expect(persistence.loadItems().map(\.id) == [1, 3])
+    }
+
+    @Test("removeItem de um produto que não está guardado não mexe em nada")
+    func removeItemInexistenteNaoMexe() {
+        let persistence = SwiftDataInactiveProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())
+        persistence.saveItems([makeProduct(id: 1)])
+
+        persistence.removeItem(productID: 99)
+
+        #expect(persistence.loadItems().map(\.id) == [1])
+    }
+
     @Test("appendPage acrescenta sem apagar o que já tinha, respeitando o offset")
     func appendPageAcrescentaRespeitandoOffset() {
         let persistence = SwiftDataInactiveProductsPersistence(accountID: EnjoeiAccountID(), container: makeContainer(), defaults: makeDefaults())

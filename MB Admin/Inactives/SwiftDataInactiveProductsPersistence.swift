@@ -70,6 +70,11 @@ final class SwiftDataInactiveProductsPersistence: InactiveProductsPersisting {
         return records.map(\.asInactiveProduct)
     }
 
+    func removeItem(productID: Int) {
+        try? context.delete(model: InactiveProductRecord.self, where: #Predicate { $0.productID == productID })
+        try? context.save()
+    }
+
     func clearItems() {
         deleteRecords()
         try? context.save()
