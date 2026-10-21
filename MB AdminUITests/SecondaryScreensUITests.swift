@@ -71,8 +71,10 @@ final class SecondaryScreensUITests: XCTestCase {
         stopButton.tap()
         XCTAssertTrue(app.buttons["megafonar"].waitForExistence(timeout: 15))
 
+        // A lista só monta as linhas perto da tela — rola até a do produto que falhou existir; o
+        // toque em si já rola o resto (ela pode estar embaixo da barra de baixo).
         let failureButton = app.buttons["falhou, ver detalhe do erro"].firstMatch
-        for _ in 0..<8 where !failureButton.isHittable {
+        for _ in 0..<8 where !failureButton.exists {
             app.swipeUp()
         }
         XCTAssertTrue(failureButton.waitForExistence(timeout: 5))
@@ -136,9 +138,16 @@ final class SecondaryScreensUITests: XCTestCase {
         start.tap()
 
         XCTAssertTrue(element(in: app.staticTexts, containing: "produtos em comum").waitForExistence(timeout: 20))
-        XCTAssertTrue(element(in: app.staticTexts, containing: "só em antonia").exists)
         XCTAssertTrue(element(in: app.buttons, containing: "ver diferenças do par").exists)
         attachScreenshot("comparar produtos", of: app)
+
+        // Os que faltam numa conta ficam embaixo dos 25 pares, e a lista só monta o que está à
+        // vista — o filtro traz a seção pro topo.
+        app.buttons["filtrar resultados"].tap()
+        element(in: app.buttons, containing: "não encontrados em loja B").tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "só em antonia").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app.buttons, containing: "postar em loja B").exists)
+        attachScreenshot("comparar só em antonia", of: app)
 
         // Selecionar só marca quem falta numa conta; "todos" da seção conta na barra de cima.
         app.buttons["selecionar"].tap()

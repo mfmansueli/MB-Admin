@@ -15,6 +15,18 @@ struct MegaphoneRunnerTests {
         return runner
     }
 
+    /// Pros testes que pausam ou cancelam "entre um produto e outro". Desde o lote em JS
+    /// (`megaphoneBatch`), o laço só confere pausa/cancelamento entre um pedaço e o próximo (ver
+    /// `MegaphoneRunner.megaphoneBatchChunkSize`) — com o pedaço padrão de 10, uma loja de 3 produtos
+    /// passa inteira antes de o teste conseguir agir. Com pedaços de 1, cada produto é um pedaço, e a
+    /// espera entre pedaços (`delay`) é a janela pro teste pausar/cancelar.
+    private func makeRunnerSteppingOneByOne(client: StubEnjoeiClient, delay: Duration) -> MegaphoneRunner {
+        let runner = MegaphoneRunner(client: client)
+        runner.delayBetweenProducts = delay
+        runner.megaphoneBatchChunkSize = 1
+        return runner
+    }
+
     // MARK: - fila de concorrência entre contas
 
     @Test("com a fila compartilhada cheia, a segunda conta fica esperando até a primeira liberar")
@@ -187,8 +199,7 @@ struct MegaphoneRunnerTests {
     @Test("cancelar devolve o produto em andamento para a fila")
     func cancelamento() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .seconds(30)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .seconds(30))
 
         runner.start(sellerID: 1)
         await waitUntil { runner.processedCount >= 1 }
@@ -252,8 +263,7 @@ struct MegaphoneRunnerTests {
     @Test("segundo plano pausa e a volta retoma do mesmo ponto")
     func pausaEmSegundoPlano() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .milliseconds(20)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .milliseconds(20))
 
         runner.start(sellerID: 1, rounds: .once)
         await waitUntil { runner.processedCount >= 1 }
@@ -275,8 +285,7 @@ struct MegaphoneRunnerTests {
     @Test("pausa do usuário sobrevive a sair e voltar do app")
     func pausaDoUsuarioNaoEhDesfeitaPeloAppVoltando() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .milliseconds(20)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .milliseconds(20))
 
         runner.start(sellerID: 1, rounds: .once)
         await waitUntil { runner.processedCount >= 1 }
@@ -299,8 +308,7 @@ struct MegaphoneRunnerTests {
     @Test("o botão continuar também tira da pausa de segundo plano")
     func continuarDesfazPausaDeSegundoPlano() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2], endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .milliseconds(20)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .milliseconds(20))
 
         runner.start(sellerID: 1, rounds: .once)
         await waitUntil { runner.processedCount >= 1 }
@@ -315,8 +323,7 @@ struct MegaphoneRunnerTests {
     @Test("parar enquanto está pausado não trava o app")
     func cancelarPausado() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .milliseconds(20)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .milliseconds(20))
 
         runner.start(sellerID: 1, rounds: .once)
         await waitUntil { runner.processedCount >= 1 }
@@ -365,8 +372,7 @@ struct MegaphoneRunnerTests {
     @Test("cancelar também avisa o resumo, com o que já tinha sido feito")
     func cancelarAvisaOResumo() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .seconds(30)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .seconds(30))
         var summaries: [MegaphoneRoundSummary] = []
         runner.onRoundFinished = { summaries.append($0) }
 
@@ -626,8 +632,7 @@ struct MegaphoneRunnerTests {
     @Test("load não faz nada enquanto já está rodando")
     func loadIgnoradoEnquantoRoda() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .seconds(30)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .seconds(30))
         runner.start(sellerID: 1)
         await waitUntil { runner.processedCount >= 1 }
 
@@ -1096,8 +1101,7 @@ struct MegaphoneRunnerTests {
     @Test("progressSnapshot muda de fase na hora, mesmo em pleno lote sem ter batido o tamanho dele")
     func progressSnapshotAcompanhaTransicaoDeFaseNaHora() async {
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3], endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .seconds(30)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .seconds(30))
 
         runner.start(sellerID: 1)
         await waitUntil { runner.processedCount >= 1 }
@@ -1113,8 +1117,7 @@ struct MegaphoneRunnerTests {
     func progressSnapshotNaoAcompanhaCadaItem() async {
         let ids = Array(1...5)
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: ids, endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .seconds(30)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .seconds(30))
         runner.progressSnapshotBatchSize = 3
 
         runner.start(sellerID: 1)
@@ -1135,8 +1138,7 @@ struct MegaphoneRunnerTests {
     func progressSnapshotPublicaAoBaterOLote() async {
         let ids = Array(1...5)
         let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: ids, endCursor: nil)])
-        let runner = MegaphoneRunner(client: client)
-        runner.delayBetweenProducts = .milliseconds(20)
+        let runner = makeRunnerSteppingOneByOne(client: client, delay: .milliseconds(20))
         runner.progressSnapshotBatchSize = 2
 
         runner.start(sellerID: 1)
