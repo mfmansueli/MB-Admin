@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// Detalhe de uma conta: o nome (e quantos megafones/erros) na barra de navegação, o seletor de
-/// abas logo abaixo e o conteúdo da aba. A aba "publicados" (megafonar, busca, filtro, seleção
-/// múltipla — e a toolbar/barra de baixo que vêm com eles) vive em `AccountPublishedTabView` — o
-/// estado dela que também importa aqui (esconder o seletor de abas durante a seleção, ou sobreviver
-/// a trocar de aba e voltar) fica com esta view, passado pra lá por `@Binding`.
+/// abas logo abaixo (com a fileira de filtros da aba, quando ela tem) e o conteúdo da aba. A aba
+/// "publicados" (megafonar, busca, seleção múltipla — e a toolbar/barra de baixo que vêm com eles)
+/// vive em `AccountPublishedTabView` — o estado dela que também importa aqui (esconder o seletor de
+/// abas durante a seleção, o filtro das cápsulas, ou sobreviver a trocar de aba e voltar) fica com
+/// esta view, passado pra lá por `@Binding`.
 ///
 /// Identidade estável entre contas de propósito — `AccountsListView` NÃO dá `.id(account.id)` a
 /// esta view. Um `.id()` aqui forçaria o SwiftUI a destruir e reconstruir a árvore inteira (incluindo
@@ -53,17 +54,13 @@ struct AccountDetailView: View {
         self.account = account
     }
 
-    private func filterKey(_ accountID: EnjoeiAccountID) -> String {
-        "accountDetail.filter.\(accountID)"
-    }
-
     /// Recarrega `filter` do que essa conta tinha guardado (ou o padrão, se nunca guardou nada) e
     /// zera o resto — mesmo efeito que reconstruir a view do zero tinha antes, só que sem destruir
     /// `AccountPublishedTabView`/a lista de produtos por baixo. `selectedTab` fica de fora de
     /// propósito — ver o comentário no topo do arquivo sobre por que ele não é mais lembrado por
     /// conta.
     private func loadState(for accountID: EnjoeiAccountID) {
-        filter = UserDefaults.standard.string(forKey: filterKey(accountID))
+        filter = UserDefaults.standard.string(forKey: AccountProductFilter.storageKey(for: accountID))
             .flatMap(AccountProductFilter.init) ?? .all
         searchText = ""
         isFollowing = true
@@ -92,10 +89,13 @@ struct AccountDetailView: View {
         // Barra presa no topo (em vez de só empilhada em cima da lista): a lista rola por baixo
         // do seletor, com o efeito de borda do sistema, como embaixo da barra de navegação.
         .floatingTopBar {
-            // Selecionando, a tela inteira é sobre a seleção — trocar de aba no meio largaria ela
-            // pela metade.
+            // Selecionando, a tela inteira é sobre a seleção — trocar de aba (ou de filtro) no meio
+            // largaria ela pela metade.
             if !isSelecting {
-                tabPicker
+                VStack(alignment: .leading, spacing: 0) {
+                    tabPicker
+                    filterChips
+                }
             }
         }
         .animation(.default, value: isSelecting)
@@ -118,7 +118,7 @@ struct AccountDetailView: View {
             loadState(for: newAccountID)
         }
         .onChange(of: filter) { _, newValue in
-            UserDefaults.standard.set(newValue.rawValue, forKey: filterKey(account.id))
+            UserDefaults.standard.set(newValue.rawValue, forKey: AccountProductFilter.storageKey(for: account.id))
         }
         // Busca e seleção são de uma aba só — a lista da outra aba não tem os mesmos produtos.
         .onChange(of: selectedTab) { _, _ in
@@ -134,7 +134,7 @@ struct AccountDetailView: View {
         // iPhone: título centralizado, como no resto do sistema.
         .toolbarTitleDisplayMode(isCompact ? .inline : .inlineLarge)
         .toolbar {
-            // A aba "publicados" monta o próprio recarregar (junto do filtro e da seleção, ver
+            // A aba "publicados" monta o próprio recarregar (junto da seleção, ver
             // `AccountPublishedTabView`), e no iPhone a de preço esperto também (dentro do filtro,
             // ver `SmartPriceProductsListView`); no resto ele fica aqui. Selecionando, sai da barra
             // — recarregar trocaria a lista por baixo da seleção.
@@ -201,6 +201,32 @@ struct AccountDetailView: View {
         .padding(.bottom, 4)
         .frame(maxWidth: isCompact ? .infinity : 620, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Os filtros da aba à vista, em cápsulas — no conteúdo da barra presa no topo, não na toolbar
+    /// (ver `FilterChipBar`). Só "publicados" tem filtro aqui por enquanto.
+    @ViewBuilder
+    private var filterChips: some View {
+        if selectedTab == .published {
+            FilterChipBar(options: publishedFilterOptions, selection: $filter, horizontalPadding: isCompact ? 16 : 24)
+                .padding(.bottom, 4)
+        }
+    }
+
+    /// As contagens vêm de `progressSnapshot` (o resumo em lote), não de `runner.items` — mesmo
+    /// cuidado de `tabLabel`: ler `items` aqui prenderia esta view a reavaliar a cada produto
+    /// megafonado. Contam a loja inteira, sem a busca, como o rótulo da aba.
+    private var publishedFilterOptions: [FilterChipOption<AccountProductFilter>] {
+        let snapshot = runner.progressSnapshot
+        return [
+            FilterChipOption(value: .all, label: AccountProductFilter.all.label, count: snapshot.itemsCount),
+            FilterChipOption(
+                value: .discountOnly,
+                label: AccountProductFilter.discountOnly.label,
+                count: snapshot.discountDecisionCount,
+                dotColor: .statusDecision
+            )
+        ]
     }
 
     /// "351 megafones · 2 com erro" — no iPad/Mac, com o @apelido na frente. No iPhone, sem erro

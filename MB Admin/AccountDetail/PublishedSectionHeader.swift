@@ -3,8 +3,9 @@ import SwiftUI
 /// Cabeçalho recolhível de uma seção da aba "publicados" ("pedem desconto · 3", "todos os anúncios ·
 /// 1.493") — o título inteiro é o alvo de toque, não só a seta. Selecionando, ganha um círculo à
 /// esquerda (nenhum/alguns/todos da seção marcados) e uma cápsula "selecionar os N" à direita, os
-/// dois só daquela seção.
-struct PublishedSectionHeader: View {
+/// dois só daquela seção. Fora da seleção, quem usa pode pôr uma ação da seção à direita
+/// (`trailingAction` — o "aplicar nos N" de "pedem desconto").
+struct PublishedSectionHeader<TrailingAction: View>: View {
     let title: String
     let count: Int
     /// Cor do título — "pedem desconto" usa a cor de "pede decisão"; o resto fica no texto padrão.
@@ -15,6 +16,7 @@ struct PublishedSectionHeader: View {
     var selectionState: SectionSelectionState?
     var onSelectAll: () -> Void = {}
     let onToggle: () -> Void
+    @ViewBuilder var trailingAction: () -> TrailingAction
 
     var body: some View {
         HStack(spacing: 8) {
@@ -61,6 +63,9 @@ struct PublishedSectionHeader: View {
                 // Botão irmão do cabeçalho, não dentro dele — um botão dentro do outro faria o
                 // toque na cápsula também recolher a seção.
                 selectAllCapsule(selectionState)
+            } else {
+                // Também irmão do cabeçalho, pelo mesmo motivo.
+                trailingAction()
             }
         }
         .font(.subheadline.weight(.semibold))
@@ -113,9 +118,41 @@ struct PublishedSectionHeader: View {
     }
 }
 
+extension PublishedSectionHeader where TrailingAction == EmptyView {
+    init(
+        title: String,
+        count: Int,
+        titleColor: Color? = nil,
+        isCollapsed: Bool,
+        horizontalPadding: CGFloat = 16,
+        selectionState: SectionSelectionState? = nil,
+        onSelectAll: @escaping () -> Void = {},
+        onToggle: @escaping () -> Void
+    ) {
+        self.init(
+            title: title,
+            count: count,
+            titleColor: titleColor,
+            isCollapsed: isCollapsed,
+            horizontalPadding: horizontalPadding,
+            selectionState: selectionState,
+            onSelectAll: onSelectAll,
+            onToggle: onToggle,
+            trailingAction: { EmptyView() }
+        )
+    }
+}
+
 #Preview {
     VStack(spacing: 0) {
-        PublishedSectionHeader(title: "pedem desconto", count: 3, titleColor: .statusDecision, isCollapsed: false) {}
+        PublishedSectionHeader(title: "pedem desconto", count: 3, titleColor: .statusDecision, isCollapsed: false) {
+        } trailingAction: {
+            Button("aplicar nos 3", systemImage: "tag.fill") {}
+                .buttonStyle(.borderedProminent)
+                .buttonBorderShape(.capsule)
+                .controlSize(.small)
+                .tint(.statusDecision)
+        }
         PublishedSectionHeader(title: "todos os anúncios", count: 1493, isCollapsed: true) {}
         PublishedSectionHeader(
             title: "pedem desconto",

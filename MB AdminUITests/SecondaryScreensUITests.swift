@@ -35,7 +35,9 @@ final class SecondaryScreensUITests: XCTestCase {
         let row = app.staticTexts[name].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
-        XCTAssertTrue(element(in: app.buttons, containing: "todos os anúncios").waitForExistence(timeout: 15))
+        // A foto de um produto diz que a lista chegou — a cápsula do filtro "todos os anúncios"
+        // aparece antes disso.
+        XCTAssertTrue(element(in: app.buttons, containing: "foto de").waitForExistence(timeout: 15))
     }
 
     /// No iPad/Mac a aba mostra a quantidade depois de carregar ("inativos (8)").

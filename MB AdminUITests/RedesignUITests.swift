@@ -38,13 +38,22 @@ final class RedesignUITests: XCTestCase {
     }
 
     /// Abre a conta e espera os produtos carregarem (o botão "megafonar" só fica útil com a lista
-    /// pronta — a seção "todos os anúncios" é o sinal).
+    /// pronta). A foto de um produto é o sinal — "todos os anúncios" não serve mais: a cápsula do
+    /// filtro com esse nome aparece antes de a lista chegar.
     @MainActor
     private func openAccount(_ name: String, in app: XCUIApplication) {
         let row = app.staticTexts[name].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
-        XCTAssertTrue(element(in: app.buttons, containing: "todos os anúncios").waitForExistence(timeout: 15))
+        XCTAssertTrue(element(in: app.buttons, containing: "foto de").waitForExistence(timeout: 15))
+    }
+
+    /// Cabeçalho de uma seção de publicados ("pedem desconto · 3"). O "·" separa ele das cápsulas
+    /// que também levam o nome da seção (o filtro "só os que pedem desconto", o "selecionar os 3 de
+    /// pedem desconto" da seleção).
+    @MainActor
+    private func sectionHeader(_ title: String, in app: XCUIApplication) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS '·'", title)).firstMatch
     }
 
     @MainActor
@@ -64,16 +73,71 @@ final class RedesignUITests: XCTestCase {
         let app = launchApp()
         openAccount("antonia", in: app)
 
-        let discountHeader = element(in: app.buttons, containing: "pedem desconto")
+        let discountHeader = sectionHeader("pedem desconto", in: app)
         XCTAssertTrue(discountHeader.waitForExistence(timeout: 5))
-        XCTAssertTrue(element(in: app.buttons, containing: "aplicar desconto").exists)
+        let rowDiscountButton = element(in: app.buttons, containing: "aplicar desconto de")
+        XCTAssertTrue(rowDiscountButton.exists)
         XCTAssertTrue(app.buttons["megafonar"].exists)
         attachScreenshot("publicados (parado)", of: app)
 
-        // Recolher a seção esconde o botão de desconto das linhas dela.
+        // Recolher a seção esconde o botão de desconto das linhas dela — o "aplicar nos 3" do
+        // cabeçalho continua.
         discountHeader.tap()
-        XCTAssertTrue(element(in: app.buttons, containing: "aplicar desconto").waitForNonExistence(timeout: 5))
+        XCTAssertTrue(rowDiscountButton.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["aplicar o desconto sugerido nos 3"].exists)
         attachScreenshot("publicados (desconto recolhido)", of: app)
+    }
+
+    @MainActor
+    func testAplicarNosTresConfirmaComOsPrecosEAplica() {
+        let app = launchApp()
+        openAccount("antonia", in: app)
+
+        let applyAll = app.buttons["aplicar o desconto sugerido nos 3"]
+        XCTAssertTrue(applyAll.waitForExistence(timeout: 5))
+        applyAll.tap()
+        let alert = app.alerts["aplicar desconto e megafonar 3 produtos?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        // A mensagem lista o preço de agora e o sugerido de cada um.
+        XCTAssertTrue(element(in: alert.staticTexts, containing: "→").exists)
+        attachScreenshot("confirmar aplicar nos 3", of: app)
+
+        alert.buttons["cancelar"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(applyAll.exists)
+
+        // Selecionando, o botão dá lugar à cápsula de selecionar a seção.
+        app.buttons["selecionar"].tap()
+        XCTAssertTrue(app.buttons["selecionar os 3 de pedem desconto"].waitForExistence(timeout: 5))
+        XCTAssertFalse(applyAll.exists)
+        app.buttons["concluir seleção"].tap()
+
+        // Confirmando, os três são megafonados com o desconto e o botão some — nenhum espera mais.
+        XCTAssertTrue(applyAll.waitForExistence(timeout: 5))
+        applyAll.tap()
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        alert.buttons["aplicar desconto"].tap()
+        XCTAssertTrue(applyAll.waitForNonExistence(timeout: 15))
+    }
+
+    @MainActor
+    func testFiltroAVistaMostraSoOsQuePedemDesconto() {
+        let app = launchApp()
+        openAccount("antonia", in: app)
+
+        // Sem o menu de filtro na barra de cima, o recarregar fica à parte — no iPhone também.
+        XCTAssertTrue(app.buttons["recarregar produtos"].exists)
+
+        let othersHeader = sectionHeader("todos os anúncios", in: app)
+        XCTAssertTrue(othersHeader.exists)
+        element(in: app.buttons, containing: "só os que pedem desconto").tap()
+        XCTAssertTrue(othersHeader.waitForNonExistence(timeout: 5))
+        XCTAssertTrue(sectionHeader("pedem desconto", in: app).exists)
+        attachScreenshot("filtro só os que pedem desconto", of: app)
+
+        // Com a seção "todos os anúncios" fora da tela, o único botão com esse nome é a cápsula.
+        element(in: app.buttons, containing: "todos os anúncios").tap()
+        XCTAssertTrue(othersHeader.waitForExistence(timeout: 5))
     }
 
     @MainActor

@@ -23,10 +23,12 @@ enum DemoMode {
     }
 
     static func makeAccountsStore() -> AccountsStore {
-        // Cada abertura começa do zero (lista de produtos, inativos, preço esperto), pra o que um
-        // teste de UI vê não depender do que a abertura anterior deixou em disco.
+        // Cada abertura começa do zero (lista de produtos, inativos, preço esperto, filtro
+        // escolhido), pra o que um teste de UI vê não depender do que a abertura anterior deixou
+        // em disco.
         for profile in DemoCatalog.profiles {
             PerAccountModelContainer.destroy(for: profile.accountID)
+            UserDefaults.standard.removeObject(forKey: AccountProductFilter.storageKey(for: profile.accountID))
         }
         return AccountsStore(
             dependenciesFactory: { accountID in
