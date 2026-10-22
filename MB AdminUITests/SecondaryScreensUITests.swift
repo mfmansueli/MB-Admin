@@ -169,7 +169,7 @@ final class SecondaryScreensUITests: XCTestCase {
         XCTAssertTrue(element(in: app.staticTexts, containing: "inativo desde").waitForExistence(timeout: 15))
 
         app.buttons["selecionar"].tap()
-        app.buttons["todos"].tap()
+        app.buttons["selecionar tudo"].tap()
         XCTAssertTrue(app.navigationBars["8 selecionados"].waitForExistence(timeout: 5))
         attachScreenshot("inativos selecionando", of: app)
 
@@ -192,7 +192,7 @@ final class SecondaryScreensUITests: XCTestCase {
         XCTAssertTrue(element(in: app.staticTexts, containing: "varia de").waitForExistence(timeout: 15))
 
         app.buttons["selecionar"].tap()
-        app.buttons["todos"].tap()
+        app.buttons["selecionar tudo"].tap()
         XCTAssertTrue(app.navigationBars["5 selecionados"].waitForExistence(timeout: 5))
         XCTAssertTrue(element(in: app.buttons, containing: "ativar preço esperto em 5").exists)
         attachScreenshot("preço esperto selecionando", of: app)

@@ -165,7 +165,7 @@ struct SmartPriceProductsListView: View {
         }
         filteredItems = items
         // Só os itens não bloqueados entram na seleção — um item `blocked` não aceita a ação de
-        // ativar, então nem "todos" nem o toque na linha deixam marcá-lo (mesma checagem em
+        // ativar, então nem "selecionar tudo" nem o toque na linha deixam marcá-lo (mesma checagem em
         // `SmartPriceProductRowView`).
         selectableItems = items.filter { !$0.product.blocked }
     }
@@ -215,7 +215,7 @@ struct SmartPriceProductsListView: View {
     private var toolbarContent: some ToolbarContent {
         if isSelecting {
             ToolbarItem(placement: .topBarLeading) {
-                Button(isAllSelectableSelected ? "nenhum" : "todos") {
+                Button(isAllSelectableSelected ? "desmarcar tudo" : "selecionar tudo") {
                     selectedIDs = PublishedProductSections.togglingAll(selectableItems.map(\.id), in: selectedIDs)
                 }
                 .fixedSize()

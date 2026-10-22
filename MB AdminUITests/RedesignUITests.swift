@@ -144,12 +144,12 @@ final class RedesignUITests: XCTestCase {
         // Selecionando, o percentual de "pedem desconto" continua à mostra (só informativo).
         XCTAssertTrue(element(in: app.staticTexts, containing: "desconto sugerido de").exists)
 
-        app.buttons["selecionar todos em pedem desconto"].tap()
+        app.buttons["selecionar os 3 de pedem desconto"].tap()
         XCTAssertTrue(navigationTitle("3 selecionados", in: app).waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["desmarcar todos em pedem desconto"].exists)
+        XCTAssertTrue(app.buttons["desmarcar os 3 de pedem desconto"].exists)
         attachScreenshot("seleção por seção", of: app)
 
-        app.buttons["desmarcar todos em pedem desconto"].tap()
+        app.buttons["desmarcar os 3 de pedem desconto"].tap()
         XCTAssertTrue(navigationTitle("selecionar produtos", in: app).waitForExistence(timeout: 5))
     }
 

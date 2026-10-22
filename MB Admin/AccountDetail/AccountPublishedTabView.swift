@@ -118,7 +118,7 @@ struct AccountPublishedTabView: View {
             }
             // Sem o campo de busca na tela durante a rodada (ver o `.background` acima), uma busca
             // que continuasse valendo deixaria a lista filtrada sem nada dizendo por quê. A
-            // seleção, ao contrário, mantém a busca de propósito: buscar e depois marcar "todos"
+            // seleção, ao contrário, mantém a busca de propósito: buscar e depois "selecionar tudo"
             // é o jeito de agir só no que bateu (o termo aparece embaixo do título, ver
             // `AccountDetailView.subtitle`).
             .onChange(of: isRoundOpen) { _, isOpen in
@@ -172,7 +172,9 @@ struct AccountPublishedTabView: View {
     private var toolbarContent: some ToolbarContent {
         if isSelecting {
             ToolbarItem(placement: .topBarLeading) {
-                Button(isAllVisibleSelected ? "nenhum" : "todos") { toggleSelectAllVisible() }
+                // "tudo", não "todos": a cápsula de cada seção também seleciona "os N" dela — esta
+                // vale pra lista inteira (só as seções abertas, ver `visibleIDs`).
+                Button(isAllVisibleSelected ? "desmarcar tudo" : "selecionar tudo") { toggleSelectAllVisible() }
                     .fixedSize()
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -466,7 +468,7 @@ struct AccountPublishedTabView: View {
                 horizontalPadding: isCompact ? 16 : 24,
                 // Vale mesmo com a seção recolhida — o cabeçalho diz de quantos se trata, e nada
                 // entra na fila sem o alerta de confirmação com a contagem.
-                isFullySelected: isSelecting ? ids.allSatisfy(selectedIDs.contains) : nil,
+                selectionState: isSelecting ? SectionSelectionState(sectionIDs: ids, selectedIDs: selectedIDs) : nil,
                 onSelectAll: { selectedIDs = PublishedProductSections.togglingAll(ids, in: selectedIDs) }
             ) {
                 withAnimation(.snappy) {
