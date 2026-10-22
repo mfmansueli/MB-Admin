@@ -29,6 +29,7 @@ enum DemoMode {
         for profile in DemoCatalog.profiles {
             PerAccountModelContainer.destroy(for: profile.accountID)
             UserDefaults.standard.removeObject(forKey: AccountProductFilter.storageKey(for: profile.accountID))
+            UserDefaults.standard.removeObject(forKey: SmartPriceStatusFilter.storageKey(for: profile.accountID))
         }
         return AccountsStore(
             dependenciesFactory: { accountID in

@@ -207,6 +207,7 @@ final class AccountsStore {
         UserDefaults.standard.removeObject(forKey: "megaphone.speed.\(accountID)")
         UserDefaults.standard.removeObject(forKey: "accountDetail.selectedTab.\(accountID)")
         UserDefaults.standard.removeObject(forKey: AccountProductFilter.storageKey(for: accountID))
+        UserDefaults.standard.removeObject(forKey: SmartPriceStatusFilter.storageKey(for: accountID))
     }
 
     /// Conta já existente (sessão vencida): reusa o client/webView dela — nunca cria uma segunda

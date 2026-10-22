@@ -191,6 +191,8 @@ final class SecondaryScreensUITests: XCTestCase {
         openAccount("antonia", in: app)
 
         tab("sem preço esperto", in: app).tap()
+        // O filtro padrão é "preço atual"; a cápsula "todos" mostra a lista inteira.
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'todos'")).firstMatch.tap()
         XCTAssertTrue(element(in: app.staticTexts, containing: "varia de").waitForExistence(timeout: 15))
 
         app.buttons["selecionar"].tap()
