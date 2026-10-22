@@ -114,11 +114,16 @@ final class RedesignUITests: XCTestCase {
 
         app.buttons["selecionar"].tap()
         XCTAssertTrue(app.buttons["concluir seleção"].waitForExistence(timeout: 5))
+        // Sem nada marcado, as ações aparecem (em cinza legível) mas não respondem.
+        XCTAssertTrue(app.buttons["apagar"].exists)
+        XCTAssertFalse(app.buttons["apagar"].isEnabled)
+        attachScreenshot("seleção vazia", of: app)
 
         let titles = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'prata 925'"))
         titles.element(boundBy: 0).tap()
         titles.element(boundBy: 1).tap()
         XCTAssertTrue(navigationTitle("2 selecionados", in: app).waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["apagar"].isEnabled)
         attachScreenshot("seleção", of: app)
 
         app.buttons["apagar"].tap()
