@@ -1,9 +1,10 @@
 import SwiftUI
 
-/// Aba "publicados" de `AccountDetailView`: megafonar, busca, filtro, seleção múltipla e a lista de
-/// produtos publicados, dividida em "pedem desconto" e "todos os anúncios". O estado que também
-/// importa pro resto de `AccountDetailView` (esconder o seletor de abas durante a seleção, ou
-/// sobreviver a trocar pra aba "inativos" e voltar) continua lá, passado aqui por `@Binding`.
+/// Aba "publicados" de `AccountDetailView`: megafonar, busca, seleção múltipla e a lista de produtos
+/// publicados, dividida em "pedem desconto" e "todos os anúncios". O estado que também importa pro
+/// resto de `AccountDetailView` (esconder o seletor de abas durante a seleção, o filtro escolhido na
+/// fileira de cápsulas de lá, ou sobreviver a trocar pra aba "inativos" e voltar) continua lá,
+/// passado aqui por `@Binding`.
 ///
 /// É esta view (não `AccountDetailView`) que monta a toolbar, a busca e a barra de baixo da tela:
 /// tudo isso só faz sentido nesta aba, e sai junto com ela ao trocar pra "inativos"/"sem preço
@@ -35,6 +36,8 @@ struct AccountPublishedTabView: View {
 
     /// Ação em massa esperando confirmação no alerta — `nil` sem alerta na tela.
     @State private var pendingBulkAction: PublishedBulkAction?
+    /// O "aplicar nos N" do cabeçalho de "pedem desconto" esperando confirmação — `nil` sem alerta.
+    @State private var pendingDiscountBatch: PendingDiscountBatch?
     /// Cache das seções (ver `recomputeSections`) — sem isso, cada leitura (lista, "todos",
     /// contagem) refiltrava/reordenava a lista inteira de publicados do zero, várias vezes por
     /// digitação.
@@ -108,6 +111,22 @@ struct AccountPublishedTabView: View {
             } message: { action in
                 Text(action.confirmationMessage)
             }
+            .alert(
+                pendingDiscountBatch?.confirmationTitle ?? "",
+                isPresented: Binding(
+                    get: { pendingDiscountBatch != nil },
+                    set: { if !$0 { pendingDiscountBatch = nil } }
+                ),
+                presenting: pendingDiscountBatch
+            ) { batch in
+                Button("cancelar", role: .cancel) {}
+                Button(PublishedBulkAction.applyDiscount.confirmationButtonLabel) {
+                    applyDiscount(to: batch.items)
+                    pendingDiscountBatch = nil
+                }
+            } message: { batch in
+                Text(batch.confirmationMessage)
+            }
             // Vale mudar o intervalo no meio da rodada: o laço lê o valor a cada produto.
             .onChange(of: storedSpeed) { _, milliseconds in
                 runner.delayBetweenProducts = MegaphoneSpeed(milliseconds: milliseconds).duration
@@ -118,7 +137,7 @@ struct AccountPublishedTabView: View {
             }
             // Sem o campo de busca na tela durante a rodada (ver o `.background` acima), uma busca
             // que continuasse valendo deixaria a lista filtrada sem nada dizendo por quê. A
-            // seleção, ao contrário, mantém a busca de propósito: buscar e depois marcar "todos"
+            // seleção, ao contrário, mantém a busca de propósito: buscar e depois "selecionar tudo"
             // é o jeito de agir só no que bateu (o termo aparece embaixo do título, ver
             // `AccountDetailView.subtitle`).
             .onChange(of: isRoundOpen) { _, isOpen in
@@ -141,6 +160,7 @@ struct AccountPublishedTabView: View {
                 searchDebounceTask?.cancel()
                 searchDebounceTask = nil
                 pendingBulkAction = nil
+                pendingDiscountBatch = nil
                 recomputeSections()
             }
             // `runner.progressSnapshot`, não `runner.items` direto: `items` muda uma vez por
@@ -172,7 +192,9 @@ struct AccountPublishedTabView: View {
     private var toolbarContent: some ToolbarContent {
         if isSelecting {
             ToolbarItem(placement: .topBarLeading) {
-                Button(isAllVisibleSelected ? "nenhum" : "todos") { toggleSelectAllVisible() }
+                // "tudo", não "todos": a cápsula de cada seção também seleciona "os N" dela — esta
+                // vale pra lista inteira (só as seções abertas, ver `visibleIDs`).
+                Button(isAllVisibleSelected ? "desmarcar tudo" : "selecionar tudo") { toggleSelectAllVisible() }
                     .fixedSize()
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -187,22 +209,20 @@ struct AccountPublishedTabView: View {
                 .accessibilityLabel("concluir seleção")
             }
         } else {
+            // No iPhone também: o filtro saiu da barra de cima (virou a fileira de cápsulas embaixo
+            // das abas, em `AccountDetailView`), e com ele o menu onde o recarregar do iPhone
+            // morava — agora cabe um botão à parte.
             ToolbarItem(placement: .topBarTrailing) {
-                filterMenu
-            }
-            if !isCompact {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        // Mexe nos publicados também — não dá pra trocar a lista com uma rodada em
-                        // aberto em cima dela. Checado aqui também porque no Mac o botão nunca fica
-                        // desabilitado (ver `ToolbarItemDisabled`).
-                        guard !runner.isRunning else { return }
-                        account.reloadAllProducts()
-                    } label: {
-                        Label("recarregar produtos", systemImage: "arrow.clockwise")
-                    }
-                    .toolbarItemDisabled(runner.isRunning)
+                Button {
+                    // Mexe nos publicados também — não dá pra trocar a lista com uma rodada em
+                    // aberto em cima dela. Checado aqui também porque no Mac o botão nunca fica
+                    // desabilitado (ver `ToolbarItemDisabled`).
+                    guard !runner.isRunning else { return }
+                    account.reloadAllProducts()
+                } label: {
+                    Label("recarregar produtos", systemImage: "arrow.clockwise")
                 }
+                .toolbarItemDisabled(runner.isRunning)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("selecionar") {
@@ -259,42 +279,6 @@ struct AccountPublishedTabView: View {
             // Sem isso, o VoiceOver lê o nome do símbolo junto do texto.
             .accessibilityLabel("megafonar")
         }
-    }
-
-    private var filterMenu: some View {
-        Menu {
-            Picker("filtro", selection: $filter) {
-                Text("todos os anúncios").tag(AccountProductFilter.all)
-                Text("só os que pedem desconto").tag(AccountProductFilter.discountOnly)
-            }
-            .pickerStyle(.inline)
-            // No iPhone não cabe um botão de recarregar à parte na barra de cima — fica aqui.
-            if isCompact {
-                Section {
-                    Button {
-                        account.reloadAllProducts()
-                    } label: {
-                        Label("recarregar produtos", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(runner.isRunning)
-                }
-            }
-        } label: {
-            Label("filtrar anúncios", systemImage: filterSymbol)
-        }
-        // Sempre habilitado de propósito: com a lista vazia o filtro só não muda nada, e um item
-        // que se desabilita sozinho ao carregar derruba o app no Mac (ver `ToolbarItemDisabled`).
-    }
-
-    /// Preenchido com um filtro ligado — menos no Mac, onde trocar a imagem de um item da barra de
-    /// cima passa pelo mesmo caminho do AppKit que derrubava o app ao trocar o estado de habilitado
-    /// (ver `ToolbarItemDisabled`); lá o ícone fica sempre o mesmo.
-    private var filterSymbol: String {
-        #if targetEnvironment(macCatalyst)
-        "line.3.horizontal.decrease"
-        #else
-        filter == .all ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill"
-        #endif
     }
 
     // MARK: - Barra de baixo
@@ -367,9 +351,7 @@ struct AccountPublishedTabView: View {
         let items = selectedItems
         switch action {
         case .applyDiscount:
-            for item in items where item.needsDiscountDecision {
-                runner.applyDiscount(for: item.id)
-            }
+            applyDiscount(to: items)
         case .repost:
             for item in items {
                 accountsStore.postQueue.enqueue(product: item.product, source: account, destination: account)
@@ -385,6 +367,14 @@ struct AccountPublishedTabView: View {
         }
         pendingBulkAction = nil
         endSelection()
+    }
+
+    /// Mesma rota da ação em massa "desconto" da seleção e do "aplicar nos N" do cabeçalho de
+    /// "pedem desconto": só quem pede desconto tem preço sugerido pra aplicar.
+    private func applyDiscount(to items: [MegaphoneItem]) {
+        for item in items where item.needsDiscountDecision {
+            runner.applyDiscount(for: item.id)
+        }
     }
 
     // MARK: - Lista
@@ -466,7 +456,7 @@ struct AccountPublishedTabView: View {
                 horizontalPadding: isCompact ? 16 : 24,
                 // Vale mesmo com a seção recolhida — o cabeçalho diz de quantos se trata, e nada
                 // entra na fila sem o alerta de confirmação com a contagem.
-                isFullySelected: isSelecting ? ids.allSatisfy(selectedIDs.contains) : nil,
+                selectionState: isSelecting ? SectionSelectionState(sectionIDs: ids, selectedIDs: selectedIDs) : nil,
                 onSelectAll: { selectedIDs = PublishedProductSections.togglingAll(ids, in: selectedIDs) }
             ) {
                 withAnimation(.snappy) {
@@ -476,10 +466,43 @@ struct AccountPublishedTabView: View {
                         collapsedSections.insert(kind)
                     }
                 }
+            } trailingAction: {
+                if kind == .discount {
+                    applyDiscountButton(for: items)
+                }
             }
             if !isCollapsed {
                 rows(items)
             }
+        }
+    }
+
+    /// "aplicar nos N" — o uso mais comum da aba (aplicar o desconto sugerido em todos que pedem) a
+    /// um toque, sem passar pela seleção; nada muda antes do alerta com a lista de preços. Some
+    /// quando nenhum da seção ainda espera a decisão (ver `PendingDiscountBatch`). Só aparece fora
+    /// da seleção — lá o cabeçalho troca isso pela cápsula de selecionar.
+    @ViewBuilder
+    private func applyDiscountButton(for items: [MegaphoneItem]) -> some View {
+        let batch = PendingDiscountBatch(section: items) { id in
+            runner.deleteStatuses[id] == .succeeded || runner.inactivateStatuses[id] == .succeeded
+        }
+        if !batch.isEmpty {
+            Button {
+                pendingDiscountBatch = batch
+            } label: {
+                Label(batch.buttonLabel, systemImage: "tag.fill")
+                    .foregroundStyle(.onTint)
+            }
+            .buttonStyle(.borderedProminent)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+            .tint(.statusDecision)
+            // Mesmo limite de tamanho da cápsula de selecionar a seção (ver
+            // `PublishedSectionHeader.selectAllCapsule`) — no iPhone, título e botão não cabiam lado a
+            // lado no `.xxxLarge` do app.
+            .dynamicTypeSize(...DynamicTypeSize.xLarge)
+            .fixedSize()
+            .accessibilityLabel(batch.accessibilityLabel)
         }
     }
 

@@ -6,7 +6,7 @@ import SwiftUI
 /// e destino são sempre a própria conta.
 ///
 /// Mesmo padrão da aba "publicados": "selecionar" na barra de cima; selecionando, o título conta a
-/// seleção (`AccountDetailView`, dona desse estado — por isso as `@Binding`), "todos"/"nenhum" e o
+/// seleção (`AccountDetailView`, dona desse estado — por isso as `@Binding`), "selecionar tudo" e o
 /// "concluir" ficam em cima, e as ações numa barra de vidro embaixo, cada uma confirmada por alerta.
 /// A busca fica na barra do sistema (no iPhone, a lupa embaixo) e some durante a seleção.
 struct InactiveProductsListView: View {
@@ -175,7 +175,7 @@ struct InactiveProductsListView: View {
     private var toolbarContent: some ToolbarContent {
         if isSelecting {
             ToolbarItem(placement: .topBarLeading) {
-                Button(isAllFilteredSelected ? "nenhum" : "todos") {
+                Button(isAllFilteredSelected ? "desmarcar tudo" : "selecionar tudo") {
                     selectedIDs = PublishedProductSections.togglingAll(filteredItems.map(\.id), in: selectedIDs)
                 }
                 .fixedSize()
@@ -206,7 +206,7 @@ struct InactiveProductsListView: View {
 
     // MARK: - Seleção
 
-    /// Considera só os itens que a busca deixa passar — "todos" com um texto digitado pega só o que
+    /// Considera só os itens que a busca deixa passar — "selecionar tudo" com um texto digitado pega só o que
     /// está visível na lista, não a loja inteira por trás do filtro.
     private var isAllFilteredSelected: Bool {
         !filteredItems.isEmpty && filteredItems.allSatisfy { selectedIDs.contains($0.id) }

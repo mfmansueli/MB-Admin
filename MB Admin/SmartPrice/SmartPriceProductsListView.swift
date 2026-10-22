@@ -6,17 +6,27 @@ import SwiftUI
 /// e link pra compartilhar vêm de cruzar o id com `account.runner.items` (os produtos publicados,
 /// já carregados quando a tela de detalhe abre; ver `SmartPriceListItem`).
 ///
-/// Mesmo padrão das abas "publicados"/"inativos": filtro e "selecionar" na barra de cima, busca na
-/// barra do sistema, e selecionando, o título conta a seleção (`AccountDetailView`, dona desse
-/// estado) e a ação — uma só, ativar — fica num botão embaixo.
+/// Mesmo padrão das abas "publicados"/"inativos": "selecionar" na barra de cima, busca na barra do
+/// sistema, e selecionando, o título conta a seleção (`AccountDetailView`, dona desse estado) e a
+/// ação — uma só, ativar — fica num botão embaixo. O filtro de status fica à vista, na fileira de
+/// cápsulas embaixo das abas (`AccountDetailView` também é dona dele). Fora da seleção, embaixo,
+/// "ativar em N" ativa de uma vez tudo o que o filtro e a busca deixam na lista
+/// (`SmartPriceBulkActivation`).
 struct SmartPriceProductsListView: View {
     let account: AccountSession
     @Binding var searchText: String
     @Binding var isSelecting: Bool
     @Binding var selectedIDs: Set<Int>
+    @Binding var statusFilter: SmartPriceStatusFilter
+    /// Resumo de "ativar em N" pro subtítulo da navegação no iPhone (lá não tem a barra de vidro
+    /// com as duas linhas) — vazio no iPad/Mac. Quem mostra é `AccountDetailView`, dona do
+    /// subtítulo.
+    @Binding var compactActivationSummary: String
 
     @State private var isConfirmingBulkActivate = false
-    @State private var statusFilter: SmartPriceStatusFilter = .all
+    /// "ativar em N" esperando confirmação — guardado no toque, pra ativar exatamente os ids que o
+    /// alerta contou mesmo que a lista mude por baixo (páginas chegando) até o "ativar".
+    @State private var pendingActivation: SmartPriceBulkActivation?
     /// Cache de `filteredItems`/`selectableItems` (ver `recomputeFilteredItems`) — antes disso, uma
     /// cadeia inteira (`titlesByID` → `displayItems` → `statusFilteredItems` → `filteredItems` →
     /// `selectableItems`) era refeita do zero a cada leitura, várias vezes por render, numa loja
@@ -44,6 +54,10 @@ struct SmartPriceProductsListView: View {
             .floatingBottomBar {
                 if isSelecting {
                     activateBar
+                } else if !isCompact, !loader.items.isEmpty {
+                    SmartPriceActivateAllBar(activation: bulkActivation) {
+                        confirmActivateAll(bulkActivation)
+                    }
                 }
             }
             // Selecionando, sair pela seta de voltar largaria a seleção pela metade.
@@ -61,13 +75,29 @@ struct SmartPriceProductsListView: View {
                         + "acompanhe o andamento pelo ícone de cada linha."
                 )
             }
+            .alert(
+                pendingActivation?.confirmationTitle ?? "",
+                isPresented: Binding(
+                    get: { pendingActivation != nil },
+                    set: { if !$0 { pendingActivation = nil } }
+                ),
+                presenting: pendingActivation
+            ) { activation in
+                Button("cancelar", role: .cancel) {}
+                Button("ativar") {
+                    loader.activate(productIDs: activation.eligibleIDs)
+                    pendingActivation = nil
+                }
+            } message: { activation in
+                Text(activation.confirmationMessage)
+            }
             // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
             // conta na barra lateral mantendo a mesma aba selecionada — sem `.id(account.id)` (ver
-            // `AccountDetailView`), é o único gatilho que sobra pra carregar a conta nova e zerar o
-            // filtro. Busca e seleção quem zera é `AccountDetailView.loadState`, dona delas.
+            // `AccountDetailView`), é o único gatilho que sobra pra carregar a conta nova. Busca,
+            // seleção e filtro quem recarrega é `AccountDetailView.loadState`, dona deles.
             .onChange(of: account.id, initial: true) { _, _ in
                 isConfirmingBulkActivate = false
-                statusFilter = .all
+                pendingActivation = nil
                 searchDebounceTask?.cancel()
                 searchDebounceTask = nil
                 if loader.items.isEmpty, loader.phase == .idle {
@@ -108,6 +138,9 @@ struct SmartPriceProductsListView: View {
                     guard !Task.isCancelled else { return }
                     recomputeFilteredItems()
                 }
+            }
+            .onChange(of: compactSummaryText, initial: true) { _, newValue in
+                compactActivationSummary = newValue
             }
     }
 
@@ -165,7 +198,7 @@ struct SmartPriceProductsListView: View {
         }
         filteredItems = items
         // Só os itens não bloqueados entram na seleção — um item `blocked` não aceita a ação de
-        // ativar, então nem "todos" nem o toque na linha deixam marcá-lo (mesma checagem em
+        // ativar, então nem "selecionar tudo" nem o toque na linha deixam marcá-lo (mesma checagem em
         // `SmartPriceProductRowView`).
         selectableItems = items.filter { !$0.product.blocked }
     }
@@ -215,7 +248,7 @@ struct SmartPriceProductsListView: View {
     private var toolbarContent: some ToolbarContent {
         if isSelecting {
             ToolbarItem(placement: .topBarLeading) {
-                Button(isAllSelectableSelected ? "nenhum" : "todos") {
+                Button(isAllSelectableSelected ? "desmarcar tudo" : "selecionar tudo") {
                     selectedIDs = PublishedProductSections.togglingAll(selectableItems.map(\.id), in: selectedIDs)
                 }
                 .fixedSize()
@@ -233,9 +266,6 @@ struct SmartPriceProductsListView: View {
             }
         } else {
             ToolbarItem(placement: .topBarTrailing) {
-                filterMenu
-            }
-            ToolbarItem(placement: .topBarTrailing) {
                 Button("selecionar") {
                     // No Mac o botão nunca fica desabilitado (ver `ToolbarItemDisabled`).
                     guard !selectableItems.isEmpty else { return }
@@ -244,41 +274,47 @@ struct SmartPriceProductsListView: View {
                 .fixedSize()
                 .toolbarItemDisabled(selectableItems.isEmpty)
             }
+            // No iPad/Mac, "ativar em N" é a `SmartPriceActivateAllBar`, flutuando (ver o
+            // `floatingBottomBar` acima).
+            if isCompact, !loader.items.isEmpty {
+                activateAllBottomBar
+            }
         }
     }
 
-    /// Mesmo padrão do filtro de "publicados": no iPhone, o "recarregar" mora aqui dentro (não cabe
-    /// um botão à parte na barra de cima); o ícone não muda com o filtro ligado no Mac (ver
-    /// `AccountPublishedTabView.filterSymbol`).
-    private var filterMenu: some View {
-        Menu {
-            Picker("filtro", selection: $statusFilter) {
-                ForEach(SmartPriceStatusFilter.allCases, id: \.self) { filter in
-                    Text(filter.label).tag(filter)
-                }
+    /// A lupa da busca e "ativar em N" — só no iPhone, mesmo padrão do `idleBottomBar` de
+    /// "publicados" (texto limitado ao `.xLarge` pelo mesmo motivo: no tamanho cheio o sistema joga
+    /// o botão pra dentro do menu "mais" da barra).
+    @ToolbarContentBuilder
+    private var activateAllBottomBar: some ToolbarContent {
+        if #available(iOS 26.0, macCatalyst 26.0, *) {
+            DefaultToolbarItem(kind: .search, placement: .bottomBar)
+            ToolbarSpacer(.flexible, placement: .bottomBar)
+        } else {
+            ToolbarItem(placement: .bottomBar) {
+                Spacer()
             }
-            .pickerStyle(.inline)
-            if isCompact {
-                Section {
-                    Button {
-                        account.reloadAllProducts()
-                    } label: {
-                        Label("recarregar produtos", systemImage: "arrow.clockwise")
-                    }
-                    .disabled(account.runner.isRunning)
-                }
-            }
-        } label: {
-            Label("filtrar produtos", systemImage: filterSymbol)
         }
-    }
-
-    private var filterSymbol: String {
-        #if targetEnvironment(macCatalyst)
-        "line.3.horizontal.decrease"
-        #else
-        statusFilter == .all ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill"
-        #endif
+        ToolbarItem(placement: .bottomBar) {
+            let activation = bulkActivation
+            Button {
+                confirmActivateAll(activation)
+            } label: {
+                // `HStack` em vez de `Label`: na barra de baixo o sistema reduz um `Label` só ao
+                // ícone (ver `AccountPublishedTabView.idleBottomBar`).
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                    Text(activation.buttonLabel)
+                }
+                .fontWeight(.semibold)
+                .foregroundStyle(.onTint)
+                .dynamicTypeSize(...DynamicTypeSize.xLarge)
+            }
+            .prominentGlassButtonStyle()
+            .fixedSize()
+            .toolbarItemDisabled(activation.count == 0)
+            .accessibilityLabel(activation.buttonLabel)
+        }
     }
 
     private var activateBar: some View {
@@ -296,6 +332,27 @@ struct SmartPriceProductsListView: View {
         .frame(maxWidth: 520)
         .padding(.horizontal, 16)
         .padding(.bottom, 8)
+    }
+
+    // MARK: - Ativar em N
+
+    private var bulkActivation: SmartPriceBulkActivation {
+        SmartPriceBulkActivation(
+            items: filteredItems,
+            filter: statusFilter,
+            activationStatuses: loader.activationStatuses,
+            isSearching: !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        )
+    }
+
+    private var compactSummaryText: String {
+        isCompact && !loader.items.isEmpty ? bulkActivation.compactSummary : ""
+    }
+
+    private func confirmActivateAll(_ activation: SmartPriceBulkActivation) {
+        // No Mac o botão da toolbar nunca fica desabilitado (ver `ToolbarItemDisabled`).
+        guard activation.count > 0 else { return }
+        pendingActivation = activation
     }
 
     // MARK: - Seleção

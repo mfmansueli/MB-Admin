@@ -25,13 +25,12 @@ struct SelectionActionBar<Action: SelectionBarAction>: View {
                     .contentShape(.rect)
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(color(for: action.role))
+                .foregroundStyle(style(for: action.role))
                 // Sem isso, o VoiceOver lê o nome do símbolo junto ("lixeira, apagar").
                 .accessibilityLabel(action.label)
             }
         }
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.4)
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
         .glassSurface(in: .capsule)
@@ -40,19 +39,30 @@ struct SelectionActionBar<Action: SelectionBarAction>: View {
         .padding(.bottom, 8)
     }
 
-    private func color(for role: SelectionBarActionRole) -> Color {
-        switch role {
-        case .standard: .primary
-        case .decision: .statusDecision
-        case .destructive: .statusFailure
+    /// Sem nada marcado (é assim que a seleção começa), cinza secundário em vez de baixar a
+    /// opacidade da barra — a 40% em cima do vidro, com a lista aparecendo por trás, os rótulos
+    /// ficavam quase ilegíveis.
+    private func style(for role: SelectionBarActionRole) -> AnyShapeStyle {
+        guard isEnabled else { return AnyShapeStyle(.secondary) }
+        return switch role {
+        case .standard: AnyShapeStyle(.primary)
+        case .decision: AnyShapeStyle(.statusDecision)
+        case .destructive: AnyShapeStyle(.statusFailure)
         }
     }
 }
 
+/// As mesmas ações habilitadas e desabilitadas, em cima de texto — a barra de verdade flutua sobre a
+/// lista, e é aí que dá pra ver se o estado desabilitado continua legível.
 #Preview {
-    VStack {
-        Spacer()
-        SelectionActionBar(actions: PublishedBulkAction.allCases, isEnabled: true) { _ in }
-        SelectionActionBar(actions: InactiveBulkAction.allCases, isEnabled: false) { _ in }
+    ZStack(alignment: .bottom) {
+        List(0..<20) { index in
+            Text("anel aro 17 entrelaçado cravejado zircônia \(index)")
+        }
+        VStack(spacing: 0) {
+            SelectionActionBar(actions: PublishedBulkAction.allCases, isEnabled: true) { _ in }
+            SelectionActionBar(actions: PublishedBulkAction.allCases, isEnabled: false) { _ in }
+            SelectionActionBar(actions: InactiveBulkAction.allCases, isEnabled: false) { _ in }
+        }
     }
 }

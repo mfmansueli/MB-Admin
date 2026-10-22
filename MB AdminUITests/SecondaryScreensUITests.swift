@@ -35,7 +35,9 @@ final class SecondaryScreensUITests: XCTestCase {
         let row = app.staticTexts[name].firstMatch
         XCTAssertTrue(row.waitForExistence(timeout: 10))
         row.tap()
-        XCTAssertTrue(element(in: app.buttons, containing: "todos os anúncios").waitForExistence(timeout: 15))
+        // A foto de um produto diz que a lista chegou — a cápsula do filtro "todos os anúncios"
+        // aparece antes disso.
+        XCTAssertTrue(element(in: app.buttons, containing: "foto de").waitForExistence(timeout: 15))
     }
 
     /// No iPad/Mac a aba mostra a quantidade depois de carregar ("inativos (8)").
@@ -169,7 +171,7 @@ final class SecondaryScreensUITests: XCTestCase {
         XCTAssertTrue(element(in: app.staticTexts, containing: "inativo desde").waitForExistence(timeout: 15))
 
         app.buttons["selecionar"].tap()
-        app.buttons["todos"].tap()
+        app.buttons["selecionar tudo"].tap()
         XCTAssertTrue(app.navigationBars["8 selecionados"].waitForExistence(timeout: 5))
         attachScreenshot("inativos selecionando", of: app)
 
@@ -191,13 +193,56 @@ final class SecondaryScreensUITests: XCTestCase {
         tab("sem preço esperto", in: app).tap()
         XCTAssertTrue(element(in: app.staticTexts, containing: "varia de").waitForExistence(timeout: 15))
 
+        // Filtro padrão "preço atual": 7 produtos, 1 bloqueado (não entra na seleção).
         app.buttons["selecionar"].tap()
-        app.buttons["todos"].tap()
-        XCTAssertTrue(app.navigationBars["5 selecionados"].waitForExistence(timeout: 5))
-        XCTAssertTrue(element(in: app.buttons, containing: "ativar preço esperto em 5").exists)
+        app.buttons["selecionar tudo"].tap()
+        XCTAssertTrue(app.navigationBars["6 selecionados"].waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app.buttons, containing: "ativar preço esperto em 6").exists)
         attachScreenshot("preço esperto selecionando", of: app)
 
         app.buttons["concluir seleção"].tap()
         XCTAssertTrue(app.buttons["selecionar"].waitForExistence(timeout: 5))
+    }
+
+    @MainActor
+    func testPrecoEspertoAtivaEmTodosDoFiltro() {
+        let app = launchApp()
+        openAccount("antonia", in: app)
+
+        tab("sem preço esperto", in: app).tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "varia de").waitForExistence(timeout: 15))
+
+        // Sem selecionar nada: "ativar em N" vale pro que o filtro deixa na lista, menos o bloqueado.
+        let activateCurrent = app.buttons["ativar em 6"]
+        XCTAssertTrue(activateCurrent.waitForExistence(timeout: 5))
+        attachScreenshot("preço esperto filtros e ativar", of: app)
+        activateCurrent.tap()
+        let alert = app.alerts["ativar preço esperto em 6 produtos com preço atual?"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: alert.staticTexts, containing: "1 produto bloqueado fica de fora").exists)
+        attachScreenshot("preço esperto confirmar ativar", of: app)
+        alert.buttons["cancelar"].tap()
+        XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
+
+        // Trocar de filtro troca o que entra.
+        element(in: app.buttons, containing: "preço alto, venda lenta").tap()
+        let activateHigh = app.buttons["ativar em 3"]
+        XCTAssertTrue(activateHigh.waitForExistence(timeout: 5))
+        activateHigh.tap()
+        let highAlert = app.alerts["ativar preço esperto em 3 produtos com preço alto, venda lenta?"]
+        XCTAssertTrue(highAlert.waitForExistence(timeout: 5))
+        highAlert.buttons["ativar"].tap()
+
+        // Um de cada vez; no fim não sobra nada pra ativar nesse filtro.
+        // Resumo da barra (iPad/Mac, as duas linhas juntas pro VoiceOver) ou subtítulo (iPhone).
+        XCTAssertTrue(element(in: app.descendants(matching: .any), containing: "ativando… faltam").waitForExistence(timeout: 5))
+        attachScreenshot("preço esperto ativando", of: app)
+        let nothingLeft = app.buttons["ativar"]
+        XCTAssertTrue(nothingLeft.waitForExistence(timeout: 20))
+        XCTAssertFalse(nothingLeft.isEnabled)
+
+        // Volta pro padrão — o filtro fica guardado por conta.
+        element(in: app.buttons, containing: "preço atual").tap()
+        XCTAssertTrue(activateCurrent.waitForExistence(timeout: 5))
     }
 }

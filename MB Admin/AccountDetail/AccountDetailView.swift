@@ -1,10 +1,11 @@
 import SwiftUI
 
 /// Detalhe de uma conta: o nome (e quantos megafones/erros) na barra de navegação, o seletor de
-/// abas logo abaixo e o conteúdo da aba. A aba "publicados" (megafonar, busca, filtro, seleção
-/// múltipla — e a toolbar/barra de baixo que vêm com eles) vive em `AccountPublishedTabView` — o
-/// estado dela que também importa aqui (esconder o seletor de abas durante a seleção, ou sobreviver
-/// a trocar de aba e voltar) fica com esta view, passado pra lá por `@Binding`.
+/// abas logo abaixo (com a fileira de filtros da aba, quando ela tem) e o conteúdo da aba. A aba
+/// "publicados" (megafonar, busca, seleção múltipla — e a toolbar/barra de baixo que vêm com eles)
+/// vive em `AccountPublishedTabView` — o estado dela que também importa aqui (esconder o seletor de
+/// abas durante a seleção, o filtro das cápsulas, ou sobreviver a trocar de aba e voltar) fica com
+/// esta view, passado pra lá por `@Binding`.
 ///
 /// Identidade estável entre contas de propósito — `AccountsListView` NÃO dá `.id(account.id)` a
 /// esta view. Um `.id()` aqui forçaria o SwiftUI a destruir e reconstruir a árvore inteira (incluindo
@@ -33,6 +34,11 @@ struct AccountDetailView: View {
     /// que não são mais `@AppStorage`.
     @State private var selectedTab: DetailTab = .published
     @State private var filter: AccountProductFilter = .all
+    /// Filtro de status da aba "sem preço esperto" — mesmo esquema de `filter` (por conta, recarregado
+    /// em `loadState`), e não `@AppStorage`, pelo motivo do comentário no topo do arquivo.
+    @State private var smartPriceFilter = SmartPriceStatusFilter.defaultFilter
+    /// Resumo de "ativar em N" que a aba "sem preço esperto" manda pro subtítulo no iPhone.
+    @State private var smartPriceActivationSummary = ""
     @State private var searchText = ""
     /// Quando ativo, a lista rola sozinha até o produto que está sendo megafonado no momento.
     @State private var isFollowing = true
@@ -53,18 +59,16 @@ struct AccountDetailView: View {
         self.account = account
     }
 
-    private func filterKey(_ accountID: EnjoeiAccountID) -> String {
-        "accountDetail.filter.\(accountID)"
-    }
-
-    /// Recarrega `filter` do que essa conta tinha guardado (ou o padrão, se nunca guardou nada) e
+    /// Recarrega os filtros do que essa conta tinha guardado (ou o padrão, se nunca guardou nada) e
     /// zera o resto — mesmo efeito que reconstruir a view do zero tinha antes, só que sem destruir
     /// `AccountPublishedTabView`/a lista de produtos por baixo. `selectedTab` fica de fora de
     /// propósito — ver o comentário no topo do arquivo sobre por que ele não é mais lembrado por
     /// conta.
     private func loadState(for accountID: EnjoeiAccountID) {
-        filter = UserDefaults.standard.string(forKey: filterKey(accountID))
+        filter = UserDefaults.standard.string(forKey: AccountProductFilter.storageKey(for: accountID))
             .flatMap(AccountProductFilter.init) ?? .all
+        smartPriceFilter = UserDefaults.standard.string(forKey: SmartPriceStatusFilter.storageKey(for: accountID))
+            .flatMap(SmartPriceStatusFilter.init) ?? .defaultFilter
         searchText = ""
         isFollowing = true
         isSelecting = false
@@ -92,10 +96,13 @@ struct AccountDetailView: View {
         // Barra presa no topo (em vez de só empilhada em cima da lista): a lista rola por baixo
         // do seletor, com o efeito de borda do sistema, como embaixo da barra de navegação.
         .floatingTopBar {
-            // Selecionando, a tela inteira é sobre a seleção — trocar de aba no meio largaria ela
-            // pela metade.
+            // Selecionando, a tela inteira é sobre a seleção — trocar de aba (ou de filtro) no meio
+            // largaria ela pela metade.
             if !isSelecting {
-                tabPicker
+                VStack(alignment: .leading, spacing: 0) {
+                    tabPicker
+                    filterChips
+                }
             }
         }
         .animation(.default, value: isSelecting)
@@ -118,7 +125,10 @@ struct AccountDetailView: View {
             loadState(for: newAccountID)
         }
         .onChange(of: filter) { _, newValue in
-            UserDefaults.standard.set(newValue.rawValue, forKey: filterKey(account.id))
+            UserDefaults.standard.set(newValue.rawValue, forKey: AccountProductFilter.storageKey(for: account.id))
+        }
+        .onChange(of: smartPriceFilter) { _, newValue in
+            UserDefaults.standard.set(newValue.rawValue, forKey: SmartPriceStatusFilter.storageKey(for: account.id))
         }
         // Busca e seleção são de uma aba só — a lista da outra aba não tem os mesmos produtos.
         .onChange(of: selectedTab) { _, _ in
@@ -134,10 +144,10 @@ struct AccountDetailView: View {
         // iPhone: título centralizado, como no resto do sistema.
         .toolbarTitleDisplayMode(isCompact ? .inline : .inlineLarge)
         .toolbar {
-            // A aba "publicados" monta o próprio recarregar (junto do filtro e da seleção, ver
-            // `AccountPublishedTabView`), e no iPhone a de preço esperto também (dentro do filtro,
-            // ver `SmartPriceProductsListView`); no resto ele fica aqui. Selecionando, sai da barra
-            // — recarregar trocaria a lista por baixo da seleção.
+            // A aba "publicados" monta o próprio recarregar (junto da seleção, ver
+            // `AccountPublishedTabView`); nas outras ele fica aqui — no iPhone também, desde que os
+            // filtros saíram da barra de cima (o recarregar do iPhone morava dentro do menu de
+            // filtro). Selecionando, sai da barra — recarregar trocaria a lista por baixo da seleção.
             if showsReloadButton {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
@@ -172,12 +182,7 @@ struct AccountDetailView: View {
     }
 
     private var showsReloadButton: Bool {
-        guard !isSelecting else { return false }
-        switch selectedTab {
-        case .published: return false
-        case .inactive: return true
-        case .smartPrice: return !isCompact
-        }
+        !isSelecting && selectedTab != .published
     }
 
     private var selectionTitle: String {
@@ -203,6 +208,56 @@ struct AccountDetailView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Os filtros da aba à vista, em cápsulas — no conteúdo da barra presa no topo, não na toolbar
+    /// (ver `FilterChipBar`). "inativos" não tem filtro.
+    @ViewBuilder
+    private var filterChips: some View {
+        switch selectedTab {
+        case .published:
+            FilterChipBar(options: publishedFilterOptions, selection: $filter, horizontalPadding: isCompact ? 16 : 24)
+                .padding(.bottom, 4)
+        case .smartPrice:
+            FilterChipBar(options: smartPriceFilterOptions, selection: $smartPriceFilter, horizontalPadding: isCompact ? 16 : 24)
+                .padding(.bottom, 4)
+        case .inactive:
+            EmptyView()
+        }
+    }
+
+    /// As contagens vêm de `progressSnapshot` (o resumo em lote), não de `runner.items` — mesmo
+    /// cuidado de `tabLabel`: ler `items` aqui prenderia esta view a reavaliar a cada produto
+    /// megafonado. Contam a loja inteira, sem a busca, como o rótulo da aba.
+    private var publishedFilterOptions: [FilterChipOption<AccountProductFilter>] {
+        let snapshot = runner.progressSnapshot
+        return [
+            FilterChipOption(value: .all, label: AccountProductFilter.all.label, count: snapshot.itemsCount),
+            FilterChipOption(
+                value: .discountOnly,
+                label: AccountProductFilter.discountOnly.label,
+                count: snapshot.discountDecisionCount,
+                dotColor: .statusDecision
+            )
+        ]
+    }
+
+    /// Cada status com quantos produtos ainda estão sem preço esperto (sem a busca, como o rótulo da
+    /// aba) e a bolinha na cor que o Enjoei manda pra ele.
+    private var smartPriceFilterOptions: [FilterChipOption<SmartPriceStatusFilter>] {
+        let loader = account.smartPriceProductsLoader
+        let products = SmartPriceStatusFilter.stillWithoutSmartPrice(
+            loader.items,
+            activationStatuses: loader.activationStatuses
+        )
+        return SmartPriceStatusFilter.allCases.map { status in
+            FilterChipOption(
+                value: status,
+                label: status.label,
+                count: status.count(in: products),
+                dotColor: Color(hex: status.dotColorHex(in: products))
+            )
+        }
+    }
+
     /// "351 megafones · 2 com erro" — no iPad/Mac, com o @apelido na frente. No iPhone, sem erro
     /// nenhum fica só "351 megafones": embaixo do nome, ao lado dos botões, o texto inteiro não
     /// cabe no tamanho de letra do app. Selecionando, o título vira "N selecionados" e aqui fica
@@ -216,6 +271,11 @@ struct AccountDetailView: View {
         guard !isSelecting else {
             let search = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             return search.isEmpty ? "" : "buscando \"\(search)\""
+        }
+        // No iPhone, a aba "sem preço esperto" não tem a barra de vidro de "ativar em N" — o resumo
+        // ("6 produtos com preço atual · 1 bloqueado") fica aqui, acima da lista.
+        if isCompact, selectedTab == .smartPrice, !smartPriceActivationSummary.isEmpty {
+            return smartPriceActivationSummary
         }
         let snapshot = runner.progressSnapshot
         let megaphones = "\(snapshot.totalSucceeded.formatted()) megafones"
@@ -243,7 +303,9 @@ struct AccountDetailView: View {
             account: account,
             searchText: $searchText,
             isSelecting: $isSelecting,
-            selectedIDs: $selectedIDs
+            selectedIDs: $selectedIDs,
+            statusFilter: $smartPriceFilter,
+            compactActivationSummary: $smartPriceActivationSummary
         )
     }
 

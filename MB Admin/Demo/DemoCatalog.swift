@@ -115,18 +115,32 @@ nonisolated enum DemoCatalog {
         }
     }
 
+    /// Rótulos e cores que o Enjoei manda de verdade (`description.text`/`.color`) — os únicos que
+    /// `SmartPriceStatusFilter` reconhece. Mesma distribuição do mock: maioria "preço atual", três
+    /// "preço alto, venda lenta" e dois "preço baixo".
+    private static let smartPriceStatuses: [(text: String, color: String)] = {
+        let current = (text: "preço atual", color: "#1A7F37")
+        let high = (text: "preço alto, venda lenta", color: "#FF4D00")
+        let low = (text: "preço baixo", color: "#0040DD")
+        return [current, current, high, current, low, current, high, current, high, current, low, current]
+    }()
+
+    /// Posição (na lista de preço esperto) do único produto bloqueado — um "preço atual", pra
+    /// "ativar em N" ter um que fica de fora.
+    private static let blockedSmartPricePosition = 5
+
     static func smartPriceProducts(for profile: Profile) -> [SmartPriceProduct] {
-        (0..<5).map { position in
-            let price = Double([199, 89, 349, 129, 59][position])
+        smartPriceStatuses.enumerated().map { position, status in
+            let price = Double([199, 89, 349, 129, 59, 273][position % 6])
             return SmartPriceProduct(
                 id: productID(profile: profile, position: position + 20),
                 price: price,
                 minPrice: (price * 0.8).rounded(),
                 maxPrice: (price * 1.1).rounded(),
-                blocked: false,
+                blocked: position == blockedSmartPricePosition,
                 smartPriceEnabled: false,
-                statusText: position.isMultiple(of: 2) ? "preço bom" : "preço acima da média",
-                statusColor: position.isMultiple(of: 2) ? "#1A7F37" : "#C93400",
+                statusText: status.text,
+                statusColor: status.color,
                 photoPublicID: nil
             )
         }
