@@ -27,6 +27,7 @@ import SwiftUI
 struct AccountDetailView: View {
     let account: AccountSession
 
+    @Environment(AccountsStore.self) private var accountsStore
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
@@ -44,6 +45,7 @@ struct AccountDetailView: View {
     @State private var isFollowing = true
     @State private var isSelecting = false
     @State private var selectedIDs: Set<Int> = []
+    @State private var isShowingQueue = false
 
     private var runner: MegaphoneRunner { account.runner }
     private var keepAlive: MegaphoneKeepAlive { account.keepAlive }
@@ -162,6 +164,20 @@ struct AccountDetailView: View {
                     .toolbarItemDisabled(runner.isRunning)
                 }
             }
+            // No iPhone a lista de contas (com o botão da fila) fica pra trás na pilha — sem isto,
+            // conferir a fila exigia voltar pra lá. No iPad/Mac ela continua à vista na barra
+            // lateral, e um segundo botão igual aqui seria repetido. Selecionando, sai da barra
+            // como os outros botões.
+            if isCompact, !isSelecting {
+                ToolbarItem(placement: .topBarTrailing) {
+                    PostQueueButton(postQueue: accountsStore.postQueue) {
+                        isShowingQueue = true
+                    }
+                }
+            }
+        }
+        .macCatalystSizedSheet(isPresented: $isShowingQueue) {
+            PostQueueView(postQueue: accountsStore.postQueue, poster: accountsStore.poster)
         }
         // Entrar na conta (primeira vez OU troca na barra lateral, já que a identidade desta view
         // não muda mais — ver `onChange(of: account.id)`) já busca sozinho os produtos publicados

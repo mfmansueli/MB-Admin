@@ -46,20 +46,6 @@ final class SecondaryScreensUITests: XCTestCase {
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", name)).firstMatch
     }
 
-    /// No iPhone a lista de contas fica atrás da conta aberta; no iPad, sempre na barra lateral.
-    @MainActor
-    private func backToAccountsIfNeeded(in app: XCUIApplication) {
-        let queueButton = element(in: app.buttons, containing: "fila de ações")
-        guard !queueButton.isHittable else { return }
-        let back = app.buttons["BackButton"]
-        if back.exists {
-            back.tap()
-        } else {
-            app.navigationBars.buttons.firstMatch.tap()
-        }
-        XCTAssertTrue(queueButton.waitForExistence(timeout: 5))
-    }
-
     @MainActor
     func testDetalheDoErroMostraOQueFalhouETentarDeNovo() {
         let app = launchApp()
@@ -93,6 +79,37 @@ final class SecondaryScreensUITests: XCTestCase {
     }
 
     @MainActor
+    func testFilaDeAcoesNaBarraDaLojaNoIPhone() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("no iPad/Mac a fila fica na barra lateral, sempre à vista")
+        }
+        let app = launchApp()
+        openAccount("antonia", in: app)
+
+        // Na barra de navegação da própria loja, sem voltar pra lista de contas.
+        let queueButton = element(in: app.navigationBars.buttons, containing: "fila de ações")
+        XCTAssertTrue(queueButton.waitForExistence(timeout: 5))
+        XCTAssertTrue(queueButton.isHittable)
+        attachScreenshot("fila na barra da loja", of: app)
+
+        // Selecionando, sai da barra junto com os outros botões.
+        app.buttons["selecionar"].tap()
+        XCTAssertTrue(app.buttons["concluir seleção"].waitForExistence(timeout: 5))
+        XCTAssertFalse(queueButton.exists)
+        app.buttons["concluir seleção"].tap()
+        XCTAssertTrue(queueButton.waitForExistence(timeout: 5))
+
+        queueButton.tap()
+        XCTAssertTrue(app.navigationBars["fila de ações"].waitForExistence(timeout: 5))
+        attachScreenshot("fila aberta da loja", of: app)
+
+        app.buttons["fechar"].firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["fila de ações"].waitForNonExistence(timeout: 5))
+        // Continua na loja, não na lista de contas.
+        XCTAssertTrue(app.buttons["megafonar"].exists)
+    }
+
+    @MainActor
     func testFilaDeAcoesSeparaPorSituacao() {
         let app = launchApp()
         openAccount("antonia", in: app)
@@ -109,7 +126,7 @@ final class SecondaryScreensUITests: XCTestCase {
         alert.buttons["inativar"].tap()
         XCTAssertTrue(app.buttons["selecionar"].waitForExistence(timeout: 5))
 
-        backToAccountsIfNeeded(in: app)
+        // Direto da loja: no iPhone o botão da fila também fica na barra dela; no iPad, na lateral.
         element(in: app.buttons, containing: "fila de ações").tap()
 
         XCTAssertTrue(element(in: app.staticTexts, containing: "próxima ação em").waitForExistence(timeout: 15))

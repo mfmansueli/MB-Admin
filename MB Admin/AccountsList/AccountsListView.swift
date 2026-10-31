@@ -292,34 +292,10 @@ struct AccountsListView: View {
         .disabled(accountsStore.accounts.isEmpty)
     }
 
-    /// A fila roda em segundo plano mesmo com a tela de comparação fechada — esse botão é o único
-    /// jeito de conferir o andamento dela sem reabrir aquela tela. O selo conta o que ainda está
-    /// esperando a vez.
     private var queueButton: some View {
-        let pendingCount = accountsStore.postQueue.items.count
-        return Button {
+        PostQueueButton(postQueue: accountsStore.postQueue) {
             isShowingQueue = true
-        } label: {
-            PublishingQueueIcon(isAnimating: accountsStore.postQueue.isRunning)
-                // Tamanho fixo, igual ao de antes do redesign — sem isso, o bezel padrão de toolbar
-                // deixa o ícone (desenhado à mão, com um tamanho próprio) espremido/distorcido em
-                // versões mais antigas do Mac Catalyst.
-                .frame(width: 34, height: 34)
-                .overlay(alignment: .topTrailing) {
-                    if pendingCount > 0 {
-                        Text(pendingCount.formatted())
-                            .font(.caption2.weight(.bold))
-                            .monospacedDigit()
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 5)
-                            .frame(minWidth: 18, minHeight: 18)
-                            .background(Color.statusFailure, in: .capsule)
-                            .offset(x: 6, y: -2)
-                    }
-                }
         }
-        .buttonStyle(.plain)
-        .accessibilityLabel(pendingCount > 0 ? "fila de ações, \(pendingCount) itens" : "fila de ações")
     }
 
     /// No iPad, um `Label` nessa toolbar (dentro da coluna lateral do `NavigationSplitView`) vira
