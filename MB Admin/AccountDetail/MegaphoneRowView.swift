@@ -193,7 +193,7 @@ struct MegaphoneRowView: View, Equatable {
                 PostToOtherStoreCopy.confirmationMessage(
                     productCount: 1,
                     target: target,
-                    pace: PostQueueStatusText.pace(interval: accountsStore.postQueue.interval)
+                    pace: PostQueueStatusText.pace(interval: accountsStore.postQueue.interval(for: .post))
                 )
             )
         }

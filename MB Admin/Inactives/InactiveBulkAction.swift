@@ -33,6 +33,15 @@ nonisolated enum InactiveBulkAction: SelectionBarAction, CaseIterable, Sendable 
 
     var isDestructive: Bool { self == .delete }
 
+    /// O tipo de ação que cada produto vira na fila — pra confirmação dizer o ritmo do grupo dele.
+    var queueKind: PostQueueItem.Kind {
+        switch self {
+        case .repost: .post
+        case .activate: .activate
+        case .delete: .delete
+        }
+    }
+
     /// Botão de confirmar do alerta.
     var confirmationButtonLabel: String {
         switch self {

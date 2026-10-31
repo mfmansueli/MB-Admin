@@ -28,4 +28,11 @@ struct InactiveBulkActionTests {
     func apagarAvisaIrreversivel() {
         #expect(InactiveBulkAction.delete.confirmationMessage.hasPrefix("ação irreversível"))
     }
+
+    @Test("cada ação vira na fila o tipo certo — repostar é uma postagem na mesma loja")
+    func tipoNaFila() {
+        #expect(InactiveBulkAction.repost.queueKind == .post)
+        #expect(InactiveBulkAction.activate.queueKind == .activate)
+        #expect(InactiveBulkAction.delete.queueKind == .delete)
+    }
 }

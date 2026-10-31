@@ -202,7 +202,7 @@ struct PostQueueTests {
 
         // Ainda dentro do intervalo de 60s entre o primeiro item e o segundo.
         await waitUntil { poster.statuses[target(1, destination: destination)] != nil && poster.statuses[target(1, destination: destination)] != .megaphoning }
-        queue.setInterval(0)
+        queue.setInterval(0, for: .posting)
         // Tempo real (não só `Task.yield`) maior que o pedaço de 0.2s do laço de espera interno —
         // mesmo raciocínio de `pausarDuranteOIntervaloInterrompeNaHora`: sem isso, o teste checa
         // de novo rápido demais pro laço interno sequer ter tido a chance de reler `interval`.
@@ -627,22 +627,41 @@ struct PostQueueTests {
         #expect(itemsPersistence.loadItems().isEmpty)
     }
 
-    @Test("mudar o intervalo persiste a escolha")
+    @Test("sem nada escolhido, postar/repostar/apagar começam em 30s e ativar/inativar em 15s")
+    func intervalosPadrao() {
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: makeIntervalDefaults())
+
+        #expect(queue.interval(for: .posting) == 30)
+        #expect(queue.interval(for: .statusChange) == 15)
+        #expect(queue.interval(for: .post) == 30)
+        #expect(queue.interval(for: .delete) == 30)
+        #expect(queue.interval(for: .inactivate) == 15)
+        #expect(queue.interval(for: .activate) == 15)
+    }
+
+    @Test("mudar o intervalo de um grupo persiste a escolha só dele")
     func mudarIntervaloPersiste() {
         let defaults = makeIntervalDefaults()
         let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
 
-        queue.setInterval(30)
+        queue.setInterval(120, for: .posting)
 
-        #expect(queue.interval == 30)
-        #expect(defaults.double(forKey: "postQueue.interval") == 30)
+        #expect(queue.interval(for: .posting) == 120)
+        #expect(queue.interval(for: .statusChange) == 15)
+        #expect(defaults.double(forKey: "postQueue.interval") == 120)
+
+        queue.setInterval(30, for: .statusChange)
+
+        #expect(queue.interval(for: .statusChange) == 30)
+        #expect(defaults.double(forKey: "postQueue.interval.statusChange") == 30)
     }
 
-    @Test("fila nova recupera o intervalo persistido, sem cair no padrão do poster")
+    @Test("fila nova recupera os dois intervalos persistidos, sem cair no padrão")
     func filaNovaRecuperaIntervaloPersistido() {
         let defaults = makeIntervalDefaults()
         let firstQueue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
-        firstQueue.setInterval(30)
+        firstQueue.setInterval(120, for: .posting)
+        firstQueue.setInterval(60, for: .statusChange)
 
         // Simula reabrir o app: uma fila nova, mesmo `UserDefaults`, sem `interval` explícito.
         let secondQueue = PostQueue(
@@ -651,17 +670,85 @@ struct PostQueueTests {
             defaults: defaults
         )
 
-        #expect(secondQueue.interval == 30)
+        #expect(secondQueue.interval(for: .posting) == 120)
+        #expect(secondQueue.interval(for: .statusChange) == 60)
     }
 
-    @Test("um interval explícito no init vale por cima de qualquer coisa persistida")
+    @Test("o intervalo escolhido antes de existirem dois grupos continua valendo pra postar")
+    func intervaloAntigoValeProPostar() {
+        let defaults = makeIntervalDefaults()
+        defaults.set(TimeInterval(180), forKey: "postQueue.interval")
+
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
+
+        #expect(queue.interval(for: .posting) == 180)
+        #expect(queue.interval(for: .statusChange) == 15)
+    }
+
+    @Test("um interval explícito no init vale pros dois grupos, por cima de qualquer coisa persistida")
     func intervalExplicitoIgnoraOPersistido() {
         let defaults = makeIntervalDefaults()
         defaults.set(TimeInterval(30), forKey: "postQueue.interval")
+        defaults.set(TimeInterval(60), forKey: "postQueue.interval.statusChange")
 
         let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, interval: .zero, defaults: defaults)
 
-        #expect(queue.interval == .zero)
+        #expect(queue.interval(for: .posting) == .zero)
+        #expect(queue.interval(for: .statusChange) == .zero)
+    }
+
+    @Test("inativar espera o intervalo de ativar/inativar, não o de postar")
+    func inativarUsaIntervaloDoProprioGrupo() async {
+        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)])
+        let account = makeAccount(name: "conta", client: client)
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [account] }, defaults: makeIntervalDefaults())
+        // Postar bem mais lento que a duração do teste — se a espera entre as duas inativações
+        // usasse esse, a segunda não sairia a tempo.
+        queue.setInterval(300, for: .posting)
+        queue.setInterval(0, for: .statusChange)
+
+        queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 1), account: account)
+        queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 2), account: account)
+        await waitUntil { !queue.isRunning }
+
+        #expect(account.runner.inactivateStatuses[1] == .succeeded)
+        #expect(account.runner.inactivateStatuses[2] == .succeeded)
+    }
+
+    @Test("a espera antes de uma postagem usa o intervalo de postar, mesmo vindo depois de uma inativação")
+    func esperaUsaOGrupoDaProximaAcao() async {
+        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)])
+        let account = makeAccount(name: "conta", client: client)
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [account] }, defaults: makeIntervalDefaults())
+        queue.setInterval(120, for: .posting)
+        queue.setInterval(0, for: .statusChange)
+
+        queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 1), account: account)
+        queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: account, destination: account)
+        await waitUntil { queue.nextActionAt != nil }
+
+        // Esperando os 120s de postar, não os 0s de inativar.
+        let remaining = queue.nextActionAt?.timeIntervalSinceNow ?? 0
+        #expect(remaining > 60)
+        #expect(remaining <= 120)
+        #expect(queue.nextItem?.product.id == 2)
+        queue.removeAll()
+    }
+
+    @Test("nextItem é a primeira ainda esperando a vez")
+    func proximoItem() async {
+        let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)])
+        let account = makeAccount(name: "conta", client: client)
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [account] }, interval: 60)
+        #expect(queue.nextItem == nil)
+
+        queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 1), account: account)
+        queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 2), account: account)
+        await waitUntil { account.runner.inactivateStatuses[1] == .succeeded }
+
+        #expect(queue.nextItem?.product.id == 2)
+        queue.removeAll()
+        #expect(queue.nextItem == nil)
     }
 
     @Test("conta que não existe mais no accountsProvider vira falha, sem travar o resto da fila")

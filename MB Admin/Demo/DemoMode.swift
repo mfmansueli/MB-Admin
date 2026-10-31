@@ -24,12 +24,15 @@ enum DemoMode {
 
     static func makeAccountsStore() -> AccountsStore {
         // Cada abertura começa do zero (lista de produtos, inativos, preço esperto, filtro
-        // escolhido), pra o que um teste de UI vê não depender do que a abertura anterior deixou
-        // em disco.
+        // escolhido, intervalos da fila), pra o que um teste de UI vê não depender do que a
+        // abertura anterior deixou em disco.
         for profile in DemoCatalog.profiles {
             PerAccountModelContainer.destroy(for: profile.accountID)
             UserDefaults.standard.removeObject(forKey: AccountProductFilter.storageKey(for: profile.accountID))
             UserDefaults.standard.removeObject(forKey: SmartPriceStatusFilter.storageKey(for: profile.accountID))
+        }
+        for group in PostQueueIntervalGroup.allCases {
+            UserDefaults.standard.removeObject(forKey: group.defaultsKey)
         }
         return AccountsStore(
             dependenciesFactory: { accountID in

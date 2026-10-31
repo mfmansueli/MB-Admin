@@ -51,4 +51,29 @@ struct PostQueueSectionsTests {
         #expect(PostQueueSections.Kind.failed.header(count: 1) == "com erro · 1")
         #expect(PostQueueSections.Kind.done.header(count: 2) == "feitos · 2")
     }
+
+    @Test("título e ícone de cada situação, os mesmos da ponta das linhas")
+    func tituloEIcone() {
+        #expect(PostQueueSections.Kind.allCases.map(\.title) == ["agora", "na fila", "com erro", "feitos"])
+        #expect(PostQueueSections.Kind.failed.systemImage == "exclamationmark.triangle.fill")
+        #expect(PostQueueSections.Kind.done.systemImage == "checkmark.circle.fill")
+        #expect(PostQueueSections.Kind.waiting.systemImage == "clock")
+    }
+
+    @Test("processados são os feitos mais os com erro, de tudo o que está na fila")
+    func progresso() {
+        let items = [item(1), item(2), item(3), item(4), item(5)]
+        let statuses: [Int: MegaphoneStatus] = [
+            1: .succeeded,
+            2: .megaphoning,
+            3: .pending,
+            4: .failed("o enjoei respondeu com erro 504."),
+            5: .succeeded
+        ]
+
+        let sections = PostQueueSections(items: items) { statuses[$0.product.id] ?? .pending }
+
+        #expect(sections.totalCount == 5)
+        #expect(sections.processedCount == 3)
+    }
 }

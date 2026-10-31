@@ -4,9 +4,10 @@ import SwiftUI
 /// inativar e ativar produtos, todos no mesmo lugar. Aberta pelo botão da toolbar em "comparar
 /// produtos" (e em "suas contas", já que a fila continua rodando com essas telas fechadas).
 ///
-/// Em cima, o cartão com quanto falta pra próxima ação; embaixo dele, uma seção por situação
-/// ("agora", "na fila", "com erro", "feitos"). Pausar e limpar ficam na barra de cima; histórico e
-/// intervalo, na de baixo.
+/// Em cima, o cartão com quanto falta pra próxima ação, o que roda agora e a seguir e o progresso;
+/// embaixo dele, uma seção por situação ("agora", "na fila", "com erro", "feitos"), cada uma com o
+/// título grande na cor da situação. Pausar e limpar ficam na barra de cima; histórico e os dois
+/// intervalos (postar/repostar/apagar e ativar/inativar), na de baixo.
 struct PostQueueView: View {
     let postQueue: PostQueue
     let poster: CrossAccountPoster
@@ -59,7 +60,7 @@ struct PostQueueView: View {
             // vira `NSTableView`, caro pra reconstruir do zero.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    PostQueueScheduleCard(postQueue: postQueue, waitingCount: sections.items(in: .waiting).count)
+                    PostQueueScheduleCard(postQueue: postQueue, sections: sections)
                         .padding(.horizontal, 16)
                         .padding(.top, 8)
                     ForEach(sections.visibleKinds) { kind in
@@ -73,11 +74,8 @@ struct PostQueueView: View {
 
     private func section(_ kind: PostQueueSections.Kind, items: [PostQueueItem]) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(kind.header(count: items.count))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.supportingText)
+            sectionHeader(kind, count: items.count)
                 .padding(.horizontal, 32)
-                .accessibilityAddTraits(.isHeader)
             VStack(spacing: 0) {
                 ForEach(items) { item in
                     PostQueueRowView(
@@ -97,6 +95,33 @@ struct PostQueueView: View {
             .padding(.horizontal, 16)
         }
         .padding(.top, 16)
+    }
+
+    /// Título grande, com o ícone e a cor da situação — azul "agora", vermelho "com erro", verde
+    /// "feitos"; "na fila" no texto normal, com o relógio cinza. A contagem vem mais apagada, mas
+    /// no mesmo texto ("na fila · 12"), pro VoiceOver ler junto.
+    private func sectionHeader(_ kind: PostQueueSections.Kind, count: Int) -> some View {
+        let color = Self.color(for: kind)
+        let countText = Text(kind == .now ? "" : " · \(count)").foregroundStyle(.supportingText)
+        return HStack(spacing: 8) {
+            Image(systemName: kind.systemImage)
+                .foregroundStyle(kind == .waiting ? Color.supportingText : color)
+                .accessibilityHidden(true)
+            Text("\(Text(kind.title).foregroundStyle(color))\(countText)")
+                .accessibilityLabel(kind.header(count: count))
+        }
+        .font(.title3.weight(.bold))
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
+    private static func color(for kind: PostQueueSections.Kind) -> Color {
+        switch kind {
+        case .now: .statusInProgress
+        case .waiting: .primary
+        case .failed: .statusFailure
+        case .done: .statusSuccess
+        }
     }
 
     @ToolbarContentBuilder
@@ -149,40 +174,53 @@ struct PostQueueView: View {
         }
     }
 
-    /// Presets oferecidos no menu de intervalo, de 30 segundos a 5 minutos.
-    private static let intervalPresets: [TimeInterval] = [30, 60, 120, 180, 240, 300]
-
-    /// Deixa escolher o intervalo entre ações da fila, de 30 segundos a 5 minutos. A escolha é
-    /// persistida por `PostQueue.setInterval` — sobrevive a fechar e abrir o app.
+    /// Os dois intervalos da fila num menu só: um submenu por grupo, com o nome dele e, embaixo, o
+    /// ritmo escolhido ("ativar e inativar / 1 a cada 15s") — postar/repostar/apagar (30s a
+    /// 5 min) e ativar/inativar (15s a 5 min). `Section` com um `Picker` em linha não mostrava o
+    /// título no menu, e as duas listas iguais ficavam sem dizer qual era qual. O rótulo da barra
+    /// mostra os dois, postar primeiro ("30s · 15s"). `.menuOrder(.fixed)`: abrindo pra cima a
+    /// partir da barra de baixo, o sistema inverteria a ordem. A escolha é persistida por
+    /// `PostQueue.setInterval` — sobrevive a fechar e abrir o app.
     private var intervalMenu: some View {
-        Menu {
-            Picker("intervalo entre ações", selection: intervalBinding) {
-                ForEach(Self.intervalPresets, id: \.self) { seconds in
-                    Text(PostQueueStatusText.intervalLabel(seconds)).tag(seconds)
+        let posting = postQueue.interval(for: .posting)
+        let statusChange = postQueue.interval(for: .statusChange)
+        return Menu {
+            ForEach(PostQueueIntervalGroup.allCases, id: \.self) { group in
+                Picker(selection: intervalBinding(for: group)) {
+                    ForEach(group.presets, id: \.self) { seconds in
+                        Text(PostQueueStatusText.pace(interval: seconds)).tag(seconds)
+                    }
+                } label: {
+                    Text(group.title)
+                    Text(PostQueueStatusText.pace(interval: postQueue.interval(for: group)))
                 }
+                .pickerStyle(.menu)
             }
-            .pickerStyle(.inline)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "timer")
-                Text(PostQueueStatusText.intervalLabel(postQueue.interval))
+                Text(PostQueueStatusText.intervalMenuLabel(posting: posting, statusChange: statusChange))
+                    .monospacedDigit()
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
                     .foregroundStyle(.supportingText)
             }
             .contentShape(.rect)
         }
+        .menuOrder(.fixed)
         .accessibilityLabel("intervalo entre ações")
-        .accessibilityValue(PostQueueStatusText.pace(interval: postQueue.interval))
+        .accessibilityValue(
+            PostQueueStatusText.intervalMenuAccessibilityValue(posting: posting, statusChange: statusChange)
+        )
     }
 
     /// `PostQueue` é uma classe (`@Observable`, não `@Bindable` aqui) — sem açúcar de `$`, o
     /// binding pro Picker precisa ser montado à mão. O `set` passa por `setInterval` (não atribui
-    /// `postQueue.interval` direto) pra escolha persistir.
-    private var intervalBinding: Binding<TimeInterval> {
+    /// direto) pra escolha persistir.
+    private func intervalBinding(for group: PostQueueIntervalGroup) -> Binding<TimeInterval> {
         Binding(
-            get: { postQueue.interval },
-            set: { postQueue.setInterval($0) }
+            get: { postQueue.interval(for: group) },
+            set: { postQueue.setInterval($0, for: group) }
         )
     }
 }

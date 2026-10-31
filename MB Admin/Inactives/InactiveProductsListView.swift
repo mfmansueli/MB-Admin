@@ -62,7 +62,7 @@ struct InactiveProductsListView: View {
                     perform(action)
                 }
             } message: { action in
-                Text(action.confirmationMessage)
+                Text(bulkConfirmationMessage(for: action))
             }
             // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
             // conta na barra lateral mantendo a mesma aba selecionada — sem `.id(account.id)` (ver
@@ -244,6 +244,14 @@ struct InactiveProductsListView: View {
 
     /// Os selecionados que ainda existem no enjoei — um já apagado nesta sessão continua na lista
     /// (marcado, até o próximo carregamento), mas qualquer ação nele só falharia na fila.
+    /// A mensagem do alerta da seleção — com mais de um produto, termina no ritmo que a fila vai
+    /// usar pra eles (o intervalo se escolhe só na tela da fila).
+    private func bulkConfirmationMessage(for action: InactiveBulkAction) -> String {
+        guard selectedLiveProducts.count > 1 else { return action.confirmationMessage }
+        let note = PostQueueStatusText.queuePaceNote(interval: accountsStore.postQueue.interval(for: action.queueKind))
+        return "\(action.confirmationMessage) \(note)"
+    }
+
     private var selectedLiveProducts: [InactiveProduct] {
         loader.items.filter {
             selectedIDs.contains($0.id) && account.runner.deleteStatuses[$0.id] != .succeeded

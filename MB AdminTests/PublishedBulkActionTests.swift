@@ -46,6 +46,14 @@ struct PublishedBulkActionTests {
         #expect(!PublishedBulkAction.postToOtherStore.isDestructive)
     }
 
+    @Test("cada ação vira na fila o tipo certo — desconto não passa pela fila")
+    func tipoNaFila() {
+        #expect(PublishedBulkAction.applyDiscount.queueKind == nil)
+        #expect(PublishedBulkAction.postToOtherStore.queueKind == .post)
+        #expect(PublishedBulkAction.inactivate.queueKind == .inactivate)
+        #expect(PublishedBulkAction.delete.queueKind == .delete)
+    }
+
     @Test("apagar avisa que é irreversível")
     func apagarAvisaQueEIrreversivel() {
         #expect(PublishedBulkAction.delete.confirmationMessage.hasPrefix("ação irreversível"))

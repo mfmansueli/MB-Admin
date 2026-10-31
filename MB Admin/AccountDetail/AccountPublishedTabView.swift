@@ -176,7 +176,7 @@ struct AccountPublishedTabView: View {
                     perform(action)
                 }
             } message: { action in
-                Text(action.confirmationMessage)
+                Text(bulkConfirmationMessage(for: action))
             }
             .alert(
                 pendingOtherStore.map {
@@ -198,7 +198,7 @@ struct AccountPublishedTabView: View {
                     PostToOtherStoreCopy.confirmationMessage(
                         productCount: selectedIDs.count,
                         target: target,
-                        pace: PostQueueStatusText.pace(interval: accountsStore.postQueue.interval)
+                        pace: PostQueueStatusText.pace(interval: accountsStore.postQueue.interval(for: .post))
                     )
                 )
             }
@@ -386,6 +386,14 @@ struct AccountPublishedTabView: View {
         let others: [PublishedBulkAction] = [.postToOtherStore, .inactivate, .delete]
         let hasDiscountCandidate = sections.discount.contains { selectedIDs.contains($0.id) }
         return hasDiscountCandidate ? [.applyDiscount] + others : others
+    }
+
+    /// A mensagem do alerta da seleção — com mais de um produto, termina no ritmo que a fila vai
+    /// usar pra eles (o intervalo se escolhe só na tela da fila).
+    private func bulkConfirmationMessage(for action: PublishedBulkAction) -> String {
+        guard let kind = action.queueKind, selectedIDs.count > 1 else { return action.confirmationMessage }
+        let note = PostQueueStatusText.queuePaceNote(interval: accountsStore.postQueue.interval(for: kind))
+        return "\(action.confirmationMessage) \(note)"
     }
 
     /// Inativar/apagar entram na mesma fila de ações usada pelo menu "..." de cada linha — origem e

@@ -2,8 +2,9 @@ import Foundation
 import Observation
 
 /// Fila de ações entre contas: posta (numa conta diferente, ou reposta na mesma), apaga, inativa
-/// ou ativa um produto de cada vez, respeitando `interval` entre uma ação e a próxima — o mesmo
-/// intervalo pras quatro, `.post` incluído (ver `waitInterval`). Também é o único ponto de entrada
+/// ou ativa um produto de cada vez, esperando antes de cada uma o intervalo do grupo dela —
+/// postar/repostar/apagar num ritmo, ativar/inativar noutro (`PostQueueIntervalGroup`, ver
+/// `waitInterval`). Também é o único ponto de entrada
 /// pra postar — tanto a fila quanto o botão avulso "postar em X" de uma linha passam por aqui, pra
 /// `currentItem` sempre refletir o que está em voo agora, esteja vindo da fila ou não.
 @MainActor
@@ -24,8 +25,8 @@ final class PostQueue {
     private(set) var currentItem: PostQueueItem?
     /// Quando a próxima ação da fila deve começar — só setado durante `waitInterval` (entre uma
     /// ação e a próxima), `nil` o resto do tempo (nada em espera agora: parado, pausado, ou uma
-    /// ação já em voo). Recalculado a cada pedaço de 0.2s com o `interval` atual, então reflete uma
-    /// troca de intervalo em andamento na hora — pra `PostQueueView` mostrar a contagem regressiva
+    /// ação já em voo). Recalculado a cada pedaço de 0.2s com o intervalo atual do grupo da
+    /// próxima ação, então reflete uma troca de intervalo em andamento na hora — pra `PostQueueView` mostrar a contagem regressiva
     /// de verdade, em vez do cooldown fixo do `CrossAccountPoster` de antes.
     private(set) var nextActionAt: Date?
     /// Só pro caso "a conta de origem ou destino não existe mais quando a vez do item chega".
@@ -40,13 +41,12 @@ final class PostQueue {
     /// `var`, não `let`: quem cria a fila às vezes não pode capturar `self` no provider ainda
     /// (dentro do próprio `init` de quem a possui) e liga ele de verdade logo em seguida.
     var accountsProvider: () -> [AccountSession]
-    /// Intervalo entre uma ação da fila e a próxima — a tela deixa o usuário escolher entre 30s e
-    /// 5 minutos, `run()` lê o valor atual a cada volta do laço (a mudança já vale a partir da
-    /// próxima espera), e a escolha sobrevive a fechar e abrir o app de novo (ver `setInterval`).
-    /// Só mutável por aqui dentro — `setInterval` é quem persiste, então a UI nunca atribui direto.
-    private(set) var interval: TimeInterval
-
-    private static let intervalDefaultsKey = "postQueue.interval"
+    /// Intervalo antes de cada ação, por grupo — o menu da tela da fila deixa escolher um pra
+    /// postar/repostar/apagar (30s a 5 min) e outro pra ativar/inativar (15s a 5 min).
+    /// `waitInterval` relê o valor a cada pedaço da espera, e a escolha sobrevive a fechar e abrir
+    /// o app (ver `setInterval(_:for:)`). Só mutável por aqui dentro — `setInterval` é quem
+    /// persiste, então a UI nunca atribui direto.
+    private(set) var intervals: [PostQueueIntervalGroup: TimeInterval] = [:]
 
     init(
         poster: CrossAccountPoster,
@@ -62,14 +62,16 @@ final class PostQueue {
         self.itemsPersistence = itemsPersistence
         self.defaults = defaults
         history = historyPersistence.loadEntries()
-        // Um `interval` explícito (testes, sobretudo) vale por cima de qualquer coisa persistida.
-        // Sem ele, a última escolha do usuário — se existir — prevalece sobre o cooldown padrão do
-        // `poster`.
-        if let interval {
-            self.interval = interval
-        } else {
-            let stored = defaults.double(forKey: Self.intervalDefaultsKey)
-            self.interval = stored > 0 ? stored : poster.cooldownDuration
+        // Um `interval` explícito (testes, sobretudo) vale pros dois grupos, por cima de qualquer
+        // coisa persistida. Sem ele, a última escolha do usuário em cada grupo — se existir —
+        // prevalece sobre o padrão do grupo (30s pra postar, 15s pra ativar/inativar).
+        for group in PostQueueIntervalGroup.allCases {
+            if let interval {
+                intervals[group] = interval
+            } else {
+                let stored = defaults.double(forKey: group.defaultsKey)
+                intervals[group] = stored > 0 ? stored : group.defaultInterval
+            }
         }
         items = itemsPersistence.loadItems()
         // Recupera pausada de propósito, nunca processando sozinha: reabrir o app não é o mesmo
@@ -84,11 +86,25 @@ final class PostQueue {
         }
     }
 
-    /// Muda o intervalo entre ações e já persiste a escolha — chamado pelo menu de intervalo da
+    /// Muda o intervalo de um grupo e já persiste a escolha — chamado pelo menu de intervalo da
     /// fila (`PostQueueView`), pra sobreviver a fechar e abrir o app de novo.
-    func setInterval(_ newValue: TimeInterval) {
-        interval = newValue
-        defaults.set(newValue, forKey: Self.intervalDefaultsKey)
+    func setInterval(_ newValue: TimeInterval, for group: PostQueueIntervalGroup) {
+        intervals[group] = newValue
+        defaults.set(newValue, forKey: group.defaultsKey)
+    }
+
+    func interval(for group: PostQueueIntervalGroup) -> TimeInterval {
+        intervals[group] ?? group.defaultInterval
+    }
+
+    /// O intervalo que vale antes de uma ação desse tipo.
+    func interval(for kind: PostQueueItem.Kind) -> TimeInterval {
+        interval(for: PostQueueIntervalGroup(kind: kind))
+    }
+
+    /// A próxima ação a sair da fila — a primeira ainda esperando a vez. `nil` com nada esperando.
+    var nextItem: PostQueueItem? {
+        items.first { status(for: $0) == .pending }
     }
 
     func status(for item: PostQueueItem) -> MegaphoneStatus {
@@ -341,12 +357,15 @@ final class PostQueue {
     /// pedaço (não guardado numa variável local no começo da espera), pra trocar o intervalo
     /// preferido enquanto a fila já está esperando também valer na hora, dentro de um pedaço — sem
     /// isso, a troca só valeria a partir da espera seguinte, deixando a impressão de que o app
-    /// ignorou a escolha nova até 5 minutos depois.
+    /// ignorou a escolha nova até 5 minutos depois. O intervalo é o do grupo da próxima ação
+    /// (`nextItem`), também relido a cada pedaço: tirar da fila a próxima, ou ela mudar, já troca
+    /// o ritmo da espera.
     private func waitInterval() async {
         let start = Date()
         defer { nextActionAt = nil }
         while !isPaused {
-            let remaining = interval - Date().timeIntervalSince(start)
+            let currentInterval = interval(for: nextItem?.kind ?? .post)
+            let remaining = currentInterval - Date().timeIntervalSince(start)
             guard remaining > 0 else { return }
             nextActionAt = Date().addingTimeInterval(remaining)
             try? await Task.sleep(for: .seconds(min(0.2, remaining)))

@@ -52,6 +52,17 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
 
     var isDestructive: Bool { self == .delete }
 
+    /// O tipo de ação que cada produto vira na fila — pra confirmação dizer o ritmo do grupo dele.
+    /// `nil` em "desconto", que não passa pela fila.
+    var queueKind: PostQueueItem.Kind? {
+        switch self {
+        case .applyDiscount: nil
+        case .postToOtherStore: .post
+        case .inactivate: .inactivate
+        case .delete: .delete
+        }
+    }
+
     /// Botão de confirmar do alerta.
     var confirmationButtonLabel: String {
         switch self {

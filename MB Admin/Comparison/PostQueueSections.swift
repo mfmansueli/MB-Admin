@@ -14,11 +14,25 @@ nonisolated struct PostQueueSections {
 
         /// "agora" fica sem contagem — é sempre um item só.
         func header(count: Int) -> String {
+            self == .now ? title : "\(title) · \(count)"
+        }
+
+        var title: String {
             switch self {
             case .now: "agora"
-            case .waiting: "na fila · \(count)"
-            case .failed: "com erro · \(count)"
-            case .done: "feitos · \(count)"
+            case .waiting: "na fila"
+            case .failed: "com erro"
+            case .done: "feitos"
+            }
+        }
+
+        /// O ícone ao lado do título — o mesmo da ponta de cada linha nessa situação.
+        var systemImage: String {
+            switch self {
+            case .now: "arrow.triangle.2.circlepath"
+            case .waiting: "clock"
+            case .failed: "exclamationmark.triangle.fill"
+            case .done: "checkmark.circle.fill"
             }
         }
     }
@@ -33,6 +47,16 @@ nonisolated struct PostQueueSections {
 
     func items(in kind: Kind) -> [PostQueueItem] {
         itemsByKind[kind] ?? []
+    }
+
+    /// Tudo o que está na fila agora, em qualquer situação.
+    var totalCount: Int {
+        itemsByKind.values.reduce(0) { $0 + $1.count }
+    }
+
+    /// Os que já terminaram, com sucesso ou com erro — o "12" de "12 de 150 produtos processados".
+    var processedCount: Int {
+        items(in: .done).count + items(in: .failed).count
     }
 
     /// Só as seções com alguma coisa, na ordem da tela.
