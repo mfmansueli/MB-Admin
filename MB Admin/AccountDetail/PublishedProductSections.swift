@@ -46,7 +46,7 @@ nonisolated struct PublishedProductSections: Sendable {
         return selection.union(ids)
     }
 
-    /// Ids das seções abertas, na ordem da tela — "todos" na seleção só marca o que está à vista,
+    /// Ids das seções abertas, na ordem da tela — "selecionar tudo" só marca o que está à vista,
     /// nunca um produto escondido numa seção recolhida (apagar em massa algo que nem apareceu na
     /// tela seria fácil demais).
     func visibleIDs(collapsed: Set<Kind>) -> [Int] {
