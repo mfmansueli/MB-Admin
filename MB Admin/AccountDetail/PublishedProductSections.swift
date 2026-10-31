@@ -1,7 +1,7 @@
 import Foundation
 
 /// As duas seções da aba "publicados": primeiro o que pede decisão de desconto, depois todo o
-/// resto — cada produto em uma seção só. Montado de uma vez por
+/// resto (do maior desconto já aplicado pro menor) — cada produto em uma seção só. Montado de uma vez por
 /// `AccountPublishedTabView.recomputeSections()` (em vez de refiltrar a cada leitura), só quando a
 /// lista, o filtro ou a busca mudam de verdade.
 nonisolated struct PublishedProductSections: Sendable {
@@ -23,7 +23,22 @@ nonisolated struct PublishedProductSections: Sendable {
         discount = visible
             .filter(\.needsDiscountDecision)
             .sorted { ($0.computedDiscountPercent ?? 0) < ($1.computedDiscountPercent ?? 0) }
-        others = filter == .discountOnly ? [] : visible.filter { !$0.needsDiscountDecision }
+        others = filter == .discountOnly ? [] : Self.byAppliedDiscountDescending(visible.filter { !$0.needsDiscountDecision })
+    }
+
+    /// Decrescente pelo desconto que o anúncio já tem hoje (riscado → atual, o mesmo "-N%" da
+    /// linha) — os mais descontados no topo, os sem desconto no fim. Empate (inclusive entre todos
+    /// os sem desconto) fica na ordem em que a loja devolveu, desempatado explicitamente pelo
+    /// índice pra não depender da estabilidade do `sorted`. O percentual é calculado uma vez por
+    /// item, não a cada comparação: isso roda a cada lote de produtos megafonados, em catálogos de
+    /// 1500+.
+    private static func byAppliedDiscountDescending(_ items: [MegaphoneItem]) -> [MegaphoneItem] {
+        let keyed: [(index: Int, percent: Int, item: MegaphoneItem)] = items.enumerated().map { index, item in
+            (index, item.appliedDiscountPercent ?? 0, item)
+        }
+        return keyed
+            .sorted { lhs, rhs in lhs.percent != rhs.percent ? lhs.percent > rhs.percent : lhs.index < rhs.index }
+            .map(\.item)
     }
 
     var isEmpty: Bool { discount.isEmpty && others.isEmpty }
