@@ -2,10 +2,13 @@ import Foundation
 
 /// Uma das ações da barra de baixo na seleção múltipla de "publicados". "Aplicar desconto" só
 /// aparece quando a seleção tem algum produto que pede desconto — os outros não têm preço sugerido
-/// pra aplicar (ver `AccountPublishedTabView.availableBulkActions`).
+/// pra aplicar (ver `AccountPublishedTabView.availableBulkActions`). "Postar em" abre antes o menu
+/// das outras lojas (`opensMenu`), e a confirmação dela é a de `PostToOtherStoreCopy`, já com a loja
+/// escolhida — os textos de confirmação daqui não valem pra ela.
 nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable {
     case applyDiscount
     case repost
+    case postToOtherStore
     case inactivate
     case delete
 
@@ -16,16 +19,25 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
         switch self {
         case .applyDiscount: "desconto"
         case .repost: "repostar"
+        case .postToOtherStore: "postar em"
         case .inactivate: "inativar"
         case .delete: "apagar"
         }
     }
+
+    /// No iPhone, com até cinco ações lado a lado, "postar em" encurta.
+    var compactLabel: String {
+        self == .postToOtherStore ? "postar" : label
+    }
+
+    var opensMenu: Bool { self == .postToOtherStore }
 
     /// Mesmos ícones do menu "..." de cada linha, pra reconhecer de longe qual ação é.
     var systemImage: String {
         switch self {
         case .applyDiscount: "tag"
         case .repost: "doc.on.doc"
+        case .postToOtherStore: PostToOtherStoreCopy.systemImage
         case .inactivate: "archivebox"
         case .delete: "trash"
         }
@@ -35,7 +47,7 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
         switch self {
         case .applyDiscount: .decision
         case .delete: .destructive
-        case .repost, .inactivate: .standard
+        case .repost, .postToOtherStore, .inactivate: .standard
         }
     }
 
@@ -46,6 +58,7 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
         switch self {
         case .applyDiscount: "aplicar desconto"
         case .repost: "repostar"
+        case .postToOtherStore: "postar"
         case .inactivate: "inativar"
         case .delete: "apagar"
         }
@@ -56,6 +69,7 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
         return switch self {
         case .applyDiscount: "aplicar desconto e megafonar \(products)?"
         case .repost: "repostar \(products)?"
+        case .postToOtherStore: "postar \(products) em outra loja?"
         case .inactivate: "inativar \(products)?"
         case .delete: "apagar \(products)?"
         }
@@ -67,6 +81,8 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
             "cada produto vai pro preço com desconto sugerido pelo megafone, e é megafonado na hora."
         case .repost:
             "entra na fila de ações, reaproveitando título, descrição, preço e fotos de cada um — acompanhe o andamento por lá."
+        case .postToOtherStore:
+            "cada um vira um anúncio novo na loja escolhida e entra na fila de ações. os anúncios daqui continuam como estão."
         case .inactivate:
             "cada anúncio selecionado entra na fila de ações e sai da vitrine de publicados — dá pra reativar depois direto no enjoei."
         case .delete:

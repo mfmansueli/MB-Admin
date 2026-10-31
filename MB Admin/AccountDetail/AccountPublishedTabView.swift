@@ -36,6 +36,8 @@ struct AccountPublishedTabView: View {
 
     /// Ação em massa esperando confirmação no alerta — `nil` sem alerta na tela.
     @State private var pendingBulkAction: PublishedBulkAction?
+    /// A loja escolhida no menu de "postar em" da seleção, esperando a confirmação — `nil` sem alerta.
+    @State private var pendingOtherStore: OtherStoreTarget?
     /// O "aplicar nos N" do cabeçalho de "pedem desconto" esperando confirmação — `nil` sem alerta.
     @State private var pendingDiscountBatch: PendingDiscountBatch?
     /// Cache das seções (ver `recomputeSections`) — sem isso, cada leitura (lista, "todos",
@@ -75,6 +77,71 @@ struct AccountPublishedTabView: View {
     private var isRoundOpen: Bool { runner.phase.isActive || runner.isRunning }
 
     var body: some View {
+        screen
+            // Vale mudar o intervalo no meio da rodada: o laço lê o valor a cada produto.
+            .onChange(of: storedSpeed) { _, milliseconds in
+                runner.delayBetweenProducts = MegaphoneSpeed(milliseconds: milliseconds).duration
+                UserDefaults.standard.set(milliseconds, forKey: speedKey(account.id))
+            }
+            .onChange(of: storedRounds) { _, newValue in
+                UserDefaults.standard.set(newValue, forKey: roundsKey(account.id))
+            }
+            // Sem o campo de busca na tela durante a rodada (ver o `.background` acima), uma busca
+            // que continuasse valendo deixaria a lista filtrada sem nada dizendo por quê. A
+            // seleção, ao contrário, mantém a busca de propósito: buscar e depois "selecionar tudo"
+            // é o jeito de agir só no que bateu (o termo aparece embaixo do título, ver
+            // `AccountDetailView.subtitle`).
+            .onChange(of: isRoundOpen) { _, isOpen in
+                if isOpen { searchText = "" }
+            }
+            // Trocar de filtro com itens marcados deixaria parte da seleção "invisível" mas ainda
+            // contando pras ações em massa.
+            .onChange(of: filter) { _, _ in
+                endSelection()
+                recomputeSections()
+            }
+            // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
+            // conta — sem identidade nova por conta (ver `AccountDetailView.swift`), é o único
+            // gatilho que sobrou pra recarregar `storedRounds`/`storedSpeed` e zerar o resto do
+            // estado local.
+            .onChange(of: account.id, initial: true) { _, newAccountID in
+                storedRounds = UserDefaults.standard.object(forKey: roundsKey(newAccountID)) as? Int ?? 1
+                storedSpeed = UserDefaults.standard.object(forKey: speedKey(newAccountID)) as? Int
+                    ?? MegaphoneSpeed.standard.milliseconds
+                searchDebounceTask?.cancel()
+                searchDebounceTask = nil
+                pendingBulkAction = nil
+                pendingOtherStore = nil
+                pendingDiscountBatch = nil
+                recomputeSections()
+            }
+            // `runner.progressSnapshot`, não `runner.items` direto: `items` muda uma vez por
+            // produto megafonado (até 1500+ vezes por rodada) — um `.onChange` nele precisa
+            // comparar a lista INTEIRA (`Equatable` sintetizado de `MegaphoneItem`, campo a campo,
+            // incluindo strings) a cada mutação de UM item, então o app inteiro passava a gastar
+            // O(catálogo) só decidindo se disparava o `onChange`, a cada produto, em cada rodada —
+            // confirmado numa amostra de CPU depois de muitas rodadas seguidas (o processo ficava
+            // preso em `MegaphoneItem`/`EnjoeiProduct`.`__derived_struct_equals` e retain/release
+            // em cima disso). `progressSnapshot` já é o resumo em lote pensado exatamente pra isso
+            // (ver seu doc comment) — struct pequena, comparação barata, atualizada a cada
+            // `progressSnapshotBatchSize` itens em vez de a cada um.
+            .onChange(of: runner.progressSnapshot) { _, _ in recomputeSections() }
+            // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer o
+            // filtro (potencialmente sobre centenas de produtos publicados) a cada tecla.
+            .onChange(of: searchText) { _, _ in
+                searchDebounceTask?.cancel()
+                searchDebounceTask = Task {
+                    try? await Task.sleep(for: .milliseconds(200))
+                    guard !Task.isCancelled else { return }
+                    recomputeSections()
+                }
+            }
+    }
+
+    /// A lista com as barras, a busca e os alertas de confirmação — separado do `body` (que só
+    /// acrescenta os `onChange`), senão o compilador desiste de checar a cadeia inteira de
+    /// modificadores de uma vez.
+    private var screen: some View {
         productList
             .floatingBottomBar { bottomBar }
             .toolbar { toolbarContent }
@@ -112,6 +179,30 @@ struct AccountPublishedTabView: View {
                 Text(action.confirmationMessage)
             }
             .alert(
+                pendingOtherStore.map {
+                    PostToOtherStoreCopy.confirmationTitle(productCount: selectedIDs.count, storeName: $0.name)
+                } ?? "",
+                isPresented: Binding(
+                    get: { pendingOtherStore != nil },
+                    set: { if !$0 { pendingOtherStore = nil } }
+                ),
+                presenting: pendingOtherStore
+            ) { target in
+                Button("cancelar", role: .cancel) {}
+                // Verbo comum, sem papel destrutivo: os anúncios daqui continuam como estão.
+                Button(PostToOtherStoreCopy.postLabel(storeName: target.name)) {
+                    postSelection(to: target)
+                }
+            } message: { target in
+                Text(
+                    PostToOtherStoreCopy.confirmationMessage(
+                        productCount: selectedIDs.count,
+                        target: target,
+                        pace: PostQueueStatusText.pace(interval: accountsStore.postQueue.interval)
+                    )
+                )
+            }
+            .alert(
                 pendingDiscountBatch?.confirmationTitle ?? "",
                 isPresented: Binding(
                     get: { pendingDiscountBatch != nil },
@@ -126,63 +217,6 @@ struct AccountPublishedTabView: View {
                 }
             } message: { batch in
                 Text(batch.confirmationMessage)
-            }
-            // Vale mudar o intervalo no meio da rodada: o laço lê o valor a cada produto.
-            .onChange(of: storedSpeed) { _, milliseconds in
-                runner.delayBetweenProducts = MegaphoneSpeed(milliseconds: milliseconds).duration
-                UserDefaults.standard.set(milliseconds, forKey: speedKey(account.id))
-            }
-            .onChange(of: storedRounds) { _, newValue in
-                UserDefaults.standard.set(newValue, forKey: roundsKey(account.id))
-            }
-            // Sem o campo de busca na tela durante a rodada (ver o `.background` acima), uma busca
-            // que continuasse valendo deixaria a lista filtrada sem nada dizendo por quê. A
-            // seleção, ao contrário, mantém a busca de propósito: buscar e depois "selecionar tudo"
-            // é o jeito de agir só no que bateu (o termo aparece embaixo do título, ver
-            // `AccountDetailView.subtitle`).
-            .onChange(of: isRoundOpen) { _, isOpen in
-                if isOpen { searchText = "" }
-            }
-            // Trocar de filtro com itens marcados deixaria parte da seleção "invisível" mas ainda
-            // contando pras ações em massa.
-            .onChange(of: filter) { _, _ in
-                endSelection()
-                recomputeSections()
-            }
-            // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
-            // conta — sem identidade nova por conta (ver `AccountDetailView.swift`), é o único
-            // gatilho que sobrou pra recarregar `storedRounds`/`storedSpeed` e zerar o resto do
-            // estado local.
-            .onChange(of: account.id, initial: true) { _, newAccountID in
-                storedRounds = UserDefaults.standard.object(forKey: roundsKey(newAccountID)) as? Int ?? 1
-                storedSpeed = UserDefaults.standard.object(forKey: speedKey(newAccountID)) as? Int
-                    ?? MegaphoneSpeed.standard.milliseconds
-                searchDebounceTask?.cancel()
-                searchDebounceTask = nil
-                pendingBulkAction = nil
-                pendingDiscountBatch = nil
-                recomputeSections()
-            }
-            // `runner.progressSnapshot`, não `runner.items` direto: `items` muda uma vez por
-            // produto megafonado (até 1500+ vezes por rodada) — um `.onChange` nele precisa
-            // comparar a lista INTEIRA (`Equatable` sintetizado de `MegaphoneItem`, campo a campo,
-            // incluindo strings) a cada mutação de UM item, então o app inteiro passava a gastar
-            // O(catálogo) só decidindo se disparava o `onChange`, a cada produto, em cada rodada —
-            // confirmado numa amostra de CPU depois de muitas rodadas seguidas (o processo ficava
-            // preso em `MegaphoneItem`/`EnjoeiProduct`.`__derived_struct_equals` e retain/release
-            // em cima disso). `progressSnapshot` já é o resumo em lote pensado exatamente pra isso
-            // (ver seu doc comment) — struct pequena, comparação barata, atualizada a cada
-            // `progressSnapshotBatchSize` itens em vez de a cada um.
-            .onChange(of: runner.progressSnapshot) { _, _ in recomputeSections() }
-            // Debounce: espera a digitação parar por 200ms antes de refiltrar, em vez de refazer o
-            // filtro (potencialmente sobre centenas de produtos publicados) a cada tecla.
-            .onChange(of: searchText) { _, _ in
-                searchDebounceTask?.cancel()
-                searchDebounceTask = Task {
-                    try? await Task.sleep(for: .milliseconds(200))
-                    guard !Task.isCancelled else { return }
-                    recomputeSections()
-                }
             }
     }
 
@@ -286,8 +320,17 @@ struct AccountPublishedTabView: View {
     @ViewBuilder
     private var bottomBar: some View {
         if isSelecting {
-            SelectionActionBar(actions: availableBulkActions, isEnabled: !selectedIDs.isEmpty) { action in
+            let targets = selectionOtherStoreTargets
+            SelectionActionBar(
+                actions: availableBulkActions,
+                isEnabled: !selectedIDs.isEmpty,
+                disabledActions: targets.isEmpty ? [.postToOtherStore] : []
+            ) { action in
                 pendingBulkAction = action
+            } menuContent: { _ in
+                OtherStoreMenuSection(targets: targets, productCount: selectedIDs.count) { target in
+                    pendingOtherStore = target
+                }
             }
         } else if isRoundOpen {
             MegaphoneRunPanel(
@@ -340,7 +383,7 @@ struct AccountPublishedTabView: View {
     /// "Aplicar desconto" só com pelo menos um produto que pede desconto na seleção — e só esses
     /// recebem o desconto (os outros não têm preço sugerido pra aplicar).
     private var availableBulkActions: [PublishedBulkAction] {
-        let others: [PublishedBulkAction] = [.repost, .inactivate, .delete]
+        let others: [PublishedBulkAction] = [.repost, .postToOtherStore, .inactivate, .delete]
         let hasDiscountCandidate = sections.discount.contains { selectedIDs.contains($0.id) }
         return hasDiscountCandidate ? [.applyDiscount] + others : others
     }
@@ -356,6 +399,10 @@ struct AccountPublishedTabView: View {
             for item in items {
                 accountsStore.postQueue.enqueue(product: item.product, source: account, destination: account)
             }
+        case .postToOtherStore:
+            // Abre o menu das lojas (`opensMenu`), não chega aqui — quem posta é `postSelection(to:)`,
+            // depois de escolher a loja e confirmar.
+            break
         case .inactivate:
             for item in items {
                 accountsStore.postQueue.enqueueInactivate(product: item.product, account: account)
@@ -366,6 +413,28 @@ struct AccountPublishedTabView: View {
             }
         }
         pendingBulkAction = nil
+        endSelection()
+    }
+
+    /// As outras lojas com sessão aberta pro "postar em" da seleção — e quantos dos selecionados a
+    /// última comparação com cada uma achou lá.
+    private var selectionOtherStoreTargets: [OtherStoreTarget] {
+        OtherStoreTarget.candidates(
+            for: Array(selectedIDs),
+            from: account.id,
+            among: accountsStore.accounts,
+            matches: accountsStore.comparisonMatches
+        )
+    }
+
+    /// Cada selecionado entra na fila de ações como uma postagem de verdade, desta loja pra
+    /// escolhida — na ordem da lista, um de cada vez, no intervalo da fila.
+    private func postSelection(to target: OtherStoreTarget) {
+        guard let destination = accountsStore.accounts.first(where: { $0.id == target.accountID }) else { return }
+        for item in selectedItems {
+            accountsStore.postQueue.enqueue(product: item.product, source: account, destination: destination)
+        }
+        pendingOtherStore = nil
         endSelection()
     }
 

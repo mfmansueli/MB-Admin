@@ -153,6 +153,25 @@ struct AccountComparisonLoaderTests {
         #expect(firstResult.id != secondResult.id)
     }
 
+    @Test("terminada, a comparação guarda os pares pra postar em outra loja avisar de duplicado")
+    func guardaOsParesNaMemoria() async {
+        let title = "colar curto prata 925 zircônia branca"
+        let accountA = makeAccount(client: StubEnjoeiClient(pages: [
+            StoreProductsPage(products: [EnjoeiFixtures.product(id: 1, title: title)], total: 1, endCursor: nil)
+        ]))
+        let accountB = makeAccount(client: StubEnjoeiClient(pages: [
+            StoreProductsPage(products: [EnjoeiFixtures.product(id: 2, title: title)], total: 1, endCursor: nil)
+        ]))
+        let memory = ComparisonMatchMemory()
+        let loader = AccountComparisonLoader()
+
+        loader.compare(accountA: accountA, accountB: accountB, matchMemory: memory)
+        await loader.waitUntilFinished()
+
+        #expect(memory.similarity(of: 1, from: accountA.id, to: accountB.id) == 1)
+        #expect(memory.similarity(of: 2, from: accountB.id, to: accountA.id) == 1)
+    }
+
     @Test("comparação completa busca a descrição de cada produto das duas contas antes de comparar")
     func comparacaoCompletaBuscaDescricaoDasDuasContas() async {
         let clientA = StubEnjoeiClient(

@@ -24,6 +24,21 @@ struct PublishedBulkActionTests {
         #expect(PublishedBulkAction.delete.role == .destructive)
         #expect(PublishedBulkAction.repost.role == .standard)
         #expect(PublishedBulkAction.inactivate.role == .standard)
+        #expect(PublishedBulkAction.postToOtherStore.role == .standard)
+    }
+
+    @Test("postar em fica entre repostar e inativar, abre o menu das lojas e encurta no iPhone")
+    func postarEmOutraLoja() {
+        let actions = PublishedBulkAction.allCases
+        let index = actions.firstIndex(of: .postToOtherStore)
+        #expect(index == actions.firstIndex(of: .repost).map { $0 + 1 })
+        #expect(index == actions.firstIndex(of: .inactivate).map { $0 - 1 })
+        #expect(actions.filter(\.opensMenu) == [.postToOtherStore])
+        #expect(PublishedBulkAction.postToOtherStore.label == "postar em")
+        #expect(PublishedBulkAction.postToOtherStore.compactLabel == "postar")
+        #expect(PublishedBulkAction.postToOtherStore.systemImage == "paperplane")
+        #expect(PublishedBulkAction.repost.compactLabel == "repostar")
+        #expect(!PublishedBulkAction.postToOtherStore.isDestructive)
     }
 
     @Test("apagar avisa que é irreversível")

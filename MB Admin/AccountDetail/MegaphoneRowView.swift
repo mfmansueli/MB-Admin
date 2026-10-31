@@ -30,10 +30,10 @@ struct MegaphoneRowView: View, Equatable {
     /// publicando `progressSnapshot` em lote. `product` some da comparação de propósito: depois de
     /// carregado ele só muda por `MegaphoneRunner.applyDescription` (daí comparar `description`
     /// puro, não o produto inteiro), nunca por `setStatus`/`resetItemsForNewRound`. `deleteStatus`/
-    /// `inactivateStatus`/`repostStatus` também somem — não vêm de `item`, vêm de `runner`/
-    /// `accountsStore` lidos ao vivo dentro do `body` (`@Environment`/referência), então o
-    /// `Observation` já invalida esta view sozinho quando qualquer um dos três muda, independente
-    /// desta comparação.
+    /// `inactivateStatus`/`repostStatus`/`otherStorePostState` também somem — não vêm de `item`,
+    /// vêm de `runner`/`accountsStore` lidos ao vivo dentro do `body` (`@Environment`/referência),
+    /// então o `Observation` já invalida esta view sozinho quando qualquer um deles muda,
+    /// independente desta comparação.
     static func == (lhs: MegaphoneRowView, rhs: MegaphoneRowView) -> Bool {
         lhs.item.id == rhs.item.id
             && lhs.item.status == rhs.item.status
@@ -51,6 +51,9 @@ struct MegaphoneRowView: View, Equatable {
     @State private var isConfirmingDelete = false
     @State private var isConfirmingInactivate = false
     @State private var isShowingErrorDetail = false
+    /// A loja escolhida em "postar em outra loja", esperando a confirmação — `nil` sem nada na tela.
+    @State private var pendingOtherStore: OtherStoreTarget?
+    @State private var isShowingOtherStoreErrorDetail = false
     @Environment(AccountsStore.self) private var accountsStore
 
     /// Reposta pela fila de ações compartilhada — mesmo `poster` que a comparação entre contas e
@@ -62,8 +65,30 @@ struct MegaphoneRowView: View, Equatable {
     private var isDeleted: Bool { deleteStatus == .succeeded }
     private var isInactivated: Bool { inactivateStatus == .succeeded }
     private var isGone: Bool { isDeleted || isInactivated }
+    /// A postagem mais recente deste produto numa outra loja, pela fila de ações — a linha embaixo
+    /// do preço. Fica até a fila ser limpa (ou o app fechar), já que a fila guarda os feitos.
+    private var otherStorePostState: OtherStorePostState? {
+        let postQueue = accountsStore.postQueue
+        return OtherStorePostState.latest(
+            productID: item.id,
+            sourceAccountID: account.id,
+            in: postQueue.items,
+            status: postQueue.status(for:)
+        )
+    }
+    /// As outras lojas com sessão aberta, pro "postar em outra loja" do menu — e se a última
+    /// comparação com cada uma achou este produto lá.
+    private var otherStoreTargets: [OtherStoreTarget] {
+        OtherStoreTarget.candidates(
+            for: [item.id],
+            from: account.id,
+            among: accountsStore.accounts,
+            matches: accountsStore.comparisonMatches
+        )
+    }
     private var isActionInFlight: Bool {
         repostStatus == .megaphoning || deleteStatus == .megaphoning || inactivateStatus == .megaphoning
+            || otherStorePostState?.isPosting == true
     }
     /// Sendo megafonado agora de verdade: o da vez na rodada, ou uma ação avulsa (aplicar desconto)
     /// sem rodada nenhuma em aberto.
@@ -89,6 +114,11 @@ struct MegaphoneRowView: View, Equatable {
                     .productTitleFont()
                     .lineLimit(2)
                 detailLine
+                if let otherStorePostState {
+                    OtherStorePostStatusLine(state: otherStorePostState) {
+                        isShowingOtherStoreErrorDetail = true
+                    }
+                }
             }
 
             Spacer(minLength: 8)
@@ -145,6 +175,29 @@ struct MegaphoneRowView: View, Equatable {
             Text("entra na fila de ações, reaproveitando título, descrição, preço e fotos — acompanhe o andamento por lá.")
         }
         .confirmationDialog(
+            pendingOtherStore.map { PostToOtherStoreCopy.confirmationTitle(productCount: 1, storeName: $0.name) } ?? "",
+            isPresented: Binding(
+                get: { pendingOtherStore != nil },
+                set: { if !$0 { pendingOtherStore = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingOtherStore
+        ) { target in
+            // Verbo comum, sem papel destrutivo: nada se perde aqui, o anúncio daqui continua.
+            Button(PostToOtherStoreCopy.postLabel(storeName: target.name)) {
+                postToOtherStore(target)
+            }
+            Button("cancelar", role: .cancel) {}
+        } message: { target in
+            Text(
+                PostToOtherStoreCopy.confirmationMessage(
+                    productCount: 1,
+                    target: target,
+                    pace: PostQueueStatusText.pace(interval: accountsStore.postQueue.interval)
+                )
+            )
+        }
+        .confirmationDialog(
             "apagar este produto?",
             isPresented: $isConfirmingDelete,
             titleVisibility: .visible
@@ -175,6 +228,17 @@ struct MegaphoneRowView: View, Equatable {
                     message: message,
                     detail: runner.failureDetails[item.id],
                     onRetry: { runner.retryMegaphone(productID: item.id) }
+                )
+            }
+        }
+        .sheet(isPresented: $isShowingOtherStoreErrorDetail) {
+            if let otherStorePostState, let message = otherStorePostState.failureMessage {
+                let postQueue = accountsStore.postQueue
+                MegaphoneErrorDetailSheet(
+                    product: item.product,
+                    message: message,
+                    detail: postQueue.failureDetail(for: otherStorePostState.item),
+                    onRetry: { postQueue.retry(id: otherStorePostState.item.id) }
                 )
             }
         }
@@ -421,6 +485,10 @@ struct MegaphoneRowView: View, Equatable {
             }
             .disabled(repostStatus == .megaphoning)
 
+            PostToOtherStoreMenuItem(targets: otherStoreTargets, postState: otherStorePostState) { target in
+                pendingOtherStore = target
+            }
+
             Button {
                 isConfirmingInactivate = true
             } label: {
@@ -443,6 +511,14 @@ struct MegaphoneRowView: View, Equatable {
             }
             .disabled(deleteStatus == .megaphoning)
         }
+    }
+
+    /// Entra na fila de ações como uma postagem de verdade (origem esta loja, destino a escolhida)
+    /// — a mesma que a comparação entre lojas usa, com o "de A para B" na fila e nas duas rows da
+    /// lista de contas.
+    private func postToOtherStore(_ target: OtherStoreTarget) {
+        guard let destination = accountsStore.accounts.first(where: { $0.id == target.accountID }) else { return }
+        accountsStore.postQueue.enqueue(product: item.product, source: account, destination: destination)
     }
 
     /// Abre o WhatsApp direto na tela de encaminhar, já com o link preenchido. Sem checar se o

@@ -32,7 +32,14 @@ final class AccountComparisonLoader {
     ///   contas (`ProductDetailsLoader`, ao mesmo tempo pras duas) antes de casar os pares — mais
     ///   precisa, mas uma chamada de rede por produto, sem lote, então pode demorar bastante numa
     ///   loja grande.
-    func compare(accountA: AccountSession, accountB: AccountSession, fullComparison: Bool = false) {
+    /// - Parameter matchMemory: onde guardar os pares do resultado, pra "postar em outra loja"
+    ///   avisar depois quando um produto talvez já exista na outra loja.
+    func compare(
+        accountA: AccountSession,
+        accountB: AccountSession,
+        fullComparison: Bool = false,
+        matchMemory: ComparisonMatchMemory? = nil
+    ) {
         guard task == nil else { return }
         loadedA = 0
         totalA = 0
@@ -40,7 +47,7 @@ final class AccountComparisonLoader {
         totalB = 0
         phase = .loadingProducts(loaded: 0, total: 0)
         task = Task { [weak self] in
-            await self?.run(accountA: accountA, accountB: accountB, fullComparison: fullComparison)
+            await self?.run(accountA: accountA, accountB: accountB, fullComparison: fullComparison, matchMemory: matchMemory)
             self?.task = nil
         }
     }
@@ -58,7 +65,12 @@ final class AccountComparisonLoader {
         await task?.value
     }
 
-    private func run(accountA: AccountSession, accountB: AccountSession, fullComparison: Bool) async {
+    private func run(
+        accountA: AccountSession,
+        accountB: AccountSession,
+        fullComparison: Bool,
+        matchMemory: ComparisonMatchMemory?
+    ) async {
         // Busca a lista de produtos direto do cliente, sem passar por `MegaphoneRunner.load` —
         // aquele fluxo também confere a exposição de cada produto (chamada extra, via WebView, em
         // lotes) pro megafone, o que aqui só deixa a comparação lenta à toa: ela nunca usa
@@ -99,6 +111,7 @@ final class AccountComparisonLoader {
         let result = await Task.detached {
             AccountProductMatcher.compare(productsA: productsA, productsB: productsB)
         }.value
+        matchMemory?.record(result.matches, accountA: accountA.id, accountB: accountB.id)
         phase = .finished(result)
     }
 

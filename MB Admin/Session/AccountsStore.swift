@@ -21,6 +21,9 @@ final class AccountsStore {
     /// precisam respeitar o mesmo bloqueio entre uma postagem e a próxima.
     let poster = CrossAccountPoster()
     let postQueue: PostQueue
+    /// Os pares da última comparação entre cada duas lojas — pra "postar em outra loja" avisar
+    /// quando o produto talvez já exista no destino (ver `ComparisonMatchMemory`).
+    let comparisonMatches = ComparisonMatchMemory()
     /// Compartilhada entre todas as contas (ver `MegaphoneQueue`) — sem limite de propósito: agora
     /// que a listagem de produtos não passa mais por `List`/`NSTableView` (ver
     /// `AccountPublishedTabView.productList`), o gargalo que motivava travar tudo numa conta de cada
@@ -190,6 +193,7 @@ final class AccountsStore {
         account.runner.cancel()
         await account.clearSession()
         accounts.removeAll { $0.id == accountID }
+        comparisonMatches.forget(accountID: accountID)
         clearLocalData(accountID: accountID)
         persist()
     }
