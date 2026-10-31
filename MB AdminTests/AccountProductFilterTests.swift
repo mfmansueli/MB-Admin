@@ -6,7 +6,7 @@ import Testing
 struct AccountProductFilterTests {
     @Test("nomes das cápsulas, na ordem da fileira")
     func nomesDasCapsulas() {
-        #expect(AccountProductFilter.allCases.map(\.label) == ["todos os anúncios", "só os que pedem desconto"])
+        #expect(AccountProductFilter.allCases.map(\.label) == ["todos produtos", "produtos pedem desconto"])
     }
 
     @Test("chave por conta continua a mesma — trocar perderia a escolha já guardada")

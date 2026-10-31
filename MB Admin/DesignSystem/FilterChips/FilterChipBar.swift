@@ -73,8 +73,8 @@ struct FilterChipBar<Value: Hashable>: View {
     VStack(alignment: .leading, spacing: 12) {
         FilterChipBar(
             options: [
-                FilterChipOption(value: AccountProductFilter.all, label: "todos os anúncios", count: 60),
-                FilterChipOption(value: .discountOnly, label: "só os que pedem desconto", count: 3, dotColor: .statusDecision)
+                FilterChipOption(value: AccountProductFilter.all, label: "todos produtos", count: 60),
+                FilterChipOption(value: .discountOnly, label: "produtos pedem desconto", count: 3, dotColor: .statusDecision)
             ],
             selection: $filter
         )

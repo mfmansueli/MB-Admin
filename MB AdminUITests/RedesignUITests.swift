@@ -38,8 +38,8 @@ final class RedesignUITests: XCTestCase {
     }
 
     /// Abre a conta e espera os produtos carregarem (o botão "megafonar" só fica útil com a lista
-    /// pronta). A foto de um produto é o sinal — "todos os anúncios" não serve mais: a cápsula do
-    /// filtro com esse nome aparece antes de a lista chegar.
+    /// pronta). A foto de um produto é o sinal — as cápsulas do filtro ("todos produtos") aparecem
+    /// antes de a lista chegar.
     @MainActor
     private func openAccount(_ name: String, in app: XCUIApplication) {
         let row = app.staticTexts[name].firstMatch
@@ -49,7 +49,7 @@ final class RedesignUITests: XCTestCase {
     }
 
     /// Cabeçalho de uma seção de publicados ("pedem desconto · 3"). O "·" separa ele das cápsulas
-    /// que também levam o nome da seção (o filtro "só os que pedem desconto", o "selecionar os 3 de
+    /// que também levam o nome da seção (o filtro "produtos pedem desconto", o "selecionar os 3 de
     /// pedem desconto" da seleção).
     @MainActor
     private func sectionHeader(_ title: String, in app: XCUIApplication) -> XCUIElement {
@@ -130,13 +130,13 @@ final class RedesignUITests: XCTestCase {
 
         let othersHeader = sectionHeader("todos os anúncios", in: app)
         XCTAssertTrue(othersHeader.exists)
-        element(in: app.buttons, containing: "só os que pedem desconto").tap()
+        element(in: app.buttons, containing: "produtos pedem desconto").tap()
         XCTAssertTrue(othersHeader.waitForNonExistence(timeout: 5))
         XCTAssertTrue(sectionHeader("pedem desconto", in: app).exists)
-        attachScreenshot("filtro só os que pedem desconto", of: app)
+        attachScreenshot("filtro produtos pedem desconto", of: app)
 
-        // Com a seção "todos os anúncios" fora da tela, o único botão com esse nome é a cápsula.
-        element(in: app.buttons, containing: "todos os anúncios").tap()
+        // A cápsula "todos produtos" traz a seção do resto de volta.
+        element(in: app.buttons, containing: "todos produtos").tap()
         XCTAssertTrue(othersHeader.waitForExistence(timeout: 5))
     }
 

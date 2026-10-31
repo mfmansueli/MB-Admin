@@ -482,7 +482,7 @@ struct AccountPublishedTabView: View {
                 ContentUnavailableView(
                     "nenhum produto pede desconto agora",
                     systemImage: "checkmark.circle",
-                    description: Text("troque o filtro pra \"todos os anúncios\" pra ver a fila inteira.")
+                    description: Text("troque o filtro pra \"todos produtos\" pra ver a fila inteira.")
                 )
                 .frame(maxHeight: .infinity)
             }
