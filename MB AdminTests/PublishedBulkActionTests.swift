@@ -8,7 +8,6 @@ struct PublishedBulkActionTests {
     func tituloDaConfirmacao() {
         #expect(PublishedBulkAction.delete.confirmationTitle(count: 3) == "apagar 3 produtos?")
         #expect(PublishedBulkAction.delete.confirmationTitle(count: 1) == "apagar 1 produto?")
-        #expect(PublishedBulkAction.repost.confirmationTitle(count: 2) == "repostar 2 produtos?")
         #expect(PublishedBulkAction.inactivate.confirmationTitle(count: 1) == "inativar 1 produto?")
         #expect(PublishedBulkAction.applyDiscount.confirmationTitle(count: 4) == "aplicar desconto e megafonar 4 produtos?")
     }
@@ -22,22 +21,28 @@ struct PublishedBulkActionTests {
     func papelDeCadaAcao() {
         #expect(PublishedBulkAction.applyDiscount.role == .decision)
         #expect(PublishedBulkAction.delete.role == .destructive)
-        #expect(PublishedBulkAction.repost.role == .standard)
         #expect(PublishedBulkAction.inactivate.role == .standard)
         #expect(PublishedBulkAction.postToOtherStore.role == .standard)
     }
 
-    @Test("postar em fica entre repostar e inativar, abre o menu das lojas e encurta no iPhone")
+    @Test("repostar fica fora da seleção de publicados — só no menu de cada produto")
+    func semRepostarNaSelecao() {
+        #expect(PublishedBulkAction.allCases == [.applyDiscount, .postToOtherStore, .inactivate, .delete])
+        #expect(!PublishedBulkAction.allCases.map(\.label).contains("repostar"))
+        // A aba "inativos" continua com o dela.
+        #expect(InactiveBulkAction.allCases.contains(.repost))
+    }
+
+    @Test("postar em vem logo antes de inativar, abre o menu das lojas e encurta no iPhone")
     func postarEmOutraLoja() {
         let actions = PublishedBulkAction.allCases
         let index = actions.firstIndex(of: .postToOtherStore)
-        #expect(index == actions.firstIndex(of: .repost).map { $0 + 1 })
         #expect(index == actions.firstIndex(of: .inactivate).map { $0 - 1 })
         #expect(actions.filter(\.opensMenu) == [.postToOtherStore])
         #expect(PublishedBulkAction.postToOtherStore.label == "postar em")
         #expect(PublishedBulkAction.postToOtherStore.compactLabel == "postar")
         #expect(PublishedBulkAction.postToOtherStore.systemImage == "paperplane")
-        #expect(PublishedBulkAction.repost.compactLabel == "repostar")
+        #expect(PublishedBulkAction.inactivate.compactLabel == "inativar")
         #expect(!PublishedBulkAction.postToOtherStore.isDestructive)
     }
 

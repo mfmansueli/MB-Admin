@@ -383,22 +383,18 @@ struct AccountPublishedTabView: View {
     /// "Aplicar desconto" só com pelo menos um produto que pede desconto na seleção — e só esses
     /// recebem o desconto (os outros não têm preço sugerido pra aplicar).
     private var availableBulkActions: [PublishedBulkAction] {
-        let others: [PublishedBulkAction] = [.repost, .postToOtherStore, .inactivate, .delete]
+        let others: [PublishedBulkAction] = [.postToOtherStore, .inactivate, .delete]
         let hasDiscountCandidate = sections.discount.contains { selectedIDs.contains($0.id) }
         return hasDiscountCandidate ? [.applyDiscount] + others : others
     }
 
-    /// Repostar/inativar/apagar entram na mesma fila de ações usada pelo menu "..." de cada linha
-    /// — origem e destino são a própria conta.
+    /// Inativar/apagar entram na mesma fila de ações usada pelo menu "..." de cada linha — origem e
+    /// destino são a própria conta.
     private func perform(_ action: PublishedBulkAction) {
         let items = selectedItems
         switch action {
         case .applyDiscount:
             applyDiscount(to: items)
-        case .repost:
-            for item in items {
-                accountsStore.postQueue.enqueue(product: item.product, source: account, destination: account)
-            }
         case .postToOtherStore:
             // Abre o menu das lojas (`opensMenu`), não chega aqui — quem posta é `postSelection(to:)`,
             // depois de escolher a loja e confirmar.

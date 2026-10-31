@@ -97,16 +97,16 @@ final class SecondaryScreensUITests: XCTestCase {
         let app = launchApp()
         openAccount("antonia", in: app)
 
-        // Repostar dois produtos põe dois itens na fila — o primeiro sai na hora, o segundo espera o
-        // intervalo (1 minuto, o padrão).
+        // Inativar dois produtos põe dois itens na fila — o primeiro sai na hora, o segundo espera o
+        // intervalo (1 minuto, o padrão). Repostar não está mais na barra da seleção de publicados.
         app.buttons["selecionar"].tap()
         let titles = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'prata 925'"))
         titles.element(boundBy: 0).tap()
         titles.element(boundBy: 1).tap()
-        app.buttons["repostar"].tap()
+        app.buttons["inativar"].tap()
         let alert = app.alerts.firstMatch
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
-        alert.buttons["repostar"].tap()
+        alert.buttons["inativar"].tap()
         XCTAssertTrue(app.buttons["selecionar"].waitForExistence(timeout: 5))
 
         backToAccountsIfNeeded(in: app)

@@ -95,6 +95,9 @@ final class PostToOtherStoreUITests: XCTestCase {
         titles.element(boundBy: 1).tap()
         XCTAssertTrue(app.navigationBars["2 selecionados"].waitForExistence(timeout: 5))
         XCTAssertTrue(postAction.isEnabled)
+        // Repostar não entra na barra de publicados — fica só no "..." de cada produto.
+        XCTAssertTrue(app.buttons["inativar"].exists)
+        XCTAssertFalse(app.buttons["repostar"].exists)
 
         postAction.tap()
         XCTAssertTrue(app.staticTexts["postar 2 em"].waitForExistence(timeout: 5))
