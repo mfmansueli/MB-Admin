@@ -163,20 +163,31 @@ struct AccountPublishedTabView: View {
             // Com o painel do megafone ou a barra da seleção no lugar, a barra do sistema some de
             // vez — sem isso, no iPhone a lupa da busca ficava sozinha embaixo deles.
             .toolbar(isRoundOpen || isSelecting ? .hidden : .automatic, for: .bottomBar)
+            // Apagar tem o alerta próprio, logo abaixo — o daqui fica com as outras ações.
             .alert(
                 pendingBulkAction?.confirmationTitle(count: selectedIDs.count) ?? "",
                 isPresented: Binding(
-                    get: { pendingBulkAction != nil },
+                    get: { pendingBulkAction.map { !$0.isDestructive } ?? false },
                     set: { if !$0 { pendingBulkAction = nil } }
                 ),
                 presenting: pendingBulkAction
             ) { action in
                 Button("cancelar", role: .cancel) {}
-                Button(action.confirmationButtonLabel, role: action.isDestructive ? .destructive : nil) {
+                Button(action.confirmationButtonLabel) {
                     perform(action)
                 }
             } message: { action in
                 Text(bulkConfirmationMessage(for: action))
+            }
+            .permanentDeleteConfirmation(
+                isPresented: Binding(
+                    get: { pendingBulkAction?.isDestructive == true },
+                    set: { if !$0 { pendingBulkAction = nil } }
+                ),
+                productCount: selectedIDs.count,
+                note: bulkQueuePaceNote(for: .delete)
+            ) {
+                perform(.delete)
             }
             .alert(
                 pendingOtherStore.map {
@@ -391,9 +402,16 @@ struct AccountPublishedTabView: View {
     /// A mensagem do alerta da seleção — com mais de um produto, termina no ritmo que a fila vai
     /// usar pra eles (o intervalo se escolhe só na tela da fila).
     private func bulkConfirmationMessage(for action: PublishedBulkAction) -> String {
-        guard let kind = action.queueKind, selectedIDs.count > 1 else { return action.confirmationMessage }
-        let note = PostQueueStatusText.queuePaceNote(interval: accountsStore.postQueue.interval(for: kind))
-        return "\(action.confirmationMessage) \(note)"
+        let message = action.confirmationMessage(count: selectedIDs.count)
+        guard let note = bulkQueuePaceNote(for: action) else { return message }
+        return "\(message) \(note)"
+    }
+
+    /// O ritmo da fila pra ação, quando a seleção tem mais de um produto — `nil` com um só, e em
+    /// "desconto", que não passa pela fila.
+    private func bulkQueuePaceNote(for action: PublishedBulkAction) -> String? {
+        guard let kind = action.queueKind, selectedIDs.count > 1 else { return nil }
+        return PostQueueStatusText.queuePaceNote(interval: accountsStore.postQueue.interval(for: kind))
     }
 
     /// Inativar/apagar entram na mesma fila de ações usada pelo menu "..." de cada linha — origem e

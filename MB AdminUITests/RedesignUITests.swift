@@ -191,8 +191,9 @@ final class RedesignUITests: XCTestCase {
         attachScreenshot("seleção", of: app)
 
         app.buttons["apagar"].tap()
-        let alert = app.alerts["apagar 2 produtos?"]
+        let alert = app.alerts["⚠️ apagar 2 produtos da loja para sempre?"]
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(alert.buttons["apagar permanentemente"].exists)
         attachScreenshot("confirmar apagar", of: app)
 
         alert.buttons["cancelar"].tap()

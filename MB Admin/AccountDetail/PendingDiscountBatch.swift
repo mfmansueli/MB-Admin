@@ -43,7 +43,7 @@ nonisolated struct PendingDiscountBatch: Equatable, Sendable {
     /// A mensagem da ação em massa, com o preço de agora e o sugerido de cada um no lugar do ponto
     /// final: "… e é megafonado na hora: R$ 149 → R$ 127, R$ 99 → R$ 69."
     var confirmationMessage: String {
-        let base = PublishedBulkAction.applyDiscount.confirmationMessage
+        let base = PublishedBulkAction.applyDiscount.confirmationMessage(count: items.count)
         let prices = items.compactMap(Self.priceChange)
         guard !prices.isEmpty else { return base }
         var listed = prices.prefix(Self.maxListedPrices).joined(separator: ", ")

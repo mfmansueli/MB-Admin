@@ -109,17 +109,8 @@ struct InactiveProductRowView: View {
         } message: {
             Text("entra na fila de ações, reaproveitando título, descrição, preço e fotos — acompanhe o andamento por lá.")
         }
-        .confirmationDialog(
-            "apagar este produto?",
-            isPresented: $isConfirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("apagar", role: .destructive) {
-                accountsStore.postQueue.enqueueDelete(product: placeholderProduct, account: account)
-            }
-            Button("cancelar", role: .cancel) {}
-        } message: {
-            Text("ação irreversível: entra na fila de ações e o anúncio é apagado do enjoei de vez, sem chance de recuperar.")
+        .permanentDeleteConfirmation(isPresented: $isConfirmingDelete, productCount: 1) {
+            accountsStore.postQueue.enqueueDelete(product: placeholderProduct, account: account)
         }
         .opacity(isActivated || isDeleted ? 0.4 : 1)
     }

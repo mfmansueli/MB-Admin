@@ -47,7 +47,7 @@ nonisolated enum InactiveBulkAction: SelectionBarAction, CaseIterable, Sendable 
         switch self {
         case .repost: "repostar"
         case .activate: "ativar"
-        case .delete: "apagar"
+        case .delete: PermanentDeleteCopy.confirmButtonLabel
         }
     }
 
@@ -56,18 +56,20 @@ nonisolated enum InactiveBulkAction: SelectionBarAction, CaseIterable, Sendable 
         return switch self {
         case .repost: "repostar \(products)?"
         case .activate: "ativar \(products) de novo?"
-        case .delete: "apagar \(products)?"
+        case .delete: PermanentDeleteCopy.title(productCount: count)
         }
     }
 
-    var confirmationMessage: String {
+    /// Apagar avisa quantos anúncios somem da loja de vez (`PermanentDeleteCopy`); as outras não
+    /// mudam com a quantidade.
+    func confirmationMessage(count: Int) -> String {
         switch self {
         case .repost:
             "entra na fila de ações, reaproveitando título, descrição, preço e fotos de cada um — acompanhe o andamento por lá."
         case .activate:
             "cada anúncio selecionado entra na fila de ações e volta pra vitrine de publicados."
         case .delete:
-            "ação irreversível: cada anúncio selecionado entra na fila de ações e é apagado do enjoei de vez, sem chance de recuperar."
+            PermanentDeleteCopy.message(productCount: count)
         }
     }
 }

@@ -6,8 +6,8 @@ import Testing
 struct PublishedBulkActionTests {
     @Test("título da confirmação conta os produtos, no singular e no plural")
     func tituloDaConfirmacao() {
-        #expect(PublishedBulkAction.delete.confirmationTitle(count: 3) == "apagar 3 produtos?")
-        #expect(PublishedBulkAction.delete.confirmationTitle(count: 1) == "apagar 1 produto?")
+        #expect(PublishedBulkAction.delete.confirmationTitle(count: 3) == "⚠️ apagar 3 produtos da loja para sempre?")
+        #expect(PublishedBulkAction.delete.confirmationTitle(count: 1) == "⚠️ apagar este produto da loja para sempre?")
         #expect(PublishedBulkAction.inactivate.confirmationTitle(count: 1) == "inativar 1 produto?")
         #expect(PublishedBulkAction.applyDiscount.confirmationTitle(count: 4) == "aplicar desconto e megafonar 4 produtos?")
     }
@@ -54,8 +54,11 @@ struct PublishedBulkActionTests {
         #expect(PublishedBulkAction.delete.queueKind == .delete)
     }
 
-    @Test("apagar avisa que é irreversível")
-    func apagarAvisaQueEIrreversivel() {
-        #expect(PublishedBulkAction.delete.confirmationMessage.hasPrefix("ação irreversível"))
+    @Test("apagar usa a confirmação alarmante de excluir da loja de vez")
+    func apagarUsaAConfirmacaoAlarmante() {
+        #expect(PublishedBulkAction.delete.confirmationMessage(count: 3) == PermanentDeleteCopy.message(productCount: 3))
+        #expect(PublishedBulkAction.delete.confirmationButtonLabel == "apagar permanentemente")
+        // As outras não mudam com a quantidade.
+        #expect(PublishedBulkAction.inactivate.confirmationMessage(count: 1) == PublishedBulkAction.inactivate.confirmationMessage(count: 5))
     }
 }

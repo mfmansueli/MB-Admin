@@ -69,7 +69,7 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
         case .applyDiscount: "aplicar desconto"
         case .postToOtherStore: "postar"
         case .inactivate: "inativar"
-        case .delete: "apagar"
+        case .delete: PermanentDeleteCopy.confirmButtonLabel
         }
     }
 
@@ -79,11 +79,13 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
         case .applyDiscount: "aplicar desconto e megafonar \(products)?"
         case .postToOtherStore: "postar \(products) em outra loja?"
         case .inactivate: "inativar \(products)?"
-        case .delete: "apagar \(products)?"
+        case .delete: PermanentDeleteCopy.title(productCount: count)
         }
     }
 
-    var confirmationMessage: String {
+    /// Apagar avisa quantos anúncios somem da loja de vez (`PermanentDeleteCopy`); as outras não
+    /// mudam com a quantidade.
+    func confirmationMessage(count: Int) -> String {
         switch self {
         case .applyDiscount:
             "cada produto vai pro preço com desconto sugerido pelo megafone, e é megafonado na hora."
@@ -92,7 +94,7 @@ nonisolated enum PublishedBulkAction: SelectionBarAction, CaseIterable, Sendable
         case .inactivate:
             "cada anúncio selecionado entra na fila de ações e sai da vitrine de publicados — dá pra reativar depois direto no enjoei."
         case .delete:
-            "ação irreversível: cada anúncio selecionado entra na fila de ações e é apagado do enjoei de vez, sem chance de recuperar."
+            PermanentDeleteCopy.message(productCount: count)
         }
     }
 }

@@ -21,12 +21,13 @@ struct InactiveBulkActionTests {
     func tituloDoAlerta() {
         #expect(InactiveBulkAction.repost.confirmationTitle(count: 1) == "repostar 1 produto?")
         #expect(InactiveBulkAction.activate.confirmationTitle(count: 3) == "ativar 3 produtos de novo?")
-        #expect(InactiveBulkAction.delete.confirmationTitle(count: 2) == "apagar 2 produtos?")
+        #expect(InactiveBulkAction.delete.confirmationTitle(count: 2) == "⚠️ apagar 2 produtos da loja para sempre?")
     }
 
-    @Test("apagar avisa que é irreversível")
-    func apagarAvisaIrreversivel() {
-        #expect(InactiveBulkAction.delete.confirmationMessage.hasPrefix("ação irreversível"))
+    @Test("apagar usa a confirmação alarmante de excluir da loja de vez")
+    func apagarUsaAConfirmacaoAlarmante() {
+        #expect(InactiveBulkAction.delete.confirmationMessage(count: 2) == PermanentDeleteCopy.message(productCount: 2))
+        #expect(InactiveBulkAction.delete.confirmationButtonLabel == "apagar permanentemente")
     }
 
     @Test("cada ação vira na fila o tipo certo — repostar é uma postagem na mesma loja")

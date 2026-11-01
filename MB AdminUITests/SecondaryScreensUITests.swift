@@ -162,6 +162,23 @@ final class SecondaryScreensUITests: XCTestCase {
         XCTAssertTrue(element(in: app.descendants(matching: .any), containing: "feitos · 1").exists)
         attachScreenshot("fila de ações", of: app)
 
+        // Limpar a fila é a vassoura azul, com confirmação dizendo que só a fila é limpa — nada
+        // da loja é apagado. Cancelando, tudo continua lá.
+        app.buttons["limpar fila"].tap()
+        XCTAssertTrue(app.staticTexts["limpar só a fila de ações?"].waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app.staticTexts, containing: "nenhum produto é apagado da loja").exists)
+        attachScreenshot("confirmar limpar fila", of: app)
+        // Saindo de um botão da barra, o iOS mostra a confirmação como popover, sem "cancelar" —
+        // fecha tocando fora dele.
+        let dismissRegion = app.otherElements["PopoverDismissRegion"]
+        if dismissRegion.exists {
+            dismissRegion.tap()
+        } else {
+            app.buttons["cancelar"].firstMatch.tap()
+        }
+        XCTAssertTrue(app.staticTexts["limpar só a fila de ações?"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(element(in: app.descendants(matching: .any), containing: "na fila · 1").exists)
+
         app.buttons["pausar fila"].tap()
         XCTAssertTrue(app.staticTexts["fila pausada"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.buttons["continuar fila"].exists)
@@ -219,8 +236,11 @@ final class SecondaryScreensUITests: XCTestCase {
         attachScreenshot("inativos selecionando", of: app)
 
         app.buttons["apagar"].tap()
-        let alert = app.alerts["apagar 8 produtos?"]
+        // Apagar tira da loja de vez: alerta alarmante, deixando claro que não é só a fila.
+        let alert = app.alerts["⚠️ apagar 8 produtos da loja para sempre?"]
         XCTAssertTrue(alert.waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: alert.staticTexts, containing: "excluídos permanentemente na raiz da sua loja").exists)
+        XCTAssertTrue(alert.buttons["apagar permanentemente"].exists)
         alert.buttons["cancelar"].tap()
         XCTAssertTrue(alert.waitForNonExistence(timeout: 5))
 

@@ -49,20 +49,31 @@ struct InactiveProductsListView: View {
             // Selecionando, sair pela seta de voltar largaria a seleção pela metade.
             .navigationBarBackButtonHidden(isSelecting)
             .toolbar(isSelecting ? .hidden : .automatic, for: .bottomBar)
+            // Apagar tem o alerta próprio, logo abaixo — o daqui fica com repostar e ativar.
             .alert(
                 pendingBulkAction?.confirmationTitle(count: selectedLiveProducts.count) ?? "",
                 isPresented: Binding(
-                    get: { pendingBulkAction != nil },
+                    get: { pendingBulkAction.map { !$0.isDestructive } ?? false },
                     set: { if !$0 { pendingBulkAction = nil } }
                 ),
                 presenting: pendingBulkAction
             ) { action in
                 Button("cancelar", role: .cancel) {}
-                Button(action.confirmationButtonLabel, role: action.isDestructive ? .destructive : nil) {
+                Button(action.confirmationButtonLabel) {
                     perform(action)
                 }
             } message: { action in
                 Text(bulkConfirmationMessage(for: action))
+            }
+            .permanentDeleteConfirmation(
+                isPresented: Binding(
+                    get: { pendingBulkAction?.isDestructive == true },
+                    set: { if !$0 { pendingBulkAction = nil } }
+                ),
+                productCount: selectedLiveProducts.count,
+                note: bulkQueuePaceNote(for: .delete)
+            ) {
+                perform(.delete)
             }
             // `initial: true` cobre tanto a primeira vez que esta view aparece quanto cada troca de
             // conta na barra lateral mantendo a mesma aba selecionada — sem `.id(account.id)` (ver
@@ -242,16 +253,22 @@ struct InactiveProductsListView: View {
         endSelection()
     }
 
-    /// Os selecionados que ainda existem no enjoei — um já apagado nesta sessão continua na lista
-    /// (marcado, até o próximo carregamento), mas qualquer ação nele só falharia na fila.
     /// A mensagem do alerta da seleção — com mais de um produto, termina no ritmo que a fila vai
     /// usar pra eles (o intervalo se escolhe só na tela da fila).
     private func bulkConfirmationMessage(for action: InactiveBulkAction) -> String {
-        guard selectedLiveProducts.count > 1 else { return action.confirmationMessage }
-        let note = PostQueueStatusText.queuePaceNote(interval: accountsStore.postQueue.interval(for: action.queueKind))
-        return "\(action.confirmationMessage) \(note)"
+        let message = action.confirmationMessage(count: selectedLiveProducts.count)
+        guard let note = bulkQueuePaceNote(for: action) else { return message }
+        return "\(message) \(note)"
     }
 
+    /// O ritmo da fila pra ação, quando a seleção tem mais de um produto — `nil` com um só.
+    private func bulkQueuePaceNote(for action: InactiveBulkAction) -> String? {
+        guard selectedLiveProducts.count > 1 else { return nil }
+        return PostQueueStatusText.queuePaceNote(interval: accountsStore.postQueue.interval(for: action.queueKind))
+    }
+
+    /// Os selecionados que ainda existem no enjoei — um já apagado nesta sessão continua na lista
+    /// (marcado, até o próximo carregamento), mas qualquer ação nele só falharia na fila.
     private var selectedLiveProducts: [InactiveProduct] {
         loader.items.filter {
             selectedIDs.contains($0.id) && account.runner.deleteStatuses[$0.id] != .succeeded

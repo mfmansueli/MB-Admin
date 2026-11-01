@@ -6,8 +6,9 @@ import SwiftUI
 ///
 /// Em cima, o cartão com quanto falta pra próxima ação, o que roda agora e a seguir e o progresso;
 /// embaixo dele, uma seção por situação ("agora", "na fila", "com erro", "feitos"), cada uma com o
-/// título grande na cor da situação. Pausar e limpar ficam na barra de cima; histórico e os dois
-/// intervalos (postar/repostar/apagar e ativar/inativar), na de baixo.
+/// título grande na cor da situação. Pausar e limpar (a vassoura azul — só esvazia a fila, nunca
+/// apaga produto da loja) ficam na barra de cima; histórico e os dois intervalos
+/// (postar/repostar/apagar e ativar/inativar), na de baixo.
 struct PostQueueView: View {
     let postQueue: PostQueue
     let poster: CrossAccountPoster
@@ -27,17 +28,22 @@ struct PostQueueView: View {
                 .navigationTitle("fila de ações")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { toolbarContent }
+                // Sem papel destrutivo de propósito: limpar a fila é faxina, nunca apaga nada da
+                // loja — o vermelho e o alarme ficam só pra apagar produto (`PermanentDeleteConfirmation`).
                 .confirmationDialog(
-                    "limpar toda a fila de ações?",
+                    "limpar só a fila de ações?",
                     isPresented: $isConfirmingClear,
                     titleVisibility: .visible
                 ) {
-                    Button("limpar fila", role: .destructive) {
+                    Button("limpar fila") {
                         postQueue.removeAll()
                     }
                     Button("cancelar", role: .cancel) {}
                 } message: {
-                    Text("remove todos os itens da fila — uma ação já em andamento termina normalmente, só não entra mais nenhuma depois dela.")
+                    Text(
+                        "é só uma faxina na fila de ações: nenhum produto é apagado da loja. as ações que ainda "
+                            + "esperavam a vez saem da fila sem rodar, e uma que já está em andamento termina normalmente."
+                    )
                 }
                 .macCatalystSizedSheet(isPresented: $isShowingHistory) {
                     PostHistoryView(postQueue: postQueue)
@@ -145,13 +151,15 @@ struct PostQueueView: View {
                     }
                 }
             }
+            // Vassourinha mágica azul (desenhada à mão em `MagicBroom` — o SF Symbols não tem
+            // vassoura), não lixeira vermelha: limpa só a fila, nunca a loja.
             ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) {
+                Button {
                     isConfirmingClear = true
                 } label: {
-                    Label("limpar fila", systemImage: "trash")
+                    Label("limpar fila", image: .magicBroom)
                 }
-                .tint(.statusFailure)
+                .tint(.statusInProgress)
             }
         }
         // Botão de histórico como primeiro item da bottom bar — fica encostado na ponta leading,

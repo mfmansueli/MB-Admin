@@ -197,17 +197,8 @@ struct MegaphoneRowView: View, Equatable {
                 )
             )
         }
-        .confirmationDialog(
-            "apagar este produto?",
-            isPresented: $isConfirmingDelete,
-            titleVisibility: .visible
-        ) {
-            Button("apagar", role: .destructive) {
-                accountsStore.postQueue.enqueueDelete(product: item.product, account: account)
-            }
-            Button("cancelar", role: .cancel) {}
-        } message: {
-            Text("ação irreversível: entra na fila de ações e o anúncio é apagado do enjoei de vez, sem chance de recuperar.")
+        .permanentDeleteConfirmation(isPresented: $isConfirmingDelete, productCount: 1) {
+            accountsStore.postQueue.enqueueDelete(product: item.product, account: account)
         }
         .confirmationDialog(
             "inativar este produto?",
