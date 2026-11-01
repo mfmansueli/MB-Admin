@@ -16,22 +16,23 @@ nonisolated enum PostQueueStatusText {
     }
 
     /// Linha de apoio do cartão: o ritmo e quantos ainda esperam a vez (quando tem algum). Com o
-    /// grupo da próxima ação, diz pra quem vale esse ritmo ("1 a cada 15s pra ativar e inativar").
+    /// grupo da próxima ação, diz pra quem vale esse ritmo ("1 a cada 10s pra ativar, inativar e
+    /// apagar").
     static func summary(interval: TimeInterval, waitingCount: Int, group: PostQueueIntervalGroup? = nil) -> String {
         var pace = pace(interval: interval)
         if let group { pace += " pra \(group.title)" }
         return waitingCount > 0 ? "\(pace) · \(waitingCount) na fila" : pace
     }
 
-    /// Rótulo do menu de intervalo na barra de baixo: os dois ritmos, postar primeiro ("30s · 15s").
-    static func intervalMenuLabel(posting: TimeInterval, statusChange: TimeInterval) -> String {
-        "\(intervalLabel(posting)) · \(intervalLabel(statusChange))"
+    /// Rótulo do menu de intervalo na barra de baixo: os dois ritmos, postar primeiro ("30s · 10s").
+    static func intervalMenuLabel(posting: TimeInterval, listingChange: TimeInterval) -> String {
+        "\(intervalLabel(posting)) · \(intervalLabel(listingChange))"
     }
 
     /// O que o VoiceOver lê no menu de intervalo, com o nome de cada grupo.
-    static func intervalMenuAccessibilityValue(posting: TimeInterval, statusChange: TimeInterval) -> String {
+    static func intervalMenuAccessibilityValue(posting: TimeInterval, listingChange: TimeInterval) -> String {
         "\(PostQueueIntervalGroup.posting.title): \(pace(interval: posting)); "
-            + "\(PostQueueIntervalGroup.statusChange.title): \(pace(interval: statusChange))"
+            + "\(PostQueueIntervalGroup.listingChange.title): \(pace(interval: listingChange))"
     }
 
     /// Fim da mensagem das confirmações em massa que entram na fila — o ritmo que vai valer, já

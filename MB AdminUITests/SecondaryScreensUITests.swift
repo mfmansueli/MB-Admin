@@ -115,30 +115,31 @@ final class SecondaryScreensUITests: XCTestCase {
         openAccount("antonia", in: app)
 
         // Os dois intervalos começam no padrão (o modo demo zera a escolha a cada abertura): 30s
-        // pra postar/repostar/apagar, 15s pra ativar/inativar. Ativar/inativar vai pra 2 min aqui,
-        // pela seção dela no menu — sem isso, a segunda inativação sairia antes das conferências.
+        // pra postar/repostar, 10s pra ativar/inativar/apagar. Esse vai pra 2 min aqui, pela seção
+        // dele no menu — sem isso, a segunda inativação sairia antes das conferências.
         element(in: app.buttons, containing: "fila de ações").tap()
         let intervalMenu = app.buttons["intervalo entre ações"]
         XCTAssertTrue(intervalMenu.waitForExistence(timeout: 5))
-        XCTAssertTrue(element(in: intervalMenu.descendants(matching: .any), containing: "30s · 15s").exists
-            || (intervalMenu.value as? String ?? "").contains("ativar e inativar: 1 a cada 15s"))
+        XCTAssertTrue(element(in: intervalMenu.descendants(matching: .any), containing: "30s · 10s").exists
+            || (intervalMenu.value as? String ?? "").contains("ativar, inativar e apagar: 1 a cada 10s"))
         intervalMenu.tap()
         // Um submenu por grupo, com o nome e o ritmo escolhido embaixo.
-        let statusChangeMenu = element(in: app.buttons, containing: "ativar e inativar")
-        XCTAssertTrue(statusChangeMenu.waitForExistence(timeout: 5))
-        XCTAssertTrue(element(in: app.buttons, containing: "postar, repostar e apagar").exists)
+        let listingChangeMenu = element(in: app.buttons, containing: "ativar, inativar e apagar")
+        XCTAssertTrue(listingChangeMenu.waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app.buttons, containing: "postar e repostar").exists)
         attachScreenshot("menu de intervalos", of: app)
-        statusChangeMenu.tap()
-        // 15s só existe pra ativar/inativar.
-        XCTAssertTrue(app.buttons["1 a cada 15s"].waitForExistence(timeout: 5))
-        attachScreenshot("intervalos de ativar e inativar", of: app)
+        listingChangeMenu.tap()
+        // 5s e 10s só existem pra ativar/inativar/apagar.
+        XCTAssertTrue(app.buttons["1 a cada 5s"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["1 a cada 10s"].exists)
+        attachScreenshot("intervalos de ativar, inativar e apagar", of: app)
         app.buttons["1 a cada 2 min"].firstMatch.tap()
-        XCTAssertTrue((intervalMenu.value as? String ?? "").contains("ativar e inativar: 1 a cada 2 min"))
-        XCTAssertTrue((intervalMenu.value as? String ?? "").contains("postar, repostar e apagar: 1 a cada 30s"))
+        XCTAssertTrue((intervalMenu.value as? String ?? "").contains("ativar, inativar e apagar: 1 a cada 2 min"))
+        XCTAssertTrue((intervalMenu.value as? String ?? "").contains("postar e repostar: 1 a cada 30s"))
         app.buttons["fechar"].firstMatch.tap()
 
         // Inativar dois produtos põe dois itens na fila — o primeiro sai na hora, o segundo espera o
-        // intervalo de ativar/inativar. Repostar não está mais na barra da seleção de publicados.
+        // intervalo de ativar/inativar/apagar. Repostar não está mais na barra da seleção de publicados.
         app.buttons["selecionar"].tap()
         let titles = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'prata 925'"))
         titles.element(boundBy: 0).tap()
@@ -155,7 +156,7 @@ final class SecondaryScreensUITests: XCTestCase {
         element(in: app.buttons, containing: "fila de ações").tap()
 
         XCTAssertTrue(element(in: app.staticTexts, containing: "próxima ação em").waitForExistence(timeout: 15))
-        XCTAssertTrue(element(in: app.staticTexts, containing: "1 a cada 2 min pra ativar e inativar").exists)
+        XCTAssertTrue(element(in: app.staticTexts, containing: "1 a cada 2 min pra ativar, inativar e apagar").exists)
         XCTAssertTrue(element(in: app.descendants(matching: .any), containing: "a seguir").exists)
         XCTAssertTrue(element(in: app.descendants(matching: .any), containing: "1 de 2 produtos processados").exists)
         XCTAssertTrue(element(in: app.descendants(matching: .any), containing: "na fila · 1").exists)
