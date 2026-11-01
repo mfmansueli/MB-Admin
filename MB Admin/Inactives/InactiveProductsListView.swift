@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// Conteúdo da aba "inativos" da tela de detalhe da conta: lista os produtos inativos da própria
-/// loja e deixa selecionar vários pra repostar (cria de novo), ativar (volta o mesmo anúncio) ou
-/// apagar de vez, entrando na mesma fila de ações usada pela comparação entre contas — aqui origem
-/// e destino são sempre a própria conta.
+/// loja e deixa selecionar vários pra repostar (cria de novo) ou apagar de vez, entrando na mesma
+/// fila de ações usada pela comparação entre contas — aqui origem e destino são sempre a própria
+/// conta. Sem "ativar" (ver `InactiveBulkAction`).
 ///
 /// Mesmo padrão da aba "publicados": "selecionar" na barra de cima; selecionando, o título conta a
 /// seleção (`AccountDetailView`, dona desse estado — por isso as `@Binding`), "selecionar tudo" e o
@@ -49,7 +49,7 @@ struct InactiveProductsListView: View {
             // Selecionando, sair pela seta de voltar largaria a seleção pela metade.
             .navigationBarBackButtonHidden(isSelecting)
             .toolbar(isSelecting ? .hidden : .automatic, for: .bottomBar)
-            // Apagar tem o alerta próprio, logo abaixo — o daqui fica com repostar e ativar.
+            // Apagar tem o alerta próprio, logo abaixo — o daqui fica com repostar.
             .alert(
                 pendingBulkAction?.confirmationTitle(count: selectedLiveProducts.count) ?? "",
                 isPresented: Binding(
@@ -242,8 +242,6 @@ struct InactiveProductsListView: View {
             switch action {
             case .repost:
                 accountsStore.postQueue.enqueue(product: placeholder, source: account, destination: account)
-            case .activate:
-                accountsStore.postQueue.enqueueActivate(product: placeholder, account: account)
             case .delete:
                 // Mesma fila de ações usada pelo "apagar produto" de cada linha (e pela aba de
                 // publicados).

@@ -3,6 +3,9 @@ import SwiftUI
 /// Uma linha da lista de inativos: foto, título, preço e desde quando está inativo — em modo de
 /// seleção, vira uma linha marcável. As ações do "..." ficam também no menu de contexto (toque
 /// longo / clique direito), como na aba de publicados.
+///
+/// Sem "ativar produto" no menu — tirado a pedido do usuário (ver `InactiveBulkAction`). O estado
+/// "produto ativado"/"ativando" continua aqui só pra uma ativação que já estava na fila antes disso.
 struct InactiveProductRowView: View {
     let product: InactiveProduct
     let account: AccountSession
@@ -11,7 +14,6 @@ struct InactiveProductRowView: View {
     var isCompact = true
     var onToggleSelection: () -> Void = {}
 
-    @State private var isConfirmingActivate = false
     @State private var isConfirmingRepost = false
     @State private var isConfirmingDelete = false
     @Environment(AccountsStore.self) private var accountsStore
@@ -86,18 +88,6 @@ struct InactiveProductRowView: View {
             }
         }
         .confirmationDialog(
-            "ativar este produto de novo?",
-            isPresented: $isConfirmingActivate,
-            titleVisibility: .visible
-        ) {
-            Button("ativar") {
-                accountsStore.postQueue.enqueueActivate(product: placeholderProduct, account: account)
-            }
-            Button("cancelar", role: .cancel) {}
-        } message: {
-            Text("entra na fila de ações e volta pra vitrine de publicados.")
-        }
-        .confirmationDialog(
             "repostar este produto?",
             isPresented: $isConfirmingRepost,
             titleVisibility: .visible
@@ -155,18 +145,6 @@ struct InactiveProductRowView: View {
             isConfirmingRepost = true
         } label: {
             Label("repostar", systemImage: "doc.on.doc.fill")
-        }
-        if !isActivated {
-            Button {
-                isConfirmingActivate = true
-            } label: {
-                if activateStatus == .megaphoning {
-                    Label("ativando…", systemImage: "arrow.triangle.2.circlepath")
-                } else {
-                    Label("ativar produto", systemImage: "tray.and.arrow.up.fill")
-                }
-            }
-            .disabled(activateStatus == .megaphoning)
         }
         Button(role: .destructive) {
             isConfirmingDelete = true

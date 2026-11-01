@@ -139,6 +139,22 @@ final class SecondaryScreensUITests: XCTestCase {
     }
 
     @MainActor
+    func testInativosSemAtivarNoMenuDaLinha() {
+        let app = launchApp()
+        openAccount("antonia", in: app)
+        tab("inativos", in: app).tap()
+
+        // Menu de uma linha: repostar e apagar, sem ativar.
+        let moreButton = app.buttons["mais ações"].firstMatch
+        XCTAssertTrue(moreButton.waitForExistence(timeout: 10))
+        moreButton.tap()
+        XCTAssertTrue(app.buttons["repostar"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["apagar produto"].exists)
+        XCTAssertFalse(app.buttons["ativar produto"].exists)
+        attachScreenshot("menu de um inativo", of: app)
+    }
+
+    @MainActor
     func testFilaDeAcoesSeparaPorSituacao() {
         let app = launchApp()
         openAccount("antonia", in: app)
@@ -263,6 +279,9 @@ final class SecondaryScreensUITests: XCTestCase {
         app.buttons["selecionar"].tap()
         app.buttons["selecionar tudo"].tap()
         XCTAssertTrue(app.navigationBars["8 selecionados"].waitForExistence(timeout: 5))
+        // Repostar e apagar — "ativar" saiu da barra.
+        XCTAssertTrue(app.buttons["repostar"].exists)
+        XCTAssertFalse(app.buttons["ativar"].exists)
         attachScreenshot("inativos selecionando", of: app)
 
         app.buttons["apagar"].tap()
