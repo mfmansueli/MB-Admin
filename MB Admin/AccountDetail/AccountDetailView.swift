@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Detalhe de uma conta: o nome (e quantos megafones/erros) na barra de navegação, o seletor de
-/// abas logo abaixo (com a fileira de filtros da aba, quando ela tem) e o conteúdo da aba. A aba
+/// abas logo abaixo (no iPhone, com a etiqueta da loja em cima dele — `StoreBadge` — e, embaixo,
+/// a fileira de filtros da aba, quando ela tem) e o conteúdo da aba. A aba
 /// "publicados" (megafonar, busca, seleção múltipla — e a toolbar/barra de baixo que vêm com eles)
 /// vive em `AccountPublishedTabView` — o estado dela que também importa aqui (esconder o seletor de
 /// abas durante a seleção, o filtro das cápsulas, ou sobreviver a trocar de aba e voltar) fica com
@@ -102,6 +103,9 @@ struct AccountDetailView: View {
             // largaria ela pela metade.
             if !isSelecting {
                 VStack(alignment: .leading, spacing: 0) {
+                    if isCompact {
+                        storeBadge
+                    }
                     tabPicker
                     filterChips
                 }
@@ -207,6 +211,27 @@ struct AccountDetailView: View {
         case 1: "1 selecionado"
         default: "\(selectedIDs.count) selecionados"
         }
+    }
+
+    /// Só no iPhone: lá o título da barra some atrás dos botões, e esta etiqueta é o que diz em qual
+    /// loja você está. No iPad/Mac o nome já está no título grande, e a quantidade de cada aba no
+    /// próprio seletor ("publicados (1.502)").
+    ///
+    /// Mesmos cuidados de `tabLabel`: os publicados vêm de `progressSnapshot.itemsCount` (ler
+    /// `runner.items` prenderia esta view a cada produto megafonado), e cada contagem só entra
+    /// depois de carregar de verdade.
+    private var storeBadge: some View {
+        let publishedCount = runner.progressSnapshot.itemsCount
+        let inactiveLoader = account.inactiveProductsLoader
+        let inactiveLoaded = !inactiveLoader.items.isEmpty || inactiveLoader.phase == .finished
+        return StoreBadge(
+            name: account.user.name,
+            publishedCount: publishedCount > 0 ? publishedCount : nil,
+            inactiveCount: inactiveLoaded ? inactiveLoader.items.count : nil
+        )
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var tabPicker: some View {

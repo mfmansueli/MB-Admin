@@ -110,6 +110,35 @@ final class SecondaryScreensUITests: XCTestCase {
     }
 
     @MainActor
+    func testEtiquetaDaLojaAcimaDasAbasNoIPhone() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("no iPad/Mac o nome da loja já está no título grande")
+        }
+        let app = launchApp()
+        openAccount("antonia", in: app)
+
+        // A antonia do modo demo tem 60 publicados e 8 inativos.
+        let badge = app.descendants(matching: .any)["loja da conta"]
+        XCTAssertTrue(badge.waitForExistence(timeout: 5))
+        let total = NSPredicate(format: "label CONTAINS 'loja antonia, 68 produtos'")
+        XCTAssertNotEqual(XCTWaiter.wait(for: [expectation(for: total, evaluatedWith: badge)], timeout: 10), .timedOut)
+        // Em cima do seletor de abas.
+        XCTAssertLessThan(badge.frame.maxY, tab("publicados", in: app).frame.minY)
+        attachScreenshot("etiqueta da loja", of: app)
+
+        // Trocar de aba não muda a loja nem o total.
+        tab("inativos", in: app).tap()
+        XCTAssertTrue(badge.exists)
+        XCTAssertTrue(badge.label.contains("68 produtos"))
+
+        // Selecionando, a barra de cima inteira dá lugar à seleção — a etiqueta sai junto.
+        tab("publicados", in: app).tap()
+        app.buttons["selecionar"].tap()
+        XCTAssertTrue(app.buttons["concluir seleção"].waitForExistence(timeout: 5))
+        XCTAssertFalse(badge.exists)
+    }
+
+    @MainActor
     func testFilaDeAcoesSeparaPorSituacao() {
         let app = launchApp()
         openAccount("antonia", in: app)
