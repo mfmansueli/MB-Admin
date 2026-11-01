@@ -1,6 +1,6 @@
 import Foundation
 
-/// Os textos da etiqueta da loja no topo do detalhe da conta ("loja Mary · 1.842 produtos") —
+/// Os textos da etiqueta da loja no topo do detalhe da conta ("loja Mary · ↻ 01/11 às 18:33") —
 /// puros, pra `StoreBadge` só montar.
 nonisolated enum StoreBadgeText {
     /// "loja Mary" — sem dobrar o "loja" quando o nome da conta já começa com ela ("loja B").
@@ -14,31 +14,34 @@ nonisolated enum StoreBadgeText {
         return alreadyNamesTheStore ? trimmed : "loja \(trimmed)"
     }
 
-    /// Publicados mais inativos — a loja inteira, não só a aba à vista. `nil` enquanto nenhum dos
-    /// dois chegou, pra não sugerir um "0" que ainda não é real; com só um deles, conta o que já se
-    /// sabe (o outro chega logo em seguida, os dois carregam juntos ao abrir a conta).
-    static func totalProducts(published: Int?, inactive: Int?) -> Int? {
-        guard published != nil || inactive != nil else { return nil }
-        return (published ?? 0) + (inactive ?? 0)
+    /// Data e hora do último toque em "recarregar produtos": "01/11 às 18:33". Sempre com a data
+    /// (não "hoje"/"ontem") — foi o que o usuário pediu; o ano só aparece quando não é o de agora
+    /// ("28/12/25 às 09:05"), pra não gastar largura à toa numa etiqueta que já disputa espaço com
+    /// o nome da loja.
+    static func refreshTime(_ date: Date, now: Date = .now, calendar: Calendar = .current) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: date)
+        let day = parts.day ?? 0
+        let month = parts.month ?? 0
+        let year = parts.year ?? 0
+        var datePart = String(format: "%02d/%02d", day, month)
+        if year != calendar.component(.year, from: now) {
+            datePart += String(format: "/%02d", year % 100)
+        }
+        let timePart = String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0)
+        return "\(datePart) às \(timePart)"
     }
 
-    /// "1.842 produtos" / "1 produto".
-    static func productCount(_ count: Int) -> String {
-        count == 1 ? "1 produto" : "\(count.formatted()) produtos"
-    }
-
-    /// O VoiceOver lê a etiqueta inteira de uma vez, com de onde vem o total: "loja Mary, 1.842
-    /// produtos: 1.502 publicados e 340 inativos".
-    static func accessibilityLabel(name: String, published: Int?, inactive: Int?) -> String {
+    /// O VoiceOver lê a etiqueta inteira de uma vez, dizendo o que é a hora (na tela, só o ícone de
+    /// recarregar diz): "loja Mary, catálogo atualizado em 01/11 às 18:33". Sem nunca ter
+    /// recarregado, só a loja.
+    static func accessibilityLabel(
+        name: String,
+        refreshedAt: Date?,
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> String {
         let store = storeName(name)
-        guard let total = totalProducts(published: published, inactive: inactive) else { return store }
-        var parts: [String] = []
-        if let published {
-            parts.append(published == 1 ? "1 publicado" : "\(published.formatted()) publicados")
-        }
-        if let inactive {
-            parts.append(inactive == 1 ? "1 inativo" : "\(inactive.formatted()) inativos")
-        }
-        return "\(store), \(productCount(total)): \(parts.joined(separator: " e "))"
+        guard let refreshedAt else { return store }
+        return "\(store), catálogo atualizado em \(refreshTime(refreshedAt, now: now, calendar: calendar))"
     }
 }

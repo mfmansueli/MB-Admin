@@ -134,6 +134,7 @@ final class AccountsStore {
             id: record.id,
             user: record.user,
             lastRoundSummary: record.lastRoundSummary,
+            lastCatalogRefresh: record.lastCatalogRefresh,
             dependencies: dependencies
         )
         do {
@@ -253,20 +254,26 @@ final class AccountsStore {
     }
 
     /// Cria a conta e fia os avisos do runner dela: fim de rodada persiste o resumo (o runner só
-    /// sabe observar `phase`, que reseta a cada `start` novo), sessão caída marca a conta.
+    /// sabe observar `phase`, que reseta a cada `start` novo), sessão caída marca a conta. Recarregar
+    /// os produtos também persiste (a hora do toque, ver `AccountSession.lastCatalogRefresh`).
     private func makeAccount(
         id: EnjoeiAccountID,
         user: EnjoeiUser,
         lastRoundSummary: MegaphoneRoundSummary? = nil,
+        lastCatalogRefresh: Date? = nil,
         dependencies: AccountDependencies
     ) -> AccountSession {
         let account = AccountSession(
             id: id,
             user: user,
             lastRoundSummary: lastRoundSummary,
+            lastCatalogRefresh: lastCatalogRefresh,
             dependencies: dependencies,
             megaphoneQueue: megaphoneQueue
         )
+        account.onCatalogRefreshed = { [weak self] in
+            self?.persist()
+        }
         account.runner.onRoundFinished = { [weak self, weak account] summary in
             account?.applyRoundFinished(summary)
             self?.persist()

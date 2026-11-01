@@ -13,6 +13,13 @@ final class AccountSession: Identifiable {
     private(set) var user: EnjoeiUser
     private(set) var status: AccountSessionStatus = .active
     private(set) var lastRoundSummary: MegaphoneRoundSummary?
+    /// Quando o usuário tocou em "recarregar produtos" pela última vez (ver `reloadAllProducts`) —
+    /// é o que a etiqueta da loja mostra no iPhone (`StoreBadge`). O carregamento automático de
+    /// quando a conta ainda não tem nada não conta: só o toque.
+    private(set) var lastCatalogRefresh: Date?
+    /// Chamado a cada recarregar, pra quem guarda o `record` em disco (`AccountsStore`) — mesmo
+    /// esquema de `MegaphoneRunner.onRoundFinished`.
+    var onCatalogRefreshed: (() -> Void)?
 
     let client: EnjoeiClientProtocol
     let runner: MegaphoneRunner
@@ -31,12 +38,14 @@ final class AccountSession: Identifiable {
         id: EnjoeiAccountID,
         user: EnjoeiUser,
         lastRoundSummary: MegaphoneRoundSummary? = nil,
+        lastCatalogRefresh: Date? = nil,
         dependencies: AccountDependencies,
         megaphoneQueue: MegaphoneQueue = MegaphoneQueue()
     ) {
         self.id = id
         self.user = user
         self.lastRoundSummary = lastRoundSummary
+        self.lastCatalogRefresh = lastCatalogRefresh
         client = dependencies.client
         sessionClearer = dependencies.sessionClearer
         webView = dependencies.webView
@@ -82,7 +91,7 @@ final class AccountSession: Identifiable {
     }
 
     var record: AccountRecord {
-        AccountRecord(id: id, user: user, lastRoundSummary: lastRoundSummary)
+        AccountRecord(id: id, user: user, lastRoundSummary: lastRoundSummary, lastCatalogRefresh: lastCatalogRefresh)
     }
 
     func refreshUser(_ user: EnjoeiUser) {
@@ -98,14 +107,21 @@ final class AccountSession: Identifiable {
         status = .checkFailed
     }
 
-    /// Recarrega as três abas do detalhe de uma vez, não só a que está na tela — publicados busca a
-    /// loja de novo do zero, inativos e preço esperto refazem as páginas (é o único jeito de tentar
-    /// de novo manualmente, além do "tentar de novo" que só aparece quando dá erro de verdade). Não
-    /// mexe nos publicados com uma rodada em aberto (`MegaphoneRunner.reload` ignora).
-    func reloadAllProducts() {
+    /// Recarrega as abas do detalhe todas juntas, não só a que está na tela — publicados busca a
+    /// loja de novo do zero, já com a exposição de cada produto (o que decide "pedem desconto"),
+    /// inativos e preço esperto refazem as páginas (é o único jeito de tentar de novo manualmente,
+    /// além do "tentar de novo" que só aparece quando dá erro de verdade). Não mexe nos publicados
+    /// com uma rodada em aberto (`MegaphoneRunner.reload` ignora — e o botão já fica desabilitado
+    /// nesse caso).
+    ///
+    /// Guarda a hora do toque em `lastCatalogRefresh` — a do toque, não a de quando as três
+    /// terminam, que é o que o usuário pediu pra etiqueta da loja mostrar.
+    func reloadAllProducts(now: Date = .now) {
         runner.reload(sellerID: user.id)
         inactiveProductsLoader.load()
         smartPriceProductsLoader.load()
+        lastCatalogRefresh = now
+        onCatalogRefreshed?()
     }
 
     func applyRoundFinished(_ summary: MegaphoneRoundSummary) {

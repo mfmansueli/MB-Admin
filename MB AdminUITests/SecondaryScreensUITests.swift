@@ -117,19 +117,35 @@ final class SecondaryScreensUITests: XCTestCase {
         let app = launchApp()
         openAccount("antonia", in: app)
 
-        // A antonia do modo demo tem 60 publicados e 8 inativos.
+        // Sem nunca ter tocado em recarregar, só o nome — nada de quantidade de produtos.
         let badge = app.descendants(matching: .any)["loja da conta"]
         XCTAssertTrue(badge.waitForExistence(timeout: 5))
-        let total = NSPredicate(format: "label CONTAINS 'loja antonia, 68 produtos'")
-        XCTAssertNotEqual(XCTWaiter.wait(for: [expectation(for: total, evaluatedWith: badge)], timeout: 10), .timedOut)
+        XCTAssertEqual(badge.label, "loja antonia")
         // Em cima do seletor de abas.
         XCTAssertLessThan(badge.frame.maxY, tab("publicados", in: app).frame.minY)
+
+        // Recarregar põe a data e a hora do toque na etiqueta.
+        app.buttons["recarregar produtos"].tap()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd/MM"
+        let refreshed = NSPredicate(
+            format: "label BEGINSWITH %@",
+            "loja antonia, catálogo atualizado em \(formatter.string(from: .now)) às "
+        )
+        XCTAssertNotEqual(XCTWaiter.wait(for: [expectation(for: refreshed, evaluatedWith: badge)], timeout: 10), .timedOut)
         attachScreenshot("etiqueta da loja", of: app)
 
-        // Trocar de aba não muda a loja nem o total.
+        // A quantidade de inativos fica no seletor, à vista de qualquer aba — a antonia do modo
+        // demo tem 8. Publicados e preço esperto continuam só com o nome (a contagem deles está
+        // nas cápsulas de filtro).
+        XCTAssertTrue(app.buttons["inativos (8)"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["publicados"].exists)
+
+        // Trocar de aba não muda a loja nem a hora.
+        let label = badge.label
         tab("inativos", in: app).tap()
         XCTAssertTrue(badge.exists)
-        XCTAssertTrue(badge.label.contains("68 produtos"))
+        XCTAssertEqual(badge.label, label)
 
         // Selecionando, a barra de cima inteira dá lugar à seleção — a etiqueta sai junto.
         tab("publicados", in: app).tap()

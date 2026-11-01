@@ -525,6 +525,32 @@ struct AccountsStoreTests {
         #expect(persistence.stored.first?.lastRoundSummary?.succeeded == 2)
     }
 
+    @Test("recarregar os produtos persiste a hora do toque, e ela volta na próxima abertura")
+    func recarregarPersisteAHora() async {
+        let id = EnjoeiAccountID()
+        let persistence = InMemoryAccountsPersistence()
+        let store = makeStore(clientsByID: [id: StubEnjoeiClient(user: .stub)], persistence: persistence)
+        defer { PerAccountModelContainer.destroy(for: id) }
+        await store.checkLoginFromWebView(accountID: id)
+        let account = store.accounts.first!
+        let tappedAt = Date(timeIntervalSince1970: 1_793_000_000)
+
+        account.reloadAllProducts(now: tappedAt)
+        await account.runner.waitUntilFinished()
+        await waitUntil {
+            account.inactiveProductsLoader.phase == .finished && account.smartPriceProductsLoader.phase == .finished
+        }
+
+        #expect(persistence.stored.first?.lastCatalogRefresh == tappedAt)
+
+        let reopened = makeStore(
+            clientsByID: [id: StubEnjoeiClient(user: .stub)],
+            persistence: InMemoryAccountsPersistence(stored: persistence.stored)
+        )
+        await reopened.restoreAccounts()
+        #expect(reopened.accounts.first?.lastCatalogRefresh == tappedAt)
+    }
+
     /// Espera uma condição sem prender o teste pra sempre se algo der errado — `retryCheckingSession`
     /// dispara a checagem numa `Task` solta, sem devolver algo pra esperar direto.
     private func waitUntil(_ condition: () -> Bool) async {
