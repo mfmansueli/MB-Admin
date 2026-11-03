@@ -86,6 +86,14 @@ nonisolated enum MatchIndexParameters {
     /// versão; o par fica pra revisar.
     static let familyMinimumTitleSimilarity = 0.5
 
+    // MARK: - Aprendido das suas revisões
+
+    /// Quantas revisões de cada resposta ("mesmo produto" **e** "diferentes") entre as duas lojas
+    /// são precisas antes de o índice delas decidir outros pares sozinho (`ReviewLearning`). Com
+    /// menos, ou só de uma resposta, não dá pra saber onde fica a fronteira — tudo continua em
+    /// "precisa revisar".
+    static let learnedVerdictMinimumDecisions = 3
+
     // MARK: - Texto padrão da loja
 
     /// Palavra que aparece na descrição de pelo menos essa fração dos anúncios (com descrição) de uma

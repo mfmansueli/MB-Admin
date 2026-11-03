@@ -24,11 +24,17 @@ import Foundation
 ///
 /// Revisões manuais valem acima de tudo enquanto os anúncios não mudarem (`ListingFingerprint`):
 /// "mesmo produto" vira par confirmado (mesmo com atributo em conflito); "produtos diferentes"
-/// remove a ligação.
+/// remove a ligação. E ensinam (`ReviewLearning`): com exemplos suficientes das duas respostas, um
+/// par em revisão com índice claramente do lado de "mesmo produto" (só um candidato de cada lado)
+/// vira par, e um claramente do lado de "diferentes" sai da revisão — os dois com o motivo dizendo
+/// que veio das suas revisões. Cada decisão recalcula tudo, então uma revisão mexe nas outras listas
+/// na hora.
 ///
 /// Por cima disso, cada loja é comparada com ela mesma (`StoreDuplicateFinder`): o mesmo produto
 /// cadastrado mais de uma vez na mesma loja. Repetidos não são versões um do outro, então não formam
-/// família entre eles. As revisões manuais entre dois anúncios da mesma loja valem só pra isso.
+/// família entre eles. As revisões manuais entre dois anúncios da mesma loja valem só pra isso. Um
+/// anúncio repetido (grupo certo) de um que já tem par na outra loja não fica em revisão com esse par
+/// nem vira "possivelmente ausente": é o mesmo produto, cadastrado de novo.
 nonisolated enum ComparisonResolver {
     static func resolve(
         _ sideA: ComparisonSide,
@@ -88,6 +94,9 @@ nonisolated enum ComparisonResolver {
         private var staleDecisionCount = 0
         private var duplicatesA = StoreDuplicateFinder.Output()
         private var duplicatesB = StoreDuplicateFinder.Output()
+        private var duplicateGroupsA = DuplicateGroupIndex()
+        private var duplicateGroupsB = DuplicateGroupIndex()
+        private var learning = ReviewLearning.none
 
         init(sideA: ComparisonSide, sideB: ComparisonSide, evidence: ComparisonEvidenceBuilder.Output) {
             self.sideA = sideA
@@ -189,6 +198,8 @@ nonisolated enum ComparisonResolver {
                 photosComplete: coverageB.map(\.isEmpty),
                 decisions: decisions.filter { $0.first.sellerID == sideB.sellerID }
             ))
+            duplicateGroupsA = DuplicateGroupIndex(duplicatesA.groups, side: sideA)
+            duplicateGroupsB = DuplicateGroupIndex(duplicatesB.groups, side: sideB)
         }
 
         private static func pairIndex(
@@ -245,7 +256,36 @@ nonisolated enum ComparisonResolver {
                 edges[index].status = outcome.doubts.isEmpty ? .strong : .needsReview
                 edges[index].reasons = (outcome.resolution.map { [$0] } ?? []) + photoReasons(edges[index]) + outcome.doubts
             }
+            applyLearning()
             finishReviews()
+        }
+
+        // MARK: - Aprendido das suas revisões
+
+        /// Os pares em revisão que as suas revisões de outros pares já decidem (`ReviewLearning`).
+        private mutating func applyLearning() {
+            learning = ReviewLearning.learn(from: edges.compactMap { edge in
+                guard let verdict = edge.verdict, !edge.isStaleDecision, !edge.assessment.isVariant else { return nil }
+                return ReviewLearning.Sample(score: edge.score, verdict: verdict)
+            })
+            let candidates = edges.indices.filter { edges[$0].isReview && edges[$0].verdict == nil }.map { index in
+                let edge = edges[index]
+                return ReviewLearning.Candidate(id: index, indexA: edge.indexA, indexB: edge.indexB, score: edge.score, isPhotoLink: edge.kind != .text)
+            }
+            let verdicts = learning.verdicts(
+                for: candidates, matchedA: Set(edges.filter(\.isMatch).map(\.indexA)), matchedB: Set(edges.filter(\.isMatch).map(\.indexB))
+            )
+            for (index, verdict) in verdicts {
+                if verdict == .sameProduct, let floor = learning.sameFloor {
+                    edges[index].status = .strong
+                    edges[index].reasons = [.learnedSame(decisions: learning.sameDecisions, floor: floor)] + photoReasons(edges[index])
+                    learning.learnedSame += 1
+                } else if verdict == .differentProducts, let ceiling = learning.differentCeiling {
+                    edges[index].status = .rejected
+                    edges[index].reasons = [.learnedDifferent(decisions: learning.differentDecisions, ceiling: ceiling)] + kindReasons(edges[index])
+                    learning.learnedDifferent += 1
+                }
+            }
         }
 
         /// O que impede uma "mesma foto" de virar par sozinha — e, quando a mesma foto liga outras
@@ -316,15 +356,20 @@ nonisolated enum ComparisonResolver {
         ///   tem par: aquele anúncio já é a mesma fotografia de outro, e esta é só uma peça parecida
         ///   (comum em catálogos de joias com fundo branco). Com texto parecido junto, fica.
         private mutating func finishReviews() {
-            let matchedA = Set(edges.filter(\.isMatch).map(\.indexA))
-            let matchedB = Set(edges.filter(\.isMatch).map(\.indexB))
+            let matches = edges.filter(\.isMatch)
+            let matchedA = Set(matches.map(\.indexA))
+            let matchedB = Set(matches.map(\.indexB))
+            // Um repetido do anúncio que já tem par também é aquele produto: nada a revisar.
+            let pairedA = duplicateGroupsA.paired(matches.map { (here: $0.indexA, other: $0.indexB) })
+            let pairedB = duplicateGroupsB.paired(matches.map { (here: $0.indexB, other: $0.indexA) })
             for index in edges.indices where edges[index].isReview {
                 let edge = edges[index]
+                let isDuplicateOfPair = pairedA.explains(edge.indexA, with: edge.indexB) || pairedB.explains(edge.indexB, with: edge.indexA)
                 let isMatchedA = matchedA.contains(edge.indexA)
                 let isMatchedB = matchedB.contains(edge.indexB)
                 let isWeakSimilar = edge.kind == .similar && edge.evidence.photo?.colorsDiffer != true
                     && edge.evidence.textSimilarity < Limits.textCandidateThreshold
-                if (isMatchedA && isMatchedB) || ((edge.kind == .text || isWeakSimilar) && (isMatchedA || isMatchedB)) {
+                if isDuplicateOfPair || (isMatchedA && isMatchedB) || ((edge.kind == .text || isWeakSimilar) && (isMatchedA || isMatchedB)) {
                     edges[index].isDropped = true
                     continue
                 }
@@ -354,8 +399,9 @@ nonisolated enum ComparisonResolver {
         // MARK: - Resultado
 
         func result(runID: UUID, revision: Int) -> AccountComparisonResult {
-            let connectedA = Set(edges.filter { $0.isMatch || $0.isReview }.map(\.indexA))
-            let connectedB = Set(edges.filter { $0.isMatch || $0.isReview }.map(\.indexB))
+            // Repetido de um anúncio que tem par (ou revisão) na outra loja também está lá.
+            let connectedA = duplicateGroupsA.expanding(Set(edges.filter { $0.isMatch || $0.isReview }.map(\.indexA)))
+            let connectedB = duplicateGroupsB.expanding(Set(edges.filter { $0.isMatch || $0.isReview }.map(\.indexB)))
             let matchedA = Set(edges.filter(\.isMatch).map(\.indexA))
             let matchedB = Set(edges.filter(\.isMatch).map(\.indexB))
             // Anúncios sem par que não deu pra analisar por inteiro — podem ser o par de alguém.
@@ -375,8 +421,8 @@ nonisolated enum ComparisonResolver {
             return AccountComparisonResult(
                 id: runID,
                 revision: revision,
-                storeA: summary(of: sideA, unverified: absenceA.unverified),
-                storeB: summary(of: sideB, unverified: absenceB.unverified),
+                storeA: .make(sideA, unverified: absenceA.unverified),
+                storeB: .make(sideB, unverified: absenceB.unverified),
                 matches: edges.filter(\.isMatch).map(makeMatch),
                 reviews: reviews.map(makeMatch),
                 rejected: edges.filter { !$0.isDropped && $0.status == .rejected }.map(makeMatch),
@@ -391,7 +437,8 @@ nonisolated enum ComparisonResolver {
                     .union(duplicatesA.keysWantingDetails).union(duplicatesB.keysWantingDetails),
                 duplicatesA: duplicatesA.groups,
                 duplicatesB: duplicatesB.groups,
-                dismissedDuplicates: duplicatesA.dismissed + duplicatesB.dismissed
+                dismissedDuplicates: duplicatesA.dismissed + duplicatesB.dismissed,
+                learning: learning
             )
         }
 
@@ -487,17 +534,6 @@ nonisolated enum ComparisonResolver {
         }
 
         // MARK: - Montagem
-
-        private func summary(of side: ComparisonSide, unverified: [UnverifiedListing]) -> ComparisonStoreSummary {
-            ComparisonStoreSummary(
-                sellerID: side.sellerID,
-                name: side.name,
-                status: side.status,
-                listingCount: side.listings.count,
-                listingsWithPhotoFailures: unverified.count { $0.reasons.contains { if case .photosFailed = $0 { true } else { false } } },
-                listingsWithDetailsFailures: unverified.count { $0.reasons.contains(.detailsUnavailable) }
-            )
-        }
 
         private func makeMatch(_ edge: Edge) -> ProductMatch {
             let listingA = sideA.listings[edge.indexA]

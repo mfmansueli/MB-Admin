@@ -12,7 +12,8 @@ import Foundation
 /// Por cima dos estados, `families` agrupa os anúncios que dividem a mesma foto em versões (aro,
 /// banho, cor, medida) com onde cada versão está, e `otherVersions` diz, de um possivelmente
 /// ausente, quais versões dele a outra loja tem. `duplicatesA`/`duplicatesB` são o mesmo produto
-/// cadastrado mais de uma vez dentro de cada loja (`StoreDuplicateFinder`).
+/// cadastrado mais de uma vez dentro de cada loja (`StoreDuplicateFinder`). `learning` diz o que as
+/// suas revisões decidiram sozinhas em outros pares (`ReviewLearning`).
 nonisolated struct AccountComparisonResult: Equatable, Sendable {
     /// Da rodada de comparação — não muda quando uma revisão manual recalcula o resultado (só
     /// `revision`), pra tela não perder busca/filtro a cada decisão. Comparar de novo gera outro.
@@ -44,6 +45,8 @@ nonisolated struct AccountComparisonResult: Equatable, Sendable {
     let duplicatesB: [StoreDuplicateGroup]
     /// Grupos das duas lojas que você marcou como não repetidos (pra poder desfazer).
     let dismissedDuplicates: [StoreDuplicateGroup]
+    /// Onde as suas revisões põem a fronteira do índice, e quantos pares ela decidiu nesta rodada.
+    let learning: ReviewLearning
 
     init(
         id: UUID = UUID(),
@@ -63,7 +66,8 @@ nonisolated struct AccountComparisonResult: Equatable, Sendable {
         keysWantingDetails: Set<ListingKey> = [],
         duplicatesA: [StoreDuplicateGroup] = [],
         duplicatesB: [StoreDuplicateGroup] = [],
-        dismissedDuplicates: [StoreDuplicateGroup] = []
+        dismissedDuplicates: [StoreDuplicateGroup] = [],
+        learning: ReviewLearning = .none
     ) {
         self.id = id
         self.revision = revision
@@ -83,6 +87,7 @@ nonisolated struct AccountComparisonResult: Equatable, Sendable {
         self.duplicatesA = duplicatesA
         self.duplicatesB = duplicatesB
         self.dismissedDuplicates = dismissedDuplicates
+        self.learning = learning
     }
 
     var unverifiedCount: Int { unverifiedA.count + unverifiedB.count }

@@ -166,7 +166,7 @@ struct ComparisonPairDetailSheet: View {
     private var decisionSection: some View {
         Section {
             switch match.status {
-            case .strong, .needsReview:
+            case _ where match.isLearned, .strong, .needsReview:
                 decisionButton("é o mesmo produto", systemImage: "equal.circle", verdict: .sameProduct)
                 decisionButton("são produtos diferentes", systemImage: "nosign", verdict: .differentProducts)
             case .confirmed:

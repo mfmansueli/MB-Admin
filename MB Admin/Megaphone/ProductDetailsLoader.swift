@@ -73,6 +73,13 @@ final class ProductDetailsLoader {
         detailsPersistence.details(for: productIDs)
     }
 
+    /// Esquece os templates salvos desta conta (fotos, tamanho, marca, categoria, descrição da
+    /// comparação) — a próxima comparação busca de novo os que precisar. A descrição da lista de
+    /// publicados (`itemsPersistence`) fica: é a do megafone, não a da comparação.
+    func forgetStoredDetails() {
+        detailsPersistence.removeAll()
+    }
+
     /// Busca o template de cada produto da lista, nessa ordem, um de cada vez no ritmo de
     /// `delayBetweenProducts` — estruturado (quem chama espera e cancela pela própria `Task`), com até
     /// `PhotoMatchingParameters.detailsFetchAttempts` tentativas por produto. Cada resposta é gravada na

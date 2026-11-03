@@ -20,5 +20,9 @@ final class InMemoryProductListingDetailsPersistence: ProductListingDetailsPersi
         stored[details.productID] = details
     }
 
+    func removeAll() {
+        stored.removeAll()
+    }
+
     var count: Int { stored.count }
 }

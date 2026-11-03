@@ -40,6 +40,15 @@ final class SwiftDataListingDetailsPersistence: ProductListingDetailsPersisting 
         try? context.save()
     }
 
+    /// Registro por registro, não `delete(model:)`: a exclusão em lote vai direto no arquivo e os
+    /// registros que este contexto já carregou continuavam voltando nas buscas.
+    func removeAll() {
+        for record in (try? context.fetch(FetchDescriptor<ProductListingDetailsRecord>())) ?? [] {
+            context.delete(record)
+        }
+        try? context.save()
+    }
+
     var count: Int {
         (try? context.fetchCount(FetchDescriptor<ProductListingDetailsRecord>())) ?? 0
     }

@@ -5,9 +5,11 @@ import SwiftUI
 /// de cada loja, possivelmente ausentes em cada loja (com a nota de quando a outra loja tem outra
 /// versão), não deu pra verificar e marcados como diferentes — com o
 /// aviso de comparação incompleta no topo, o filtro na barra de cima, a busca (no iPhone, a lupa na
-/// barra de baixo) e a seleção múltipla **só** dos possivelmente ausentes pra mandar pra fila de
-/// ações. Quem chama passa `.id(result.id)`: cada comparação nova nasce com busca/filtro/seleção
-/// zerados, mas uma revisão manual (mesmo `id`, `revision` nova) só atualiza as seções.
+/// barra de baixo) e a seleção múltipla pra fila de ações: os possivelmente ausentes (postar na outra
+/// loja) e os grupos de repetidos certos (fica o anúncio de "manter", os outros vão pra fila pra
+/// serem apagados — `DuplicateCleanup`). Quem chama passa `.id(result.id)`: cada comparação nova
+/// nasce com busca/filtro/seleção zerados, mas uma revisão manual (mesmo `id`, `revision` nova) só
+/// atualiza as seções.
 ///
 /// Desempenho com milhares de produtos: cada linha é filha direta da `LazyVStack` (o cartão é
 /// desenhado linha a linha, `ComparisonCardRow`), então só as linhas perto da tela existem — com
@@ -28,7 +30,8 @@ struct ComparisonResultView: View {
     @State private var resultFilter: ComparisonResultFilter = .all
     @State private var searchText = ""
     @State private var isSelecting = false
-    @State private var selectedProductIDs: Set<Int> = []
+    @State private var selection = ComparisonSelection()
+    @State private var isConfirmingDuplicateDeletion = false
     /// Cache do filtro + busca (ver `recomputeFilteredItems`) — sem isso, o filtro rodava sobre os
     /// três resultados inteiros a cada leitura no `body`, várias vezes por render, numa comparação
     /// com muitos produtos. Mesmo raciocínio de `AccountPublishedTabView.sections`. Já nasce montado
@@ -65,11 +68,14 @@ struct ComparisonResultView: View {
     private var isCompact: Bool { horizontalSizeClass != .regular }
 
     var body: some View {
-        resultList
+        // Uma vez por render: os anúncios dos repetidos que já estão na fila, apagando ou apagados.
+        let states = duplicateStates()
+        let selectableGroups = selectableGroupIDs(states)
+        resultList(states: states)
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle(isSelecting ? selectionTitle : "comparar produtos")
             .navigationSubtitleIfAvailable(subtitle)
-            .toolbar { toolbarContent }
+            .toolbar { toolbarContent(selectableGroups: selectableGroups) }
             // Mesmo esquema da aba "publicados": a busca só existe fora da seleção, num fundo vazio
             // (pôr/tirar `.searchable` da própria lista trocaria a identidade dela).
             .background {
@@ -81,8 +87,22 @@ struct ComparisonResultView: View {
             }
             .floatingBottomBar {
                 if isSelecting {
-                    selectionBar
+                    ComparisonSelectionBar(
+                        showsPost: !filtered.selectableIDs.isEmpty,
+                        postCount: selection.productIDs.count,
+                        showsDelete: !selectableGroups.isEmpty,
+                        deleteCount: duplicateDeletions(states).count,
+                        onPost: enqueueSelected,
+                        onDelete: { isConfirmingDuplicateDeletion = true }
+                    )
                 }
+            }
+            .permanentDeleteConfirmation(
+                isPresented: $isConfirmingDuplicateDeletion,
+                productCount: duplicateDeletions(states).count,
+                note: duplicateDeletionNote(count: duplicateDeletions(states).count)
+            ) {
+                deleteSelectedDuplicates()
             }
             .toolbar(isSelecting ? .hidden : .automatic, for: .bottomBar)
             // Uma revisão manual recalcula o resultado com o mesmo `id` — só refiltra.
@@ -90,7 +110,7 @@ struct ComparisonResultView: View {
             .onChange(of: resultFilter) { _, _ in
                 // Trocar de filtro com itens marcados deixaria parte da seleção escondida, mas
                 // ainda indo pra fila.
-                selectedProductIDs.removeAll()
+                selection.removeAll()
                 recomputeFilteredItems()
             }
             // Debounce: espera a digitação parar por 200ms antes de refiltrar, mesmo raciocínio de
@@ -107,15 +127,19 @@ struct ComparisonResultView: View {
 
     private func recomputeFilteredItems() {
         filtered = ComparisonFilteredResult(result: result, filter: resultFilter, searchText: searchText)
-        // Um produto que deixou de ser "possivelmente ausente" (revisão manual) sai da seleção.
-        selectedProductIDs.formIntersection(filtered.selectableIDs)
+        // Um produto que deixou de ser "possivelmente ausente" (revisão manual), ou um grupo que
+        // deixou de ser repetido certo, sai da seleção.
+        selection.keepOnly(
+            productIDs: Set(filtered.selectableIDs),
+            groupIDs: Set((filtered.duplicatesA + filtered.duplicatesB).filter(\.isCertain).map(\.id))
+        )
     }
 
     private var selectionTitle: String {
-        switch selectedProductIDs.count {
+        switch selection.count {
         case 0: "selecionar produtos"
         case 1: "1 selecionado"
-        default: "\(selectedProductIDs.count) selecionados"
+        default: "\(selection.count) selecionados"
         }
     }
 
@@ -131,8 +155,8 @@ struct ComparisonResultView: View {
     // MARK: - Lista
 
     @ViewBuilder
-    private var resultList: some View {
-        if filtered.isEmpty, !showsProblems {
+    private func resultList(states: [Int: DuplicateListingState]) -> some View {
+        if filtered.isEmpty, !showsProblems, !(searchText.isEmpty && result.learning.hasChanges) {
             ContentUnavailableView.search(text: searchText)
                 .frame(maxHeight: .infinity)
         } else {
@@ -145,11 +169,14 @@ struct ComparisonResultView: View {
                     if showsProblems {
                         ComparisonProblemsCard(result: result, onRetry: onRetry)
                     }
+                    if searchText.isEmpty, result.learning.hasChanges {
+                        ComparisonLearningCard(learning: result.learning)
+                    }
                     pairSection("mesmo produto", filtered.matches)
                     pairSection("precisa revisar", filtered.reviews)
                     familySection
-                    duplicateSection(filtered.duplicatesA, storeName: accountA.user.name)
-                    duplicateSection(filtered.duplicatesB, storeName: accountB.user.name)
+                    duplicateSection(filtered.duplicatesA, storeName: accountA.user.name, states: states)
+                    duplicateSection(filtered.duplicatesB, storeName: accountB.user.name, states: states)
                     if !filtered.missingInB.isEmpty {
                         // Só existe em A — postar cria ele em B.
                         missingSection(filtered.missingInB, source: accountA, destination: accountB)
@@ -175,7 +202,7 @@ struct ComparisonResultView: View {
     @ViewBuilder
     private func pairSection(_ title: String, _ matches: [ProductMatch]) -> some View {
         if !matches.isEmpty {
-            sectionHeader(title, count: matches.count, selectableIDs: nil)
+            sectionHeader(title, count: matches.count)
             pairRows(matches, isFirstSegment: true, isLastSegment: true)
         }
     }
@@ -206,7 +233,7 @@ struct ComparisonResultView: View {
     private var familySection: some View {
         let families = filtered.families
         if !families.isEmpty {
-            sectionHeader("produtos com variantes", count: families.count, selectableIDs: nil)
+            sectionHeader("produtos com variantes", count: families.count)
             let firstID = families.first?.id
             let lastID = families.last?.id
             ForEach(families) { family in
@@ -221,21 +248,44 @@ struct ComparisonResultView: View {
     }
 
     @ViewBuilder
-    private func duplicateSection(_ groups: [StoreDuplicateGroup], storeName: String) -> some View {
+    private func duplicateSection(_ groups: [StoreDuplicateGroup], storeName: String, states: [Int: DuplicateListingState]) -> some View {
         if !groups.isEmpty {
-            sectionHeader("repetidos em \(storeName)", count: groups.count, selectableIDs: nil)
-            duplicateRows(groups, isFirstSegment: true, isLastSegment: true)
+            sectionHeader(
+                "repetidos em \(storeName)",
+                count: groups.count,
+                selectableGroupIDs: groups.filter { DuplicateCleanup.isSelectable($0, states: states) }.map(\.id)
+            )
+            duplicateRows(groups, states: states, isFirstSegment: true, isLastSegment: true)
         }
     }
 
-    private func duplicateRows(_ groups: [StoreDuplicateGroup], isFirstSegment: Bool, isLastSegment: Bool) -> some View {
+    private func duplicateRows(
+        _ groups: [StoreDuplicateGroup],
+        states: [Int: DuplicateListingState],
+        isFirstSegment: Bool,
+        isLastSegment: Bool
+    ) -> some View {
         let firstID = groups.first?.id
         let lastID = groups.last?.id
         return ForEach(groups) { group in
+            let groupStates = Dictionary(uniqueKeysWithValues: group.products.compactMap { product in states[product.id].map { (product.id, $0) } })
+            let choice = selection.keptByGroup[group.id]
             StoreDuplicateRowView(
                 group: group,
+                states: groupStates,
+                isSelecting: isSelecting,
+                isSelected: selection.groupIDs.contains(group.id),
+                keptID: DuplicateCleanup.isSelectable(group, states: groupStates)
+                    ? DuplicateCleanup.kept(group, choice: choice, states: groupStates)
+                    : nil,
                 onDecide: { verdict in onDecideDuplicate(verdict, group) },
-                onUndo: { onUndoDuplicate(group) }
+                onUndo: { onUndoDuplicate(group) },
+                onChooseKept: {
+                    selection.select(groupID: group.id)
+                    isSelecting = true
+                },
+                onToggleSelection: { selection.toggle(groupID: group.id) },
+                onKeep: { productID in selection.keep(productID, inGroup: group.id) }
             )
             .equatable()
             .comparisonCardRow(isFirst: isFirstSegment && group.id == firstID, isLast: isLastSegment && group.id == lastID)
@@ -250,7 +300,7 @@ struct ComparisonResultView: View {
         let listingsA = filtered.unverifiedA
         let listingsB = filtered.unverifiedB
         if !listingsA.isEmpty || !listingsB.isEmpty {
-            sectionHeader("não deu pra verificar", count: listingsA.count + listingsB.count, selectableIDs: nil)
+            sectionHeader("não deu pra verificar", count: listingsA.count + listingsB.count)
             unverifiedRows(listingsA, storeName: accountA.user.name, isFirstSegment: true, isLastSegment: listingsB.isEmpty)
             unverifiedRows(listingsB, storeName: accountB.user.name, isFirstSegment: listingsA.isEmpty, isLastSegment: true)
         }
@@ -281,9 +331,9 @@ struct ComparisonResultView: View {
         let pairs = filtered.rejected
         let groups = filtered.dismissedDuplicates
         if !pairs.isEmpty || !groups.isEmpty {
-            sectionHeader("marcados como diferentes", count: pairs.count + groups.count, selectableIDs: nil)
+            sectionHeader("marcados como diferentes", count: pairs.count + groups.count)
             pairRows(pairs, isFirstSegment: true, isLastSegment: groups.isEmpty)
-            duplicateRows(groups, isFirstSegment: pairs.isEmpty, isLastSegment: true)
+            duplicateRows(groups, states: [:], isFirstSegment: pairs.isEmpty, isLastSegment: true)
         }
     }
 
@@ -312,8 +362,8 @@ struct ComparisonResultView: View {
                         storeName: destination.user.name
                     ),
                     isSelecting: isSelecting,
-                    isSelected: selectedProductIDs.contains(product.id),
-                    onToggleSelection: { toggleSelection(productID: product.id) }
+                    isSelected: selection.productIDs.contains(product.id),
+                    onToggleSelection: { selection.toggle(productID: product.id) }
                 )
                 .equatable()
                 .comparisonCardRow(isFirst: product.id == firstID, isLast: product.id == lastID)
@@ -333,17 +383,17 @@ struct ComparisonResultView: View {
 
     /// "mesmo produto · 90" — nas seções selecionáveis, com "todos"/"nenhum" daquela seção à
     /// direita durante a seleção.
-    private func sectionHeader(_ title: String, count: Int, selectableIDs: [Int]?) -> some View {
+    private func sectionHeader(_ title: String, count: Int, selectableIDs: [Int] = [], selectableGroupIDs: [String] = []) -> some View {
         HStack(spacing: 8) {
             Text("\(title) · \(count.formatted())")
                 .foregroundStyle(.supportingText)
                 .lineLimit(1)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 0)
-            if isSelecting, let selectableIDs {
-                let isFullySelected = selectableIDs.allSatisfy(selectedProductIDs.contains)
+            if isSelecting, !selectableIDs.isEmpty || !selectableGroupIDs.isEmpty {
+                let isFullySelected = selection.isFullySelected(productIDs: selectableIDs, groupIDs: selectableGroupIDs)
                 Button(isFullySelected ? "nenhum" : "todos") {
-                    selectedProductIDs = PublishedProductSections.togglingAll(selectableIDs, in: selectedProductIDs)
+                    selection.toggleAll(productIDs: selectableIDs, groupIDs: selectableGroupIDs)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.tint)
@@ -360,11 +410,12 @@ struct ComparisonResultView: View {
     // MARK: - Barras
 
     @ToolbarContentBuilder
-    private var toolbarContent: some ToolbarContent {
+    private func toolbarContent(selectableGroups: [String]) -> some ToolbarContent {
         if isSelecting {
             ToolbarItem(placement: .topBarLeading) {
+                let isAllSelected = selection.isFullySelected(productIDs: filtered.selectableIDs, groupIDs: selectableGroups)
                 Button(isAllSelected ? "nenhum" : "todos") {
-                    selectedProductIDs = PublishedProductSections.togglingAll(filtered.selectableIDs, in: selectedProductIDs)
+                    selection.toggleAll(productIDs: filtered.selectableIDs, groupIDs: selectableGroups)
                 }
                 .fixedSize()
             }
@@ -393,11 +444,11 @@ struct ComparisonResultView: View {
                     }
                 }
                 ToolbarItem(placement: .bottomBar) {
-                    selectButton
+                    selectButton(hasSelectableGroups: !selectableGroups.isEmpty)
                 }
             } else {
                 ToolbarItem(placement: .topBarTrailing) {
-                    selectButton
+                    selectButton(hasSelectableGroups: !selectableGroups.isEmpty)
                 }
             }
         }
@@ -406,9 +457,9 @@ struct ComparisonResultView: View {
     /// Sempre habilitado — sem nada selecionável (só pares/revisões, ou tudo filtrado) o toque não faz
     /// nada; um item da barra que se desabilita sozinho derruba o app no Mac (ver
     /// `ToolbarItemDisabled`).
-    private var selectButton: some View {
+    private func selectButton(hasSelectableGroups: Bool) -> some View {
         Button("selecionar") {
-            guard !filtered.selectableIDs.isEmpty else { return }
+            guard !filtered.selectableIDs.isEmpty || hasSelectableGroups else { return }
             isSelecting = true
         }
         .fixedSize()
@@ -430,53 +481,64 @@ struct ComparisonResultView: View {
         }
     }
 
-    /// Uma ação só: mandar o que está marcado pra fila de ações, cada um pra conta onde ele
-    /// possivelmente não existe.
-    private var selectionBar: some View {
-        Button {
-            enqueueSelected()
-        } label: {
-            Label(
-                selectedProductIDs.isEmpty ? "adicionar à fila" : "adicionar \(selectedProductIDs.count) à fila",
-                systemImage: "paperplane.fill"
-            )
-            .frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.tinted(.accentColor, size: 50))
-        .disabled(selectedProductIDs.isEmpty)
-        .frame(maxWidth: 520)
-        .padding(.horizontal, 16)
-        .padding(.bottom, 8)
-    }
-
     // MARK: - Seleção
 
-    private var isAllSelected: Bool {
-        !filtered.selectableIDs.isEmpty && filtered.selectableIDs.allSatisfy(selectedProductIDs.contains)
-    }
-
-    private func toggleSelection(productID: Int) {
-        if selectedProductIDs.contains(productID) {
-            selectedProductIDs.remove(productID)
-        } else {
-            selectedProductIDs.insert(productID)
-        }
-    }
-
     private func endSelection() {
-        selectedProductIDs.removeAll()
+        selection.removeAll()
         isSelecting = false
     }
 
     /// Resolve cada id selecionado contra o resultado **completo** (não o filtrado pela busca),
     /// pra achar a origem/destino certos mesmo se o texto de busca mudar antes de confirmar.
     private func enqueueSelected() {
-        for product in result.possiblyMissingInB where selectedProductIDs.contains(product.id) {
+        for product in result.possiblyMissingInB where selection.productIDs.contains(product.id) {
             postQueue.enqueue(product: product, source: accountA, destination: accountB)
         }
-        for product in result.possiblyMissingInA where selectedProductIDs.contains(product.id) {
+        for product in result.possiblyMissingInA where selection.productIDs.contains(product.id) {
             postQueue.enqueue(product: product, source: accountB, destination: accountA)
         }
-        endSelection()
+        selection.removeProducts()
+        if selection.isEmpty { endSelection() }
+    }
+
+    // MARK: - Repetidos
+
+    /// Os anúncios de todos os grupos de repetidos (não só os filtrados): na fila, apagando, apagados.
+    private func duplicateStates() -> [Int: DuplicateListingState] {
+        var reader = DuplicateListingStateReader(queue: postQueue)
+        return reader.states(of: result.duplicatesA, account: accountA)
+            .merging(reader.states(of: result.duplicatesB, account: accountB)) { $1 }
+    }
+
+    /// Os grupos na tela em que dá pra escolher um e apagar os outros.
+    private func selectableGroupIDs(_ states: [Int: DuplicateListingState]) -> [String] {
+        (filtered.duplicatesA + filtered.duplicatesB).filter { DuplicateCleanup.isSelectable($0, states: states) }.map(\.id)
+    }
+
+    /// Cada anúncio a mais dos grupos marcados, com a conta dele — contra o resultado completo.
+    private func duplicateDeletions(_ states: [Int: DuplicateListingState]) -> [(product: EnjoeiProduct, account: AccountSession)] {
+        guard !selection.groupIDs.isEmpty else { return [] }
+        return [(result.duplicatesA, accountA), (result.duplicatesB, accountB)].flatMap { groups, account in
+            groups
+                .filter { selection.groupIDs.contains($0.id) }
+                .flatMap { DuplicateCleanup.deletions($0, choice: selection.keptByGroup[$0.id], states: states) }
+                .map { (product: $0, account: account) }
+        }
+    }
+
+    private func duplicateDeletionNote(count: Int) -> String {
+        let kept = "fica um anúncio de cada produto: o marcado como \"manter\"."
+        guard count > 1 else { return kept }
+        return "\(kept) \(PostQueueStatusText.queuePaceNote(interval: postQueue.interval(for: .delete)))"
+    }
+
+    /// Lê o estado de novo na hora de confirmar — algo pode ter entrado na fila enquanto o alerta
+    /// estava aberto.
+    private func deleteSelectedDuplicates() {
+        for deletion in duplicateDeletions(duplicateStates()) {
+            postQueue.enqueueDelete(product: deletion.product, account: deletion.account)
+        }
+        selection.removeGroups()
+        if selection.isEmpty { endSelection() }
     }
 }

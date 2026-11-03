@@ -145,26 +145,38 @@ struct AccountComparisonView: View {
                 }
                 .disabled(loader.isRunning)
 
-                Button {
-                    guard let accountA, let accountB else { return }
-                    loader.compare(
-                        accountA: accountA,
-                        accountB: accountB,
-                        services: accountsStore.comparisonServices,
-                        matchMemory: accountsStore.comparisonMatches,
-                        checkAllDetails: checkAllDetails
-                    )
-                } label: {
-                    // `.onTint`: o estilo proeminente pinta o texto de branco, que some em cima da
-                    // ação principal no modo escuro (`#F2F2F7`).
-                    Text("comparar")
-                        .foregroundStyle(.onTint)
-                        .frame(maxWidth: .infinity)
+                HStack(spacing: 8) {
+                    Button {
+                        startComparison(refreshing: false)
+                    } label: {
+                        // `.onTint`: o estilo proeminente pinta o texto de branco, que some em cima da
+                        // ação principal no modo escuro (`#F2F2F7`).
+                        Text("comparar")
+                            .foregroundStyle(.onTint)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    // Distingue do "comparar" da lista de contas, por baixo da folha (testes de UI).
+                    .accessibilityIdentifier("startComparison")
+
+                    Button {
+                        startComparison(refreshing: true)
+                    } label: {
+                        Label("atualizar", systemImage: "arrow.clockwise")
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("refreshComparison")
                 }
-                .buttonStyle(.borderedProminent)
                 .disabled(accountA == nil || accountB == nil || loader.isRunning)
-                // Distingue do "comparar" da lista de contas, por baixo da folha (testes de UI).
-                .accessibilityIdentifier("startComparison")
+
+                Text(
+                    "\"atualizar\" compara como na primeira vez: lê de novo a descrição, o tamanho e as fotos dos anúncios "
+                        + "em vez de usar o que ficou salvo das duas lojas — mais lento."
+                )
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Depois de "nova comparação", o resultado anterior continua valendo até outra
                 // comparação começar.
@@ -355,6 +367,20 @@ struct AccountComparisonView: View {
         if let id = loader.accountBID, !ids.contains(id) { loader.accountBID = nil }
         if loader.accountAID == nil { loader.accountAID = accounts.first { $0.id != loader.accountBID }?.id }
         if loader.accountBID == nil { loader.accountBID = accounts.first { $0.id != loader.accountAID }?.id }
+    }
+
+    /// "atualizar" (`refreshing`) esquece os templates salvos das duas contas antes — ver
+    /// `AccountComparisonLoader.compare`.
+    private func startComparison(refreshing: Bool) {
+        guard let accountA, let accountB else { return }
+        loader.compare(
+            accountA: accountA,
+            accountB: accountB,
+            services: accountsStore.comparisonServices,
+            matchMemory: accountsStore.comparisonMatches,
+            checkAllDetails: checkAllDetails,
+            refreshing: refreshing
+        )
     }
 
     private func showLastComparison() {

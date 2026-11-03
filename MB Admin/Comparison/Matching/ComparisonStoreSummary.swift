@@ -11,6 +11,17 @@ nonisolated struct ComparisonStoreSummary: Equatable, Sendable {
     /// Anúncios cujo template (todas as fotos) falhou.
     let listingsWithDetailsFailures: Int
 
+    static func make(_ side: ComparisonSide, unverified: [UnverifiedListing]) -> ComparisonStoreSummary {
+        ComparisonStoreSummary(
+            sellerID: side.sellerID,
+            name: side.name,
+            status: side.status,
+            listingCount: side.listings.count,
+            listingsWithPhotoFailures: unverified.count { $0.reasons.contains { if case .photosFailed = $0 { true } else { false } } },
+            listingsWithDetailsFailures: unverified.count { $0.reasons.contains(.detailsUnavailable) }
+        )
+    }
+
     var problems: [String] {
         var problems: [String] = []
         if let listing = status.problemText { problems.append(listing) }

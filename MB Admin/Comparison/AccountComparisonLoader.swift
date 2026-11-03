@@ -19,6 +19,11 @@ import Observation
 /// `.interrupted` — nunca em `.finished` — e "continuar" retoma de onde parou (templates e
 /// assinaturas já ficaram salvos).
 ///
+/// A listagem é sempre buscada de novo; o template salvo vale enquanto a capa for a mesma (até
+/// `listingDetailsMaxAge`). "Atualizar" (`compare(…, refreshing: true)`) esquece os templates das
+/// duas contas antes de começar — pra quando um anúncio mudou de descrição, tamanho ou fotos sem
+/// trocar a capa.
+///
 /// **O resultado fica.** Um só por app (`AccountsStore.comparisonLoader`), então fechar a tela não
 /// perde nada (uma comparação em andamento continua por trás). A última comparação terminada também
 /// vai pro disco (`ComparisonSnapshot`): reabrir o app refaz o mesmo resultado sem rede. Só começar
@@ -98,14 +103,23 @@ final class AccountComparisonLoader {
         self.snapshots = snapshots
     }
 
+    /// - Parameter refreshing: o "atualizar" — além da listagem (que toda comparação busca de novo),
+    ///   esquece os templates salvos das duas contas (fotos, tamanho, marca, descrição), pra cada
+    ///   anúncio que a comparação precisar ser lido de novo como está hoje na loja. As assinaturas das
+    ///   fotos ficam: o id público é do arquivo, e foto trocada chega com outro id.
     func compare(
         accountA: AccountSession,
         accountB: AccountSession,
         services: ComparisonServices,
         matchMemory: ComparisonMatchMemory? = nil,
-        checkAllDetails: Bool = false
+        checkAllDetails: Bool = false,
+        refreshing: Bool = false
     ) {
         guard task == nil else { return }
+        if refreshing {
+            accountA.productDetailsLoader.forgetStoredDetails()
+            accountB.productDetailsLoader.forgetStoredDetails()
+        }
         cachedListings = nil
         // Começar outra comparação é o que descarta a anterior (o arquivo é apagado no começo da
         // rodada, antes de qualquer gravação nova).

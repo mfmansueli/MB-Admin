@@ -353,6 +353,51 @@ final class SecondaryScreensUITests: XCTestCase {
         XCTAssertTrue(element(in: app.staticTexts, containing: "mesmo produto ·").waitForExistence(timeout: 5))
     }
 
+    /// "atualizar" compara do zero; nos repetidos de antonia, escolher qual anúncio fica e mandar o
+    /// outro pra fila pra ser apagado. Só na demonstração: a loja é falsa, nada sai do app.
+    @MainActor
+    func testRepetidosEscolheQualManterEApagaOOutro() {
+        let app = launchApp()
+        XCTAssertTrue(app.staticTexts["antonia"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["loja B"].waitForExistence(timeout: 10))
+
+        element(in: app.buttons, containing: "comparar").tap()
+        let refresh = app.buttons["refreshComparison"]
+        XCTAssertTrue(refresh.waitForExistence(timeout: 5))
+        attachScreenshot("comparar com atualizar", of: app)
+        refresh.tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "mesmo produto ·").waitForExistence(timeout: 90))
+
+        app.buttons["filtrar resultados"].tap()
+        element(in: app.buttons, containing: "repetidos na mesma loja (").tap()
+        let choose = app.buttons["escolher qual anúncio manter"]
+        XCTAssertTrue(choose.waitForExistence(timeout: 5))
+        choose.tap()
+
+        // O mais antigo vem marcado pra manter; tocar no outro troca qual fica.
+        let newer = app.buttons["duplicateListing-1001045"]
+        XCTAssertTrue(newer.waitForExistence(timeout: 5))
+        XCTAssertTrue(newer.label.contains("apagar"))
+        newer.tap()
+        XCTAssertTrue(app.buttons["duplicateListing-1001035"].label.contains("apagar"))
+        attachScreenshot("repetidos escolhendo qual manter", of: app)
+
+        let delete = app.buttons["deleteDuplicates"]
+        XCTAssertTrue(delete.isEnabled)
+        delete.tap()
+        let confirm = app.alerts.buttons["apagar permanentemente"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        confirm.tap()
+
+        // Na fila — ou já apagando/apagado, a demonstração é rápida. O que fica não muda.
+        let state = app.staticTexts.matching(
+            NSPredicate(format: "label == 'na fila pra apagar' OR label == 'apagando…' OR label == 'apagado'")
+        ).firstMatch
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'pra apagar' OR label BEGINSWITH 'apagad'")).count, 1)
+        attachScreenshot("repetidos na fila pra apagar", of: app)
+    }
+
     @MainActor
     func testInativosSelecionaComBarraDeAcoes() {
         let app = launchApp()

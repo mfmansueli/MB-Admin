@@ -39,6 +39,9 @@ nonisolated struct StoreDuplicateGroup: Identifiable, Equatable, Sendable {
     var keys: [ListingKey] { products.map { ListingKey(sellerID: sellerID, productID: $0.id) } }
     var title: String { products.first?.title ?? "" }
     var hasUserDecision: Bool { status == .confirmed || status == .dismissed }
+    /// Repetido sem dúvida, ou confirmado por você — dá pra escolher um e apagar os outros
+    /// (`DuplicateCleanup`).
+    var isCertain: Bool { status == .repeated || status == .confirmed }
 
     /// "repetido 2 vezes" / "talvez repetidos" — o estado em poucas palavras.
     var statusText: String {

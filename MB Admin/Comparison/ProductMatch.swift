@@ -64,7 +64,10 @@ nonisolated struct ProductMatch: Identifiable, Equatable, Sendable {
     var id: String { "\(productA.id)-\(productB.id)" }
     var pairKey: ListingPairKey { ListingPairKey(keyA, keyB) }
     var isMatch: Bool { status == .strong || status == .confirmed }
-    var hasUserDecision: Bool { status == .confirmed || status == .rejected }
+    /// Decidido pelo que as suas revisões de outros pares ensinaram (`ReviewLearning`), não por você
+    /// neste par — a linha continua com "mesmo produto"/"diferentes" pra confirmar ou corrigir.
+    var isLearned: Bool { reasons.contains(where: \.isLearned) }
+    var hasUserDecision: Bool { (status == .confirmed || status == .rejected) && !isLearned }
 
     /// A foto que a revisão mostra de cada lado.
     var displayPhotoA: String? { photoA ?? productA.photoPublicID }
@@ -73,10 +76,10 @@ nonisolated struct ProductMatch: Identifiable, Equatable, Sendable {
     /// O estado em poucas palavras, pra linha da lista e o detalhe.
     var statusText: String {
         switch status {
-        case .strong: "correspondência forte"
+        case .strong: isLearned ? "mesmo produto pelas suas revisões" : "correspondência forte"
         case .confirmed: "confirmado por você"
         case .needsReview: "precisa revisar"
-        case .rejected: "marcado como diferentes"
+        case .rejected: isLearned ? "diferentes pelas suas revisões" : "marcado como diferentes"
         }
     }
 

@@ -59,7 +59,8 @@ struct ProductMatchRowView: View, Equatable {
                     }
                 }
             }
-            if match.status == .needsReview {
+            // Decidido pelas suas revisões de outros pares: os mesmos botões, pra confirmar ou corrigir.
+            if match.status == .needsReview || match.isLearned {
                 reviewButtons
             }
         }

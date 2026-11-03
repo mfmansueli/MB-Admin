@@ -259,6 +259,35 @@ struct ComparisonLastResultTests {
         #expect(finished(loader)?.dismissedDuplicates.isEmpty == true)
     }
 
+    @Test("\"atualizar\" lê de novo o template que \"comparar\" reaproveita do que ficou salvo")
+    func atualizarLeDeNovo() async {
+        let setup = makeSetup()
+        let loader = AccountComparisonLoader()
+        _ = await compareAndSave(loader, setup)
+        let afterFirst = await setup.clientA.requestedTemplateIDs
+        // O pingente não tem par pela capa: o template dele é buscado.
+        #expect(afterFirst.filter { $0 == 3 }.count == 1)
+
+        await restock(setup)
+        let second = await compareAndSave(loader, setup)
+        #expect(second?.possiblyMissingInB.map(\.id) == [3])
+        #expect(await setup.clientA.requestedTemplateIDs == afterFirst)
+
+        await restock(setup)
+        loader.compare(accountA: setup.accountA, accountB: setup.accountB, services: onlineServices(setup), refreshing: true)
+        await loader.waitUntilFinished()
+        #expect(finished(loader)?.possiblyMissingInB.map(\.id) == [3])
+        #expect(await setup.clientA.requestedTemplateIDs.filter { $0 == 3 }.count == 2)
+        // A listagem é buscada de novo nas três.
+        #expect(await setup.clientA.requestedCursors.count == 3)
+    }
+
+    /// As mesmas listas de `makeSetup` de novo — o client falso entrega cada página uma vez só.
+    private func restock(_ setup: Setup) async {
+        await setup.clientA.setPages([page([Fixtures.product(1, title: "anel", cover: "a1"), Fixtures.product(3, title: "pingente gota", cover: "a2")])])
+        await setup.clientB.setPages([page([Fixtures.product(2, title: "anel", cover: "b1")])])
+    }
+
     @Test("o arquivo guarda e devolve a mesma comparação; apagar some com ele")
     func arquivo() async throws {
         let directory = FileManager.default.temporaryDirectory.appending(path: "comparacao-\(UUID().uuidString)")

@@ -26,6 +26,12 @@ nonisolated enum ComparisonReason: Hashable, Sendable {
     case categoryDiffers
     case otherListingAlreadyPaired
     case staleDecision
+    /// Decidido pelas suas revisões (`ReviewLearning`): você confirmou tantos pares com índice a
+    /// partir deste, e nenhum como diferente.
+    case learnedSame(decisions: Int, floor: Int)
+    /// Decidido pelas suas revisões: você marcou tantos pares com índice até este como diferentes, e
+    /// nenhum como o mesmo produto.
+    case learnedDifferent(decisions: Int, ceiling: Int)
 
     var text: String {
         switch self {
@@ -48,6 +54,17 @@ nonisolated enum ComparisonReason: Hashable, Sendable {
         case .categoryDiffers: "categorias diferentes"
         case .otherListingAlreadyPaired: "um dos dois já tem par com outro anúncio"
         case .staleDecision: "você tinha revisado este par, mas um dos anúncios mudou desde então"
+        case .learnedSame(let decisions, let floor):
+            "pelas suas revisões: você confirmou \(decisions) pares com índice \(floor) ou mais, e nenhum foi diferente"
+        case .learnedDifferent(let decisions, let ceiling):
+            "pelas suas revisões: você marcou \(decisions) pares com índice até \(ceiling) como diferentes, e nenhum era o mesmo"
+        }
+    }
+
+    var isLearned: Bool {
+        switch self {
+        case .learnedSame, .learnedDifferent: true
+        default: false
         }
     }
 }
