@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// Uma linha de par — em "mesmo produto", "precisa revisar" ou "marcados como diferentes": as fotos
-/// que ligaram os dois lado a lado, o produto de uma loja e, embaixo, como ele se chama na outra, e o
-/// motivo. Em revisão, os dois botões de decidir ficam numa faixa embaixo da linha; a lupa abre o detalhe
-/// (fotos grandes, todos os motivos, diferenças de texto, desfazer).
+/// que ligaram os dois lado a lado, o produto de uma loja e, embaixo, como ele se chama na outra, o
+/// motivo e o índice de correspondência. Em revisão, os dois botões de decidir ficam numa faixa
+/// embaixo da linha; a lupa abre o detalhe (fotos grandes, todos os motivos, as parcelas do índice,
+/// os atributos lado a lado, diferenças de texto, desfazer).
 struct ProductMatchRowView: View {
     let match: ProductMatch
     let accountAName: String
@@ -38,14 +39,19 @@ struct ProductMatchRowView: View {
                     }
                 }
                 Spacer(minLength: 8)
-                // O detalhe (e `ProductMatchDifference`) só é montado quando o sheet abre de verdade.
-                Button {
-                    isShowingDetail = true
-                } label: {
-                    Image(systemName: "text.magnifyingglass")
+                VStack(spacing: 6) {
+                    // O detalhe (e `ProductMatchDifference`) só é montado quando o sheet abre de verdade.
+                    Button {
+                        isShowingDetail = true
+                    } label: {
+                        Image(systemName: "text.magnifyingglass")
+                    }
+                    .buttonStyle(.neutral(isCircle: true, size: 38))
+                    .accessibilityLabel("ver detalhes do par")
+                    if !match.index.components.isEmpty {
+                        MatchIndexBadge(index: match.index)
+                    }
                 }
-                .buttonStyle(.neutral(isCircle: true, size: 38))
-                .accessibilityLabel("ver detalhes do par")
             }
             if match.status == .needsReview {
                 reviewButtons

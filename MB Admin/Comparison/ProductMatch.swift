@@ -27,6 +27,39 @@ nonisolated struct ProductMatch: Identifiable, Equatable, Sendable {
     let photoB: String?
     /// Jaccard das palavras de título + descrição (0 a 1) — medida, não probabilidade.
     let textSimilarity: Double
+    /// Foto + título + descrição + preço inicial + marca + atributos de variante, em pontos de 0 a
+    /// 100, com as parcelas — explicação, não probabilidade.
+    let index: MatchIndex
+    /// Os atributos dos dois lado a lado (aro, banho, cor, medida, marca, preço inicial).
+    let attributeRows: [MatchAttributeRow]
+
+    init(
+        productA: EnjoeiProduct,
+        productB: EnjoeiProduct,
+        keyA: ListingKey,
+        keyB: ListingKey,
+        status: Status,
+        reasons: [ComparisonReason],
+        photoEvidence: PhotoPairEvidence?,
+        photoA: String?,
+        photoB: String?,
+        textSimilarity: Double,
+        index: MatchIndex = .empty,
+        attributeRows: [MatchAttributeRow] = []
+    ) {
+        self.productA = productA
+        self.productB = productB
+        self.keyA = keyA
+        self.keyB = keyB
+        self.status = status
+        self.reasons = reasons
+        self.photoEvidence = photoEvidence
+        self.photoA = photoA
+        self.photoB = photoB
+        self.textSimilarity = textSimilarity
+        self.index = index
+        self.attributeRows = attributeRows
+    }
 
     var id: String { "\(productA.id)-\(productB.id)" }
     var pairKey: ListingPairKey { ListingPairKey(keyA, keyB) }

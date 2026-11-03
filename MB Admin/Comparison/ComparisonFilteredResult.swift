@@ -6,6 +6,7 @@ import Foundation
 nonisolated struct ComparisonFilteredResult: Sendable {
     private(set) var matches: [ProductMatch] = []
     private(set) var reviews: [ProductMatch] = []
+    private(set) var families: [ProductFamily] = []
     /// Produtos de A sem indício em B.
     private(set) var missingInB: [EnjoeiProduct] = []
     /// Produtos de B sem indício em A.
@@ -28,6 +29,7 @@ nonisolated struct ComparisonFilteredResult: Sendable {
         }
         if filter.includes(.matches) { matches = result.matches.filter(pairMatches) }
         if filter.includes(.review) { reviews = result.reviews.filter(pairMatches) }
+        if filter.includes(.variants) { families = result.families.filter { text.isEmpty || $0.matchesSearch(text) } }
         if filter.includes(.missingInB) { missingInB = result.possiblyMissingInB.filter { matchesSearch($0.title) } }
         if filter.includes(.missingInA) { missingInA = result.possiblyMissingInA.filter { matchesSearch($0.title) } }
         if filter.includes(.unverified) {
@@ -38,7 +40,7 @@ nonisolated struct ComparisonFilteredResult: Sendable {
     }
 
     var isEmpty: Bool {
-        matches.isEmpty && reviews.isEmpty && missingInB.isEmpty && missingInA.isEmpty
+        matches.isEmpty && reviews.isEmpty && families.isEmpty && missingInB.isEmpty && missingInA.isEmpty
             && unverifiedA.isEmpty && unverifiedB.isEmpty && rejected.isEmpty
     }
 

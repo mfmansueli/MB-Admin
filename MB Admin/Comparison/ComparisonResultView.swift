@@ -1,7 +1,9 @@
 import SwiftUI
 
 /// Resultado de uma comparação já carregada, em seções-cartão: mesmo produto, precisa revisar,
-/// possivelmente ausentes em cada loja, não deu pra verificar e marcados como diferentes — com o
+/// produtos com variantes (versões que dividem a mesma foto e onde cada uma está), possivelmente
+/// ausentes em cada loja (com a nota de quando a outra loja tem outra versão), não deu pra verificar
+/// e marcados como diferentes — com o
 /// aviso de comparação incompleta no topo, o filtro na barra de cima, a busca (no iPhone, a lupa na
 /// barra de baixo) e a seleção múltipla **só** dos possivelmente ausentes pra mandar pra fila de
 /// ações. Quem chama passa `.id(result.id)`: cada comparação nova nasce com busca/filtro/seleção
@@ -113,6 +115,7 @@ struct ComparisonResultView: View {
                     }
                     pairSection("mesmo produto", filtered.matches)
                     pairSection("precisa revisar", filtered.reviews)
+                    familySection
                     if !filtered.missingInB.isEmpty {
                         // Só existe em A — postar cria ele em B.
                         missingSection(filtered.missingInB, source: accountA, destination: accountB)
@@ -157,6 +160,21 @@ struct ComparisonResultView: View {
     }
 
     @ViewBuilder
+    private var familySection: some View {
+        if !filtered.families.isEmpty {
+            sectionHeader("produtos com variantes", count: filtered.families.count, selectableIDs: nil)
+            card {
+                ForEach(filtered.families) { family in
+                    ProductFamilyCardView(family: family, accountAName: accountA.user.name, accountBName: accountB.user.name)
+                    if family.id != filtered.families.last?.id {
+                        Divider().padding(.leading, 16 + 52 + 12)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
     private var unverifiedSection: some View {
         let listings = filtered.unverifiedA.map { ($0, accountA.user.name) } + filtered.unverifiedB.map { ($0, accountB.user.name) }
         if !listings.isEmpty {
@@ -191,6 +209,10 @@ struct ComparisonResultView: View {
                         destinationAccount: destination,
                         poster: poster,
                         postQueue: postQueue,
+                        otherVersionsNote: OtherVersion.summary(
+                            result.otherVersions[ListingKey(sellerID: source.user.id, productID: product.id)] ?? [],
+                            storeName: destination.user.name
+                        ),
                         isSelecting: isSelecting,
                         isSelected: selectedProductIDs.contains(product.id),
                         onToggleSelection: { toggleSelection(productID: product.id) }

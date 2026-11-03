@@ -4,13 +4,14 @@ import Testing
 
 @Suite("textos de postar em outra loja")
 struct PostToOtherStoreCopyTests {
-    private func target(_ name: String, existing: Int = 0, possible: Int = 0) -> OtherStoreTarget {
+    private func target(_ name: String, existing: Int = 0, possible: Int = 0, otherVersion: Int = 0) -> OtherStoreTarget {
         OtherStoreTarget(
             accountID: EnjoeiAccountID(),
             name: name,
             nickname: "nick",
             existingCount: existing,
-            possibleCount: possible
+            possibleCount: possible,
+            otherVersionCount: otherVersion
         )
     }
 
@@ -79,5 +80,19 @@ struct PostToOtherStoreCopyTests {
 
         let both = PostToOtherStoreCopy.confirmationMessage(productCount: 3, target: target("loja C", existing: 2, possible: 1), pace: "1 a cada minuto")
         #expect(both.hasPrefix("2 deles já existem em loja C e 1 pode existir, pela última comparação."))
+    }
+
+    @Test("lá tem o produto em outra versão: avisa, sem tratar como repetido")
+    func mensagemDeOutraVersao() {
+        let one = PostToOtherStoreCopy.confirmationMessage(productCount: 1, target: target("loja C", otherVersion: 1), pace: "1 a cada minuto")
+        #expect(one.hasPrefix("loja C tem esse produto em outra versão (a mesma foto, com outro tamanho, banho, cor ou medida), mas não nesta"))
+        #expect(!one.contains("repetido"))
+
+        let many = PostToOtherStoreCopy.confirmationMessage(productCount: 3, target: target("loja C", otherVersion: 2), pace: "1 a cada minuto")
+        #expect(many.hasPrefix("loja C tem 2 deles em outra versão, mas não nesta, pela última comparação. cada um vira"))
+
+        // Risco de duplicar vem primeiro; a outra versão não muda o aviso.
+        let risky = PostToOtherStoreCopy.confirmationMessage(productCount: 3, target: target("loja C", existing: 1, otherVersion: 1), pace: "1 a cada minuto")
+        #expect(risky.hasPrefix("1 deles já existe em loja C, pela última comparação."))
     }
 }

@@ -47,9 +47,9 @@ struct AccountComparisonLoaderTests {
         )
     }
 
-    private func template(photos: [String], size: String? = nil) -> ProductTemplate {
+    private func template(photos: [String], size: String? = nil, description: String = "") -> ProductTemplate {
         ProductTemplate(
-            title: "produto", description: "", brand: nil, used: false, price: 10_000, originalPrice: 10_000,
+            title: "produto", description: description, brand: nil, used: false, price: 10_000, originalPrice: 10_000,
             weight: "0.3", quantity: 1, category: .init(id: 327), size: size,
             shipping: .init(type: "charge_by_weight", hasInsurance: true),
             photos: photos.enumerated().map { ProductTemplate.Photo(imagePublicID: $1, position: $0) },
@@ -75,6 +75,7 @@ struct AccountComparisonLoaderTests {
             "b1": Self.ringWhiteB ?? Data(),
             "b1-ambiente": Self.ambient ?? Data(),
             "a2": Self.pendant ?? Data(),
+            "a1-outra-versao": Self.ringWhiteA ?? Data(),
             "b2-outro": Self.otherRing ?? Data()
         ])
     }
@@ -209,6 +210,64 @@ struct AccountComparisonLoaderTests {
         #expect(await clientA.requestedTemplateIDs == [1, 3])
         #expect(await clientB.requestedTemplateIDs == [2])
         #expect(await fetcher.requestCount(for: "b1") == 1)
+    }
+
+    @Test("versões com a mesma capa: busca o template até de quem já tem par, e a descrição separa as versões")
+    func templateDasVersoes() async {
+        // Títulos iguais: só a descrição diz o banho. Na etapa 1 (só capas), tudo empata.
+        let clientA = StubEnjoeiClient(
+            pages: [page([Fixtures.product(1, title: "anel coração", cover: "a1"), Fixtures.product(3, title: "anel coração", cover: "a1-outra-versao")])],
+            templatesByProductID: [
+                1: template(photos: ["a1"], description: "banho de ródio"),
+                3: template(photos: ["a1-outra-versao"], description: "banho de ouro")
+            ]
+        )
+        let clientB = StubEnjoeiClient(
+            pages: [page([Fixtures.product(2, title: "anel coração", cover: "b1")])],
+            templatesByProductID: [2: template(photos: ["b1"], description: "banho de ródio")]
+        )
+        let loader = AccountComparisonLoader()
+        compare(loader, clientA, clientB)
+        await loader.waitUntilFinished()
+
+        let result = finishedResult(loader)
+        #expect(result?.matches.map(\.id) == ["1-2"])
+        #expect(result?.reviews.isEmpty == true)
+        #expect(result?.possiblyMissingInB.map(\.id) == [3])
+        #expect(result?.otherVersions[ListingKey(sellerID: Self.sellerA, productID: 3)]?.first?.label == "ródio")
+        #expect(result?.families.count == 1)
+        #expect(Set(await clientA.requestedTemplateIDs) == [1, 3])
+        #expect(await clientB.requestedTemplateIDs == [2])
+    }
+
+    @Test("par 1:1 pela capa não busca template — a não ser com 'conferir a descrição de todos'")
+    func conferirTodos() async {
+        let products = (a: [Fixtures.product(1, title: "anel", cover: "a1")], b: [Fixtures.product(2, title: "anel", cover: "b1")])
+        let clientA = StubEnjoeiClient(pages: [page(products.a)], templatesByProductID: [1: template(photos: ["a1"], description: "aro 16")])
+        let clientB = StubEnjoeiClient(pages: [page(products.b)], templatesByProductID: [2: template(photos: ["b1"], description: "aro 18")])
+        let loader = AccountComparisonLoader()
+        compare(loader, clientA, clientB)
+        await loader.waitUntilFinished()
+        #expect(finishedResult(loader)?.matches.map(\.id) == ["1-2"])
+        #expect(await clientA.requestedTemplateIDs.isEmpty)
+
+        // O stub entrega cada página uma vez só: a listagem da segunda rodada vai de novo.
+        await clientA.setPages([page(products.a)])
+        await clientB.setPages([page(products.b)])
+        loader.reset()
+        loader.compare(
+            accountA: makeAccount(seller: Self.sellerA, client: clientA),
+            accountB: makeAccount(seller: Self.sellerB, client: clientB),
+            services: .inMemory(fetcher: photos()),
+            checkAllDetails: true
+        )
+        await loader.waitUntilFinished()
+        // Com a descrição, o aro diferente aparece: outra versão, não o mesmo produto.
+        let result = finishedResult(loader)
+        #expect(result?.matches.isEmpty == true)
+        #expect(result?.possiblyMissingInB.map(\.id) == [1])
+        #expect(await clientA.requestedTemplateIDs == [1])
+        #expect(await clientB.requestedTemplateIDs == [2])
     }
 
     @Test("template que falha deixa o anúncio como não verificado, nunca ausente")

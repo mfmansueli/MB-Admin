@@ -67,11 +67,17 @@ nonisolated enum DemoCatalog {
     /// com o mesmo começo de título não ficarem "quase iguais" na comparação.
     private static let titleVariants = ["banho ouro", "linha infantil", "tamanho grande", "peça delicada", "modelo duplo"]
 
+    /// O anel das posições `DemoPhotoCatalog.variantFamilyPositions`: mesmo título e preço nas três
+    /// versões — só a descrição diz o aro e o banho.
+    private static let variantFamilyTitle = "anel coração vazado cravejado prata 925"
+    private static let variantFamilyPrice = 189.0
+
     static func products(for profile: Profile) -> [EnjoeiProduct] {
         (0..<profile.productCount).map { position in
-            let base = Double([99, 149, 273, 299, 459, 799][position % 6])
+            let isVariant = DemoPhotoCatalog.variantFamilyPositions.contains(position)
+            let base = isVariant ? variantFamilyPrice : Double([99, 149, 273, 299, 459, 799][position % 6])
             // Quem pede desconto fica sem desconto da loja, pra o preço sugerido sair abaixo do atual.
-            let hasStoreDiscount = position % 4 == 0 && discountPositions[position] == nil
+            let hasStoreDiscount = position % 4 == 0 && discountPositions[position] == nil && !isVariant
             return EnjoeiProduct(
                 id: productID(profile: profile, position: position),
                 title: title(position: position),
@@ -84,9 +90,22 @@ nonisolated enum DemoCatalog {
     }
 
     static func title(position: Int) -> String {
+        if DemoPhotoCatalog.variantFamilyPositions.contains(position) { return variantFamilyTitle }
         let base = titles[position % titles.count]
         guard position >= titles.count else { return base }
         return "\(base) \(titleVariants[(position / titles.count - 1) % titleVariants.count])"
+    }
+
+    /// A descrição do template. Nas versões do anel, é ela que diz aro e banho: antonia tem aro 16 e 18
+    /// em ródio e aro 16 em ouro; as outras lojas, aro 16 e **20** em ródio e aro 16 em ouro.
+    static func description(sellerID: Int, position: Int) -> String {
+        let isAntonia = sellerID == DemoPhotoCatalog.antoniaSellerID
+        switch position {
+        case 22: return "anel coração vazado com zircônias. aro 16, banho de ródio. acompanha caixinha."
+        case 23: return "anel coração vazado com zircônias. aro \(isAntonia ? 18 : 20), banho de ródio. acompanha caixinha."
+        case 24: return "anel coração vazado com zircônias. aro 16, banho de ouro 18k. acompanha caixinha."
+        default: return "descrição de exemplo do modo de demonstração."
+        }
     }
 
     /// A posição de um produto da demonstração dentro da loja, pelo id.

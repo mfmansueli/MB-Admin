@@ -25,7 +25,7 @@ struct DemoComparisonScenarioTests {
             let details = ProductListingDetails(
                 productID: product.id, coverPublicID: product.photoPublicID, photoPublicIDs: photoIDs, categoryID: 327,
                 size: DemoPhotoCatalog.size(sellerID: profile.user.id, position: position), brand: nil,
-                description: "", fetchedAt: Date()
+                description: DemoCatalog.description(sellerID: profile.user.id, position: position), fetchedAt: Date()
             )
             return ComparableListing(
                 sellerID: profile.user.id, product: product, details: details, detailsFailure: nil,
@@ -47,29 +47,45 @@ struct DemoComparisonScenarioTests {
         Self.result.reviews.first { $0.productA.id == idA(positionA) && $0.productB.id == idB(positionB) }
     }
 
-    @Test("os produtos comuns viram par forte pela foto, mesmo quando a capa é outra")
+    @Test("os produtos comuns viram par forte pela foto, mesmo quando a capa é outra — e as versões do anel, pela descrição")
     func paresFortes() {
         let special: Set = [
             DemoPhotoCatalog.sizeConflictPosition, DemoPhotoCatalog.variantPosition, DemoPhotoCatalog.differentPhotoPosition,
-            DemoPhotoCatalog.duplicatedPosition, DemoPhotoCatalog.duplicatePosition, DemoPhotoCatalog.brokenPhotosPosition
+            DemoPhotoCatalog.duplicatePosition, DemoPhotoCatalog.brokenPhotosPosition, 23
         ]
         let expected = (0..<Self.storeB.productCount).filter { !special.contains($0) }.map { "\(idA($0))-\(idB($0))" }
         #expect(Self.result.matches.map(\.id).sorted() == expected.sorted())
         #expect(Self.result.matches.allSatisfy { $0.status == .strong })
     }
 
-    @Test("tamanho diferente, variante de cor e mesmo título com outra foto vão pra revisão")
+    @Test("variante de cor e mesmo título com outra foto vão pra revisão; tamanho diferente no template é outra versão")
     func revisoes() {
-        let size = review(DemoPhotoCatalog.sizeConflictPosition, DemoPhotoCatalog.sizeConflictPosition)
-        #expect(size?.reasons.contains(.sizeDiffers("17", "16")) == true)
+        let size = DemoPhotoCatalog.sizeConflictPosition
+        #expect(review(size, size) == nil)
+        let note = Self.result.otherVersions[ListingKey(sellerID: Self.antonia.user.id, productID: idA(size))]
+        #expect(note?.map(\.product.id) == [idB(size)])
         #expect(review(DemoPhotoCatalog.variantPosition, DemoPhotoCatalog.variantPosition)?.reasons.contains(.colorVariant) == true)
         #expect(review(DemoPhotoCatalog.differentPhotoPosition, DemoPhotoCatalog.differentPhotoPosition) != nil)
     }
 
-    @Test("a mesma foto em dois anúncios da loja B: os dois pares ficam pra revisar")
+    @Test("a mesma foto em dois anúncios da loja B, um com outro título e preço: o texto desempata, o outro fica pra revisar")
     func duplicata() {
-        #expect(review(DemoPhotoCatalog.duplicatedPosition, DemoPhotoCatalog.duplicatedPosition) != nil)
-        #expect(review(DemoPhotoCatalog.duplicatedPosition, DemoPhotoCatalog.duplicatePosition) != nil)
+        let duplicated = DemoPhotoCatalog.duplicatedPosition
+        let pair = Self.result.matches.first { $0.productA.id == idA(duplicated) }
+        #expect(pair?.productB.id == idB(duplicated))
+        #expect(pair?.reasons.first.map { if case .versionResolved = $0 { true } else { false } } == true)
+        let other = review(duplicated, DemoPhotoCatalog.duplicatePosition)
+        #expect(other?.reasons.contains(.otherListingAlreadyPaired) == true)
+        // Um anel com a foto do colar não é versão do colar.
+        #expect(!Self.result.families.contains { family in family.versions.contains { $0.productA?.id == idA(duplicated) } })
+    }
+
+    @Test("a descrição padrão, igual em todo anúncio das duas lojas, não deixa título parecido virar texto quase idêntico")
+    func descricaoPadrao() {
+        // 26 = "brinco pérola shell 8mm prata 925 linha infantil" × 6 da loja B (o mesmo sem "linha
+        // infantil"): com a descrição de exemplo contando, o texto passava de quase idêntico.
+        #expect(!Self.result.reviews.contains { $0.productA.id == idA(26) })
+        #expect(!Self.result.reviews.contains { $0.productA.id == idA(33) })
     }
 
     @Test("fotos que não carregam: não verificado, nunca possivelmente ausente")
@@ -80,13 +96,34 @@ struct DemoComparisonScenarioTests {
         #expect(!Self.result.possiblyMissingInA.contains { $0.id == idB(broken) })
     }
 
-    @Test("o que antonia tem a mais aparece como possivelmente ausente na loja B; a loja B não tem nada a mais")
+    @Test("o que antonia tem a mais aparece como possivelmente ausente na loja B; da loja B, só as versões que antonia não tem")
     func ausentes() {
         let missing = Set(Self.result.possiblyMissingInB.map(\.id))
         // Peças só parecidas com uma da loja B que já tem par, sem texto parecido, não seguram nada.
         #expect(missing.isSuperset(of: [idA(26), idA(35), idA(45), idA(50)]))
-        #expect(missing.allSatisfy { DemoCatalog.position(of: $0, in: Self.antonia) >= Self.storeB.productCount })
-        #expect(Self.result.possiblyMissingInA.isEmpty)
+        let versions: Set = [DemoPhotoCatalog.sizeConflictPosition, 23]
+        #expect(missing.allSatisfy {
+            let position = DemoCatalog.position(of: $0, in: Self.antonia)
+            return position >= Self.storeB.productCount || versions.contains(position)
+        })
+        #expect(Set(Self.result.possiblyMissingInA.map(\.id)) == Set(versions.map(idB)))
+    }
+
+    @Test("o anel em três versões com a mesma foto e o mesmo título: a descrição separa aro e banho")
+    func versoesDoAnel() {
+        let pairs = Set(Self.result.matches.map(\.id))
+        #expect(pairs.isSuperset(of: ["\(idA(22))-\(idB(22))", "\(idA(24))-\(idB(24))"]))
+        #expect(!Self.result.reviews.contains { [idA(22), idA(23), idA(24)].contains($0.productA.id) })
+
+        let aro18 = Self.result.otherVersions[ListingKey(sellerID: Self.antonia.user.id, productID: idA(23))]
+        #expect(aro18?.first?.label == "aro 16" || aro18?.first?.label == "aro 20")
+        let aro20 = Self.result.otherVersions[ListingKey(sellerID: Self.storeB.user.id, productID: idB(23))]
+        #expect(aro20?.isEmpty == false)
+
+        let family = Self.result.families.first { family in family.versions.contains { $0.productA?.id == idA(22) } }
+        #expect(family?.dimensions == [.size, .finish])
+        #expect(family?.versions.map(\.label) == ["aro 16 · ouro", "aro 16 · ródio", "aro 18 · ródio", "aro 20 · ródio"])
+        #expect(family?.versions.map(\.presence) == [.both, .both, .onlyInA, .onlyInB])
     }
 
     @Test("título parecido com um anúncio da loja B cujas fotos não carregaram: não verificado, não ausente")

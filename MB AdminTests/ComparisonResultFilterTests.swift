@@ -12,7 +12,8 @@ struct ComparisonResultFilterTests {
         rejected: [Fixtures.match(10, 11, status: .rejected)],
         missingInB: [Fixtures.product(3, title: "colar", cover: nil), Fixtures.product(4, title: "anel", cover: nil)],
         missingInA: [Fixtures.product(5, title: "pulseira", cover: nil)],
-        unverifiedB: [UnverifiedListing(product: Fixtures.product(12, title: "brinco", cover: nil), reasons: [.noUsablePhoto])]
+        unverifiedB: [UnverifiedListing(product: Fixtures.product(12, title: "brinco", cover: nil), reasons: [.noUsablePhoto])],
+        families: [Fixtures.family("familia-A1", title: "anel", versions: [])]
     )
 
     private func label(_ filter: ComparisonResultFilter) -> String {
@@ -24,6 +25,8 @@ struct ComparisonResultFilterTests {
         #expect(label(.all) == "todos (8)")
         #expect(label(.matches) == "mesmo produto (1)")
         #expect(label(.review) == "precisa revisar (2)")
+        // Família agrupa anúncios que já estão contados nas outras seções: não soma em "todos".
+        #expect(label(.variants) == "com variantes (1)")
         #expect(label(.missingInB) == "possivelmente ausentes em loja B (2)")
         #expect(label(.missingInA) == "possivelmente ausentes em loja A (1)")
         #expect(label(.unverified) == "não verificados (1)")

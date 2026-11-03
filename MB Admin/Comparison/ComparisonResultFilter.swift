@@ -6,6 +6,8 @@ nonisolated enum ComparisonResultFilter: Hashable, CaseIterable, Sendable {
     /// Correspondência forte ou confirmada.
     case matches
     case review
+    /// Produtos com várias versões (a mesma foto em vários anúncios) e onde cada versão está.
+    case variants
     /// Produtos de A sem nenhum indício em B.
     case missingInB
     /// Produtos de B sem nenhum indício em A.
@@ -16,11 +18,13 @@ nonisolated enum ComparisonResultFilter: Hashable, CaseIterable, Sendable {
     func label(result: AccountComparisonResult, accountAName: String, accountBName: String) -> String {
         switch self {
         case .all:
+            // Conta anúncios/pares — as famílias são um agrupamento deles, não somam.
             let total = result.matches.count + result.reviews.count + result.possiblyMissingInB.count
                 + result.possiblyMissingInA.count + result.unverifiedCount + result.rejected.count
             return "todos (\(total))"
         case .matches: return "mesmo produto (\(result.matches.count))"
         case .review: return "precisa revisar (\(result.reviews.count))"
+        case .variants: return "com variantes (\(result.families.count))"
         case .missingInB: return "possivelmente ausentes em \(accountBName) (\(result.possiblyMissingInB.count))"
         case .missingInA: return "possivelmente ausentes em \(accountAName) (\(result.possiblyMissingInA.count))"
         case .unverified: return "não verificados (\(result.unverifiedCount))"

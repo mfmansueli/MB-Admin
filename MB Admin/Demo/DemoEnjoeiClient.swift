@@ -72,7 +72,7 @@ actor DemoEnjoeiClient: EnjoeiClientProtocol {
         let price = Int((product?.currentPrice ?? 100) * 100)
         return ProductTemplate(
             title: product?.title ?? "produto",
-            description: "descrição de exemplo do modo de demonstração.",
+            description: DemoCatalog.description(sellerID: profile.user.id, position: position),
             brand: nil,
             used: false,
             price: price,

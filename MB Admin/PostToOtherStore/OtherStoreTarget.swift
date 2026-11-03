@@ -11,6 +11,9 @@ nonisolated struct OtherStoreTarget: Identifiable, Equatable, Sendable {
     let existingCount: Int
     /// Quantos ficaram "pra revisar" com algum anúncio de lá — pode ser o mesmo produto.
     let possibleCount: Int
+    /// Quantos não estão lá nesta versão, mas lá tem outra versão deles (mesma foto, outro aro/banho/
+    /// cor/medida) — informação, não risco de duplicar.
+    var otherVersionCount = 0
 
     var id: EnjoeiAccountID { accountID }
 
@@ -20,7 +23,11 @@ nonisolated struct OtherStoreTarget: Identifiable, Equatable, Sendable {
     /// A linha de baixo de cada loja no menu: o "@nick", ou o risco de duplicar quando a última
     /// comparação achou o produto (ou um indício dele) lá.
     func subtitle(productCount: Int) -> String {
-        guard possibleDuplicateCount > 0 else { return "@\(nickname)" }
+        guard possibleDuplicateCount > 0 else {
+            guard otherVersionCount > 0 else { return "@\(nickname)" }
+            if productCount == 1 { return "tem outra versão desse produto" }
+            return otherVersionCount == 1 ? "1 tem outra versão lá" : "\(otherVersionCount) têm outra versão lá"
+        }
         if productCount == 1 {
             return existingCount > 0 ? "já tem esse produto" : "pode já ter esse produto"
         }
@@ -55,7 +62,8 @@ nonisolated struct OtherStoreTarget: Identifiable, Equatable, Sendable {
                     name: account.user.name,
                     nickname: account.user.nickname,
                     existingCount: presences.count { $0 == .present },
-                    possibleCount: presences.count { $0 == .possible }
+                    possibleCount: presences.count { $0 == .possible },
+                    otherVersionCount: presences.count { $0 == .otherVersion }
                 )
             }
     }

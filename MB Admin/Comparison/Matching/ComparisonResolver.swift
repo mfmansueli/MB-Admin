@@ -1,21 +1,30 @@
 import Foundation
 
 /// Transforma a evidência (`ComparisonEvidenceBuilder`) + as revisões manuais num
-/// `AccountComparisonResult`. Sem ordem gulosa nem nota somada: cada par é classificado pelo **tipo**
-/// de evidência e pelos concorrentes que os dois anúncios têm.
+/// `AccountComparisonResult`. Sem ordem gulosa: cada par é classificado pelo **tipo** de evidência,
+/// pelos atributos de variante (aro, banho, cor, medida — `PairAssessor`) e pelos concorrentes que os
+/// dois anúncios têm. O índice de correspondência (`MatchIndex`) acompanha todo par pra explicar, e só
+/// decide uma coisa: qual versão é qual quando várias dividem a mesma foto.
 ///
-/// - **Correspondência forte**: a mesma fotografia (ou o mesmo arquivo), e nenhum dos dois anúncios
-///   tem outro par com a mesma foto, nem uma foto quase tão parecida com outro, nem variante de cor,
-///   nem tamanho/categoria em conflito (dado faltando não é conflito; preço nunca entra).
-/// - **Precisa revisar**: mesma foto com concorrente ou conflito; foto parecida; texto parecido
-///   (só quando as fotos não estão todas analisadas, ou o texto é quase idêntico). Nunca vira par
-///   sozinho, e duplicatas numa loja não são forçadas a 1:1 — cada ligação aparece pra revisar.
-/// - **Possivelmente ausente**: nenhuma ligação, todas as fotos do anúncio analisadas, a lista da
-///   outra loja completa, e nenhum anúncio não verificado da outra loja com título parecido.
+/// - **Outra versão** (não é estado de par): a mesma foto (ou a mesma pose em outra cor), mas algum
+///   atributo decisivo em conflito — aro 16 × aro 18, ouro × ródio. Nunca vira par nem revisão; cada
+///   lado segue pra ausência com a nota de qual versão a outra loja tem (`otherVersions`).
+/// - **Correspondência forte**: a mesma fotografia (ou o mesmo arquivo), sem conflito, e nenhum dos
+///   dois tem outro par com a mesma foto — ou tem, mas o índice deste passa o de todo concorrente por
+///   `MatchIndexParameters.versionResolutionMargin` (os atributos/preço apontam só este). Também sem
+///   foto quase tão parecida com outro, sem variante de cor, categoria/marca em conflito, nem preço
+///   inicial bem diferente sem o texto confirmar. Dado faltando não é conflito.
+/// - **Precisa revisar**: mesma foto com concorrente empatado ou alguma dúvida; foto parecida; texto
+///   parecido (só quando as fotos não estão todas analisadas, ou o texto é quase idêntico). Nunca
+///   vira par sozinho, e duplicatas numa loja não são forçadas a 1:1.
+/// - **Possivelmente ausente**: nenhuma ligação (fora "outra versão"), todas as fotos do anúncio
+///   analisadas, a lista da outra loja completa, e nenhum anúncio não verificado de lá com título
+///   parecido.
 /// - **Não foi possível verificar**: nenhuma ligação, mas falta alguma dessas condições.
 ///
 /// Revisões manuais valem acima de tudo enquanto os anúncios não mudarem (`ListingFingerprint`):
-/// "mesmo produto" vira par confirmado; "produtos diferentes" remove a ligação.
+/// "mesmo produto" vira par confirmado (mesmo com atributo em conflito); "produtos diferentes"
+/// remove a ligação.
 nonisolated enum ComparisonResolver {
     static func resolve(
         _ sideA: ComparisonSide,
@@ -42,17 +51,24 @@ nonisolated enum ComparisonResolver {
     private struct Edge {
         var evidence: ListingPairEvidence
         var kind: EdgeKind
+        var assessment: PairAssessment
         var verdict: ComparisonDecision.Verdict?
         var isStaleDecision = false
         var status: ProductMatch.Status = .needsReview
         var reasons: [ComparisonReason] = []
         var isDropped = false
+        /// Mesma foto (ou mesma pose em outra cor) com atributo em conflito: outra versão do produto.
+        var isVersionLink = false
 
         var indexA: Int { evidence.indexA }
         var indexB: Int { evidence.indexB }
+        var score: Int { assessment.index.score }
         var isActive: Bool { !isDropped && status != .rejected }
         var isMatch: Bool { isActive && (status == .strong || status == .confirmed) }
         var isReview: Bool { isActive && status == .needsReview }
+        /// Liga as duas fotos como a mesma fotografia, ou a mesma pose em outra cor — o que agrupa
+        /// versões numa família.
+        var isPhotoLink: Bool { kind == .strong || evidence.photo?.colorsDiffer == true }
     }
 
     private struct Run {
@@ -60,6 +76,7 @@ nonisolated enum ComparisonResolver {
 
         let sideA: ComparisonSide
         let sideB: ComparisonSide
+        private let evidence: ComparisonEvidenceBuilder.Output
         private var edges: [Edge] = []
         private let coverageA: [[UnverifiedReason]]
         private let coverageB: [[UnverifiedReason]]
@@ -68,11 +85,21 @@ nonisolated enum ComparisonResolver {
         init(sideA: ComparisonSide, sideB: ComparisonSide, evidence: ComparisonEvidenceBuilder.Output) {
             self.sideA = sideA
             self.sideB = sideB
-            coverageA = sideA.listings.map { Self.coverageReasons($0, generic: evidence.genericPhotosA) }
-            coverageB = sideB.listings.map { Self.coverageReasons($0, generic: evidence.genericPhotosB) }
+            self.evidence = evidence
+            let coverageA = sideA.listings.map { Self.coverageReasons($0, generic: evidence.genericPhotosA) }
+            let coverageB = sideB.listings.map { Self.coverageReasons($0, generic: evidence.genericPhotosB) }
+            self.coverageA = coverageA
+            self.coverageB = coverageB
             edges = evidence.pairs.values
                 .sorted { ($0.indexA, $0.indexB) < ($1.indexA, $1.indexB) }
-                .compactMap { pair in Self.kind(of: pair).map { Edge(evidence: pair, kind: $0) } }
+                .compactMap { pair in
+                    Self.kind(of: pair).map { kind in
+                        Edge(evidence: pair, kind: kind, assessment: PairAssessor.assess(
+                            sideA.listings[pair.indexA], sideB.listings[pair.indexB], evidence: pair,
+                            photosComplete: coverageA[pair.indexA].isEmpty && coverageB[pair.indexB].isEmpty
+                        ))
+                    }
+                }
         }
 
         private static func kind(of pair: ListingPairEvidence) -> EdgeKind? {
@@ -124,11 +151,17 @@ nonisolated enum ComparisonResolver {
                     edges[existing].verdict = decision.verdict
                 } else {
                     // Par confirmado/rejeitado que não tem (mais) evidência nenhuma — continua valendo.
-                    var evidence = ListingPairEvidence(indexA: pair.indexA, indexB: pair.indexB)
-                    evidence.textSimilarity = ProductSimilarity.jaccard(
-                        sideA.listings[pair.indexA].words, sideB.listings[pair.indexB].words
+                    let listingA = sideA.listings[pair.indexA]
+                    let listingB = sideB.listings[pair.indexB]
+                    let evidence = ListingPairEvidence(
+                        indexA: pair.indexA, indexB: pair.indexB,
+                        textSimilarity: ProductSimilarity.jaccard(listingA.words, listingB.words)
                     )
-                    edges.append(Edge(evidence: evidence, kind: .text, verdict: decision.verdict))
+                    let assessment = PairAssessor.assess(
+                        listingA, listingB, evidence: evidence,
+                        photosComplete: coverageA[pair.indexA].isEmpty && coverageB[pair.indexB].isEmpty
+                    )
+                    edges.append(Edge(evidence: evidence, kind: .text, assessment: assessment, verdict: decision.verdict))
                     edgeByPair[pair] = edges.count - 1
                 }
             }
@@ -152,18 +185,24 @@ nonisolated enum ComparisonResolver {
 
         mutating func classifyEdges() {
             for index in edges.indices {
-                switch edges[index].verdict {
+                let edge = edges[index]
+                switch edge.verdict {
                 case .differentProducts:
                     edges[index].status = .rejected
-                    edges[index].reasons = [.rejectedByUser]
+                    edges[index].reasons = [.rejectedByUser] + versionReasons(edge)
                 case .sameProduct:
                     edges[index].status = .confirmed
-                    edges[index].reasons = [.confirmedByUser] + photoReasons(edges[index])
+                    edges[index].reasons = [.confirmedByUser] + photoReasons(edge) + versionReasons(edge)
                 case nil:
-                    // Texto sozinho, com as fotos dos dois lados todas analisadas e nenhuma ligando os
-                    // dois: só sobra se o texto for quase idêntico.
-                    if edges[index].kind == .text, isComplete(edges[index]),
-                       edges[index].evidence.textSimilarity < Limits.textNearIdenticalThreshold {
+                    if edge.assessment.isVariant {
+                        // Outra versão do produto: nunca par nem revisão. Só a ligação por foto conta
+                        // como "a outra loja tem outra versão"; texto parecido com atributo em
+                        // conflito é só outro anúncio.
+                        edges[index].isVersionLink = edge.isPhotoLink && sharesBaseTitle(edge)
+                        edges[index].isDropped = true
+                    } else if edge.kind == .text, isComplete(edge), edge.evidence.textSimilarity < Limits.textNearIdenticalThreshold {
+                        // Texto sozinho, com as fotos dos dois lados todas analisadas e nenhuma
+                        // ligando os dois: só sobra se o texto for quase idêntico.
                         edges[index].isDropped = true
                     }
                 }
@@ -178,22 +217,39 @@ nonisolated enum ComparisonResolver {
 
             for index in edges.indices where edges[index].isActive && edges[index].verdict == nil && edges[index].kind == .strong {
                 let others = (edgesOfA[edges[index].indexA] + edgesOfB[edges[index].indexB]).filter { $0 != index }
-                let doubts = doubts(about: index, others: others)
-                edges[index].status = doubts.isEmpty ? .strong : .needsReview
-                edges[index].reasons = photoReasons(edges[index]) + doubts
+                let outcome = doubts(about: index, others: others)
+                edges[index].status = outcome.doubts.isEmpty ? .strong : .needsReview
+                edges[index].reasons = (outcome.resolution.map { [$0] } ?? []) + photoReasons(edges[index]) + outcome.doubts
             }
             finishReviews()
         }
 
-        /// O que impede uma "mesma foto" de virar par sozinha.
-        private func doubts(about index: Int, others: [Int]) -> [ComparisonReason] {
+        /// O que impede uma "mesma foto" de virar par sozinha — e, quando a mesma foto liga outras
+        /// versões e o índice deste par passa o de todas, o motivo de ter virado mesmo assim.
+        private func doubts(about index: Int, others: [Int]) -> (doubts: [ComparisonReason], resolution: ComparisonReason?) {
             let edge = edges[index]
+            let assessment = edge.assessment
             var doubts: [ComparisonReason] = []
+            var resolution: ComparisonReason?
             let sameElsewhere = others.filter { edges[$0].kind == .strong || edges[$0].verdict == .sameProduct }
             if !sameElsewhere.isEmpty {
-                let linked = Set(([index] + sameElsewhere).map { edges[$0].indexA }).count
-                    + Set(([index] + sameElsewhere).map { edges[$0].indexB }).count
-                doubts.append(.photoUsedByManyListings(max(linked, edge.evidence.linkedListingCount)))
+                let margin = MatchIndexParameters.versionResolutionMargin
+                let isDistinguished = sameElsewhere.allSatisfy { edges[$0].verdict == nil && edge.score - edges[$0].score >= margin }
+                if isDistinguished {
+                    // Só os eixos que separam este par de algum concorrente ("prata" em todos não diz nada,
+                    // e "prata" sozinho nunca é o que separa).
+                    let competitorAgreements = sameElsewhere.map { Set(edges[$0].assessment.agreements) }
+                    let discriminating = assessment.strongAgreements.filter { dimension in
+                        !competitorAgreements.allSatisfy { $0.contains(dimension) }
+                    }
+                    let attributes = sideA.listings[edge.indexA].attributes
+                    let label = discriminating.compactMap { attributes.reading($0)?.display }.joined(separator: " · ")
+                    resolution = .versionResolved(label.isEmpty ? nil : label)
+                } else {
+                    let linked = Set(([index] + sameElsewhere).map { edges[$0].indexA }).count
+                        + Set(([index] + sameElsewhere).map { edges[$0].indexB }).count
+                    doubts.append(.photoUsedByManyListings(max(linked, edge.evidence.linkedListingCount)))
+                }
             }
             let correlation = edge.evidence.photo?.contentCorrelation ?? 1
             let hasCloseCompetitor = others.contains {
@@ -202,20 +258,30 @@ nonisolated enum ComparisonResolver {
             }
             if hasCloseCompetitor { doubts.append(.closeCompetitor) }
             if edge.evidence.hasColorConflict { doubts.append(.colorVariant) }
-            let listingA = sideA.listings[edge.indexA]
-            let listingB = sideB.listings[edge.indexB]
-            if let sizeA = listingA.size, let sizeB = listingB.size, sizeA != sizeB {
-                doubts.append(.sizeDiffers(sizeA, sizeB))
+            if assessment.categoriesDiffer { doubts.append(.categoryDiffers) }
+            if assessment.brandsDiffer {
+                doubts.append(.brandDiffers(assessment.brandA ?? "", assessment.brandB ?? ""))
             }
-            if let categoryA = listingA.categoryID, let categoryB = listingB.categoryID, categoryA != categoryB {
-                doubts.append(.categoryDiffers)
+            if assessment.pricesFarApart, !assessment.textConfirms, sameElsewhere.isEmpty,
+               let priceA = sideA.listings[edge.indexA].attributes.price, let priceB = sideB.listings[edge.indexB].attributes.price {
+                doubts.append(.priceDiffers(PriceRelation.format(priceA), PriceRelation.format(priceB)))
             }
-            return doubts
+            return (doubts, resolution)
         }
 
         private func photoReasons(_ edge: Edge) -> [ComparisonReason] {
             guard let photo = edge.evidence.photo, photo.level >= .samePhoto else { return [] }
             return [photo.isSamePublicID ? .samePublicID : .samePhoto]
+        }
+
+        /// Os dois lados parecem o mesmo produto pelo título base — só assim a mesma foto liga versões.
+        private func sharesBaseTitle(_ edge: Edge) -> Bool {
+            sideA.listings[edge.indexA].attributes.sharesBaseTitle(with: sideB.listings[edge.indexB].attributes)
+        }
+
+        private func versionReasons(_ edge: Edge) -> [ComparisonReason] {
+            guard edge.assessment.isVariant else { return [] }
+            return [.attributesDiffer(edge.assessment.conflicts.map(\.text).joined(separator: ", "))]
         }
 
         /// Revisões que sobram depois dos pares: some a ligação fraca quando um dos lados já tem par
@@ -272,18 +338,16 @@ nonisolated enum ComparisonResolver {
             let blockersA = sideA.listings.indices.filter { !matchedA.contains($0) && !coverageA[$0].isEmpty }
             let blockersB = sideB.listings.indices.filter { !matchedB.contains($0) && !coverageB[$0].isEmpty }
 
-            let absenceA = absence(
-                of: sideA, coverage: coverageA, connected: connectedA,
-                otherSide: sideB, otherBlockers: blockersB
-            )
-            let absenceB = absence(
-                of: sideB, coverage: coverageB, connected: connectedB,
-                otherSide: sideA, otherBlockers: blockersA
-            )
+            let absenceA = absence(of: sideA, coverage: coverageA, connected: connectedA, otherSide: sideB, otherBlockers: blockersB)
+            let absenceB = absence(of: sideB, coverage: coverageB, connected: connectedB, otherSide: sideA, otherBlockers: blockersA)
             let reviews = edges.filter(\.isReview).sorted {
                 if $0.kind != $1.kind { return $0.kind > $1.kind }
+                if $0.score != $1.score { return $0.score > $1.score }
                 return ($0.indexA, $0.indexB) < ($1.indexA, $1.indexB)
             }
+            let families = families(absenceA: absenceA, absenceB: absenceB)
+            let matchedKeys = Set(edges.filter(\.isMatch).flatMap { [sideA.listings[$0.indexA].key, sideB.listings[$0.indexB].key] })
+            let incompleteKeys = Set(sideA.listings.filter { !$0.hasAllPhotos }.map(\.key) + sideB.listings.filter { !$0.hasAllPhotos }.map(\.key))
             return AccountComparisonResult(
                 id: runID,
                 revision: revision,
@@ -292,12 +356,21 @@ nonisolated enum ComparisonResolver {
                 matches: edges.filter(\.isMatch).map(makeMatch),
                 reviews: reviews.map(makeMatch),
                 rejected: edges.filter { !$0.isDropped && $0.status == .rejected }.map(makeMatch),
-                possiblyMissingInB: absenceA.missing,
-                possiblyMissingInA: absenceB.missing,
+                possiblyMissingInB: absenceA.missing.map { sideA.listings[$0].product },
+                possiblyMissingInA: absenceB.missing.map { sideB.listings[$0].product },
                 unverifiedA: absenceA.unverified,
                 unverifiedB: absenceB.unverified,
-                staleDecisionCount: staleDecisionCount
+                staleDecisionCount: staleDecisionCount,
+                families: families.families,
+                otherVersions: otherVersions(missingA: absenceA.missing, missingB: absenceB.missing),
+                keysWantingDetails: families.memberKeys.intersection(matchedKeys).intersection(incompleteKeys)
             )
+        }
+
+        private struct Absence {
+            var missing: [Int] = []
+            var unverified: [UnverifiedListing] = []
+            var unverifiedIndices: Set<Int> = []
         }
 
         private func absence(
@@ -306,9 +379,8 @@ nonisolated enum ComparisonResolver {
             connected: Set<Int>,
             otherSide: ComparisonSide,
             otherBlockers: [Int]
-        ) -> (missing: [EnjoeiProduct], unverified: [UnverifiedListing]) {
-            var missing: [EnjoeiProduct] = []
-            var unverified: [UnverifiedListing] = []
+        ) -> Absence {
+            var absence = Absence()
             for (index, listing) in side.listings.enumerated() where !connected.contains(index) {
                 var reasons = coverage[index]
                 if !otherSide.status.allowsAbsenceConclusions {
@@ -318,12 +390,13 @@ nonisolated enum ComparisonResolver {
                     reasons.append(.possibleUnverifiedCounterpart(title: title))
                 }
                 if reasons.isEmpty {
-                    missing.append(listing.product)
+                    absence.missing.append(index)
                 } else {
-                    unverified.append(UnverifiedListing(product: listing.product, reasons: reasons))
+                    absence.unverified.append(UnverifiedListing(product: listing.product, reasons: reasons))
+                    absence.unverifiedIndices.insert(index)
                 }
             }
-            return (missing, unverified)
+            return absence
         }
 
         private func possibleCounterpart(of listing: ComparableListing, among blockers: [Int], in side: ComparisonSide) -> String? {
@@ -337,6 +410,53 @@ nonisolated enum ComparisonResolver {
             }
             return best?.title
         }
+
+        // MARK: - Versões
+
+        /// De cada possivelmente ausente: as versões dele na outra loja (ligações "outra versão"),
+        /// da que menos muda pra que mais muda.
+        private func otherVersions(missingA: [Int], missingB: [Int]) -> [ListingKey: [OtherVersion]] {
+            var result: [ListingKey: [OtherVersion]] = [:]
+            let missingSetA = Set(missingA)
+            let missingSetB = Set(missingB)
+            for edge in edges where edge.isVersionLink {
+                let listingA = sideA.listings[edge.indexA]
+                let listingB = sideB.listings[edge.indexB]
+                if missingSetA.contains(edge.indexA) {
+                    result[listingA.key, default: []].append(OtherVersion(product: listingB.product, differences: edge.assessment.conflicts))
+                }
+                if missingSetB.contains(edge.indexB) {
+                    result[listingB.key, default: []].append(OtherVersion(
+                        product: listingA.product, differences: edge.assessment.conflicts.map(\.reversed)
+                    ))
+                }
+            }
+            return result.mapValues { versions in
+                versions.sorted {
+                    if $0.differences.count != $1.differences.count { return $0.differences.count < $1.differences.count }
+                    return $0.label.localizedStandardCompare($1.label) == .orderedAscending
+                }
+            }
+        }
+
+        private func families(absenceA: Absence, absenceB: Absence) -> ProductFamilyBuilder.Output {
+            let link = { (edge: Edge) in ProductFamilyBuilder.Link(indexA: edge.indexA, indexB: edge.indexB) }
+            return ProductFamilyBuilder.build(ProductFamilyBuilder.Input(
+                listingsA: sideA.listings,
+                listingsB: sideB.listings,
+                photoLinks: edges.filter { $0.isPhotoLink && sharesBaseTitle($0) }.map(link),
+                coverGroupsA: evidence.coverGroupsA,
+                coverGroupsB: evidence.coverGroupsB,
+                matches: edges.filter(\.isMatch).map(link),
+                reviewA: Set(edges.filter(\.isReview).map(\.indexA)),
+                reviewB: Set(edges.filter(\.isReview).map(\.indexB)),
+                unverifiedA: absenceA.unverifiedIndices,
+                unverifiedB: absenceB.unverifiedIndices,
+                versionLinks: edges.filter(\.isVersionLink).map(link)
+            ))
+        }
+
+        // MARK: - Montagem
 
         private func summary(of side: ComparisonSide, unverified: [UnverifiedListing]) -> ComparisonStoreSummary {
             ComparisonStoreSummary(
@@ -362,7 +482,9 @@ nonisolated enum ComparisonResolver {
                 photoEvidence: edge.evidence.photo,
                 photoA: edge.evidence.photoA,
                 photoB: edge.evidence.photoB,
-                textSimilarity: edge.evidence.textSimilarity
+                textSimilarity: edge.evidence.textSimilarity,
+                index: edge.assessment.index,
+                attributeRows: MatchAttributeRow.rows(listingA.attributes, listingB.attributes)
             )
         }
     }

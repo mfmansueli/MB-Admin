@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// Uma linha nas seções "possivelmente ausentes em loja B" — produto sem nenhum indício na outra
-/// conta, com tudo dos dois lados analisado: foto, título, preço e, logo embaixo, o botão de postar
+/// conta, com tudo dos dois lados analisado: foto, título, preço, a nota de quando a outra loja tem o
+/// produto em **outra versão** (aro/banho/cor/medida diferente) e, logo embaixo, o botão de postar
 /// o mesmo produto direto na conta onde ele possivelmente não existe. Em modo de seleção, vira uma
 /// linha marcável pra entrar na fila de ações junto com outras. Compartilhar o link fica no menu de
 /// contexto. Revisões e não verificados nunca usam esta linha — não dá pra postar o que pode já
@@ -12,6 +13,9 @@ struct UnmatchedProductRowView: View {
     let destinationAccount: AccountSession
     let poster: CrossAccountPoster
     let postQueue: PostQueue
+    /// "loja B tem outra versão: aro 18 (aqui: aro 16)" — `nil` quando a outra loja não tem versão
+    /// nenhuma do produto.
+    var otherVersionsNote: String?
     var isSelecting = false
     var isSelected = false
     var onToggleSelection: () -> Void = {}
@@ -40,6 +44,12 @@ struct UnmatchedProductRowView: View {
                     Text(price)
                         .productPriceFont()
                         .foregroundStyle(.supportingText)
+                }
+                if let otherVersionsNote {
+                    Label(otherVersionsNote, systemImage: "square.stack")
+                        .font(.footnote)
+                        .foregroundStyle(.supportingText)
+                        .lineLimit(3)
                 }
                 if !isSelecting {
                     postButton

@@ -9,14 +9,16 @@ nonisolated enum AccountProductMatcher {
         decisions: [ComparisonDecision] = [],
         runID: UUID = UUID()
     ) -> AccountComparisonResult {
-        let evidence = ComparisonEvidenceBuilder.build(sideA.listings, sideB.listings)
-        return ComparisonResolver.resolve(sideA, sideB, evidence: evidence, decisions: decisions, runID: runID)
+        let sides = DescriptionBoilerplate.removing(from: sideA, sideB)
+        let evidence = ComparisonEvidenceBuilder.build(sides.a.listings, sides.b.listings)
+        return ComparisonResolver.resolve(sides.a, sides.b, evidence: evidence, decisions: decisions, runID: runID)
     }
 
     /// Monta a evidência fora do MainActor — o único passo caro (fotos de A × fotos de B).
     @concurrent
     static func buildEvidenceOffMain(_ sideA: ComparisonSide, _ sideB: ComparisonSide) async -> ComparisonEvidenceBuilder.Output {
-        ComparisonEvidenceBuilder.build(sideA.listings, sideB.listings)
+        let sides = DescriptionBoilerplate.removing(from: sideA, sideB)
+        return ComparisonEvidenceBuilder.build(sides.a.listings, sides.b.listings)
     }
 
     @concurrent
@@ -29,7 +31,8 @@ nonisolated enum AccountProductMatcher {
         runID: UUID,
         revision: Int
     ) async -> AccountComparisonResult {
-        ComparisonResolver.resolve(sideA, sideB, evidence: evidence, decisions: decisions, runID: runID, revision: revision)
+        let sides = DescriptionBoilerplate.removing(from: sideA, sideB)
+        return ComparisonResolver.resolve(sides.a, sides.b, evidence: evidence, decisions: decisions, runID: runID, revision: revision)
     }
 
     /// Título sozinho, ou título + descrição quando o template já foi buscado — mais texto em comum

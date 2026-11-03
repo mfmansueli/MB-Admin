@@ -1,7 +1,9 @@
 import Foundation
 
 /// Todos os parâmetros da comparação por foto num lugar só — normalização da imagem, limites de
-/// "mesma foto"/"foto parecida", busca de candidatos e resolução de conflitos.
+/// "mesma foto"/"foto parecida", busca de candidatos e resolução de conflitos. Os pesos do índice de
+/// correspondência (foto + título + descrição + atributos de versão + marca + preço inicial) e a
+/// separação de versões que dividem a mesma foto ficam em `MatchIndexParameters`.
 ///
 /// **Nada aqui é probabilidade.** Distância de hash (bits diferentes, de 0 a 63), correlação das
 /// miniaturas (−1 a 1) e diferença de cor (ΔE76 médio entre células, em unidades CIELAB) são medidas

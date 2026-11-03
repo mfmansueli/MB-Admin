@@ -46,10 +46,10 @@ struct ProductMatchTests {
             keyA: ListingKey(sellerID: 1001, productID: 1),
             keyB: ListingKey(sellerID: 2002, productID: 2),
             status: .needsReview,
-            reasons: [.samePhoto, .sizeDiffers("17", "16")],
+            reasons: [.samePhoto, .brandDiffers("vivara", "pandora")],
             photoEvidence: nil, photoA: nil, photoB: nil, textSimilarity: 1
         )
-        #expect(match.summaryText == "tamanhos diferentes (17 × 16)")
+        #expect(match.summaryText == "marcas diferentes (vivara × pandora)")
         #expect(Fixtures.match(1, 2, status: .needsReview).summaryText == ComparisonReason.similarPhoto.text)
     }
 

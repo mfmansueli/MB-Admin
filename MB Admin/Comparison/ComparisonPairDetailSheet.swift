@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// Detalhe de um par, pra revisar: as fotos que ligaram os dois lado a lado (grandes), o estado e
-/// todos os motivos, título/descrição dos dois e as palavras que só aparecem de um lado — e as
-/// decisões: confirmar "mesmo produto", marcar "produtos diferentes", corrigir ou desfazer uma
+/// todos os motivos, o índice de correspondência com cada parcela, os atributos (aro, banho, cor,
+/// medida, marca, preço inicial) lado a lado, título/descrição dos dois e as palavras que só aparecem
+/// de um lado — e as decisões: confirmar "mesmo produto", marcar "produtos diferentes", corrigir ou desfazer uma
 /// revisão já feita. A revisão só existe por um toque aqui (ou na linha) — nada automático vira
 /// decisão.
 struct ComparisonPairDetailSheet: View {
@@ -35,6 +36,10 @@ struct ComparisonPairDetailSheet: View {
                 }
 
                 decisionSection
+
+                indexSection
+
+                attributesSection
 
                 Section("título") {
                     labeled(accountAName, match.productA.title)
@@ -69,6 +74,69 @@ struct ComparisonPairDetailSheet: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var indexSection: some View {
+        if !match.index.components.isEmpty {
+            Section {
+                ForEach(Array(match.index.components.enumerated()), id: \.offset) { _, component in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        Text(component.text)
+                        Spacer(minLength: 8)
+                        Text(component.signedPoints)
+                            .font(.body.weight(.semibold).monospacedDigit())
+                            .foregroundStyle(pointsColor(component.points))
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+            } header: {
+                Text("índice de correspondência · \(match.index.score) de 100 (\(match.index.levelText))")
+            } footer: {
+                Text(
+                    "soma de pontos de cada evidência, de 0 a 100 — não é probabilidade. o estado do par sai das regras "
+                        + "(a mesma foto, atributos em conflito, outros anúncios com a mesma foto); o índice só desempata "
+                        + "versões que dividem a mesma foto."
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var attributesSection: some View {
+        if !match.attributeRows.isEmpty {
+            Section("lado a lado") {
+                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                    GridRow {
+                        Text("")
+                        Text(accountAName).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Text(accountBName).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    }
+                    ForEach(Array(match.attributeRows.enumerated()), id: \.offset) { _, row in
+                        GridRow {
+                            Text(row.label)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                            attributeValue(row.valueA, relation: row.relation)
+                            attributeValue(row.valueB, relation: row.relation)
+                        }
+                        .accessibilityElement(children: .combine)
+                    }
+                }
+            }
+        }
+    }
+
+    private func attributeValue(_ value: String?, relation: AttributeRelation) -> some View {
+        Text(value ?? "—")
+            .font(.subheadline.weight(relation == .conflicts ? .semibold : .regular))
+            .foregroundStyle(relation == .conflicts ? AnyShapeStyle(Color.statusFailure) : AnyShapeStyle(.primary))
+    }
+
+    private func pointsColor(_ points: Int) -> Color {
+        if points > 0 { return .statusSuccess }
+        if points < 0 { return .statusFailure }
+        return .secondary
     }
 
     private var photos: some View {

@@ -183,14 +183,19 @@ struct AccountProductMatcherTests {
         #expect(result.possiblyMissingInB.isEmpty)
     }
 
-    @Test("a mesma foto com tamanhos diferentes no template vai pra revisão; tamanho faltando não conta")
+    @Test("a mesma foto com tamanhos diferentes no template é outra versão: nem par nem revisão; tamanho faltando não conta")
     func tamanhoDiferente() {
         let conflict = Fixtures.compare(
             [listingA(1, "anel", [("a1", Self.ringA)], size: "17")],
             [listingB(2, "anel", [("b2", Self.ringB)], size: "16")]
         )
         #expect(conflict.matches.isEmpty)
-        #expect(conflict.reviews.first?.reasons.contains(.sizeDiffers("17", "16")) == true)
+        #expect(conflict.reviews.isEmpty)
+        #expect(conflict.possiblyMissingInB.map(\.id) == [1])
+        #expect(conflict.possiblyMissingInA.map(\.id) == [2])
+        let note = conflict.otherVersions[ListingKey(sellerID: Fixtures.sellerA, productID: 1)]
+        #expect(note?.map(\.product.id) == [2])
+        #expect(note?.first?.label == "tam. 16")
 
         let missingSize = Fixtures.compare(
             [listingA(1, "anel", [("a1", Self.ringA)], size: "17")],

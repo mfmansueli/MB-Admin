@@ -1,7 +1,8 @@
 import Foundation
 
 /// Um anúncio pronto pra comparar: o produto da listagem (com a descrição, se já buscada), as fotos
-/// que entram na comparação com as assinaturas, os atributos do template e as palavras do texto.
+/// que entram na comparação com as assinaturas, os atributos (do template e do texto) e as palavras
+/// do texto.
 nonisolated struct ComparableListing: Sendable {
     let key: ListingKey
     let product: EnjoeiProduct
@@ -11,10 +12,14 @@ nonisolated struct ComparableListing: Sendable {
     let details: ProductListingDetails?
     /// Por que o template não veio, quando foi tentado nesta comparação e falhou.
     let detailsFailure: String?
-    /// Título + descrição, normalizados (`ProductSimilarity.tokenize`).
-    let words: Set<String>
+    /// Título + descrição, normalizados (`ProductSimilarity.tokenize`) — sem o texto padrão da loja
+    /// depois de `removingBoilerplate`.
+    private(set) var words: Set<String>
     /// Só o título — pra conferências mais fracas (ver `unverifiedBlockingTextThreshold`).
     let titleWords: Set<String>
+    /// Aro/tamanho, banho, cor, medidas, marca, preço inicial e o texto sem eles — o que separa
+    /// versões que dividem a mesma foto.
+    private(set) var attributes: ListingAttributes
 
     init(
         sellerID: Int,
@@ -38,6 +43,7 @@ nonisolated struct ComparableListing: Sendable {
         }
         words = ProductSimilarity.tokenize(AccountProductMatcher.comparableText(for: product))
         titleWords = ProductSimilarity.tokenize(product.title)
+        attributes = ListingAttributes(product: product, details: usableDetails)
     }
 
     /// As fotos que entram na comparação: as primeiras do template pela posição, ou só a capa sem ele.
@@ -48,14 +54,21 @@ nonisolated struct ComparableListing: Sendable {
         return product.photoPublicID.map { [$0] } ?? []
     }
 
+    /// As palavras da descrição, normalizadas — de onde sai o texto padrão da loja.
+    var descriptionTokens: Set<String> { ProductSimilarity.tokenize(product.description ?? "") }
+
+    /// O mesmo anúncio sem o texto padrão da loja na descrição (`DescriptionBoilerplate`). O título
+    /// fica inteiro.
+    func removingBoilerplate(_ boilerplate: Set<String>) -> ComparableListing {
+        guard !boilerplate.isEmpty, let description = product.description, !description.isEmpty else { return self }
+        var copy = self
+        copy.words = titleWords.union(ProductSimilarity.tokenize(description).subtracting(boilerplate))
+        copy.attributes = attributes.removingDescriptionWords(boilerplate)
+        return copy
+    }
+
     var hasAllPhotos: Bool { details != nil }
     var failedPhotoCount: Int { photos.count { $0.failure != nil } }
     var notAnalyzedPhotoCount: Int { photos.count(where: \.wasNotAnalyzed) }
-    var size: String? { details?.size.flatMap { Self.normalized($0) } }
     var categoryID: Int? { details?.categoryID }
-
-    private static func normalized(_ value: String) -> String? {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return trimmed.isEmpty ? nil : trimmed
-    }
 }

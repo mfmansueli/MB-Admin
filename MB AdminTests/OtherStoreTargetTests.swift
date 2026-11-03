@@ -18,13 +18,14 @@ struct OtherStoreTargetTests {
         )
     }
 
-    private func target(existing: Int = 0, possible: Int = 0) -> OtherStoreTarget {
+    private func target(existing: Int = 0, possible: Int = 0, otherVersion: Int = 0) -> OtherStoreTarget {
         OtherStoreTarget(
             accountID: EnjoeiAccountID(),
             name: "loja C",
             nickname: "lojac-77a1",
             existingCount: existing,
-            possibleCount: possible
+            possibleCount: possible,
+            otherVersionCount: otherVersion
         )
     }
 
@@ -93,5 +94,13 @@ struct OtherStoreTargetTests {
         #expect(target(existing: 1).subtitle(productCount: 3) == "1 já existe lá")
         #expect(target(existing: 2, possible: 1).subtitle(productCount: 3) == "2 já existem lá · 1 pode existir lá")
         #expect(target(possible: 2).subtitle(productCount: 3) == "2 podem existir lá")
+    }
+
+    @Test("lá tem outra versão (e nenhum risco de duplicar): a linha diz isso, em vez do @nick")
+    func subtituloOutraVersao() {
+        #expect(target(otherVersion: 1).subtitle(productCount: 1) == "tem outra versão desse produto")
+        #expect(target(otherVersion: 2).subtitle(productCount: 3) == "2 têm outra versão lá")
+        #expect(target(existing: 1, otherVersion: 1).subtitle(productCount: 1) == "já tem esse produto")
+        #expect(target(otherVersion: 1).possibleDuplicateCount == 0)
     }
 }

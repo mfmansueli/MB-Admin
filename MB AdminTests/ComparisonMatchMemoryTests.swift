@@ -49,6 +49,24 @@ struct ComparisonMatchMemoryTests {
         #expect(memory.presence(of: 3, from: storeA, to: storeB) == .possiblyMissing)
     }
 
+    @Test("possivelmente ausente com outra versão na outra loja vira 'outra versão' — informação, não aviso de duplicata")
+    func outraVersao() {
+        let memory = ComparisonMatchMemory()
+        let version = OtherVersion(product: product(20), differences: [])
+        let result = Fixtures.result(
+            missingInB: [product(1), product(2)],
+            missingInA: [product(20)],
+            otherVersions: [
+                ListingKey(sellerID: Fixtures.sellerA, productID: 1): [version],
+                ListingKey(sellerID: Fixtures.sellerB, productID: 20): [OtherVersion(product: product(1), differences: [])]
+            ]
+        )
+        memory.record(result, accountA: storeA, accountB: storeB)
+        #expect(memory.presence(of: 1, from: storeA, to: storeB) == .otherVersion)
+        #expect(memory.presence(of: 2, from: storeA, to: storeB) == .possiblyMissing)
+        #expect(memory.presence(of: 20, from: storeB, to: storeA) == .otherVersion)
+    }
+
     @Test("um produto em dois estados fica com o mais forte (par vence revisão)")
     func estadoMaisForteVence() {
         let memory = ComparisonMatchMemory()

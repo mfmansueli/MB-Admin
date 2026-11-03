@@ -33,22 +33,32 @@ nonisolated enum PostToOtherStoreCopy {
 
     /// Começa pelo risco quando a última comparação achou o produto (ou alguns deles) na loja de
     /// destino — "já tem" só com a mesma foto (ou confirmado por você); "pode já ter" quando ficou
-    /// pra revisar. O intervalo (`pace`, ex. "1 a cada minuto") só aparece com mais de um — é aí que
-    /// a fila demora.
+    /// pra revisar. Sem risco, avisa (só informação) quando lá tem o produto em outra versão. O
+    /// intervalo (`pace`, ex. "1 a cada minuto") só aparece com mais de um — é aí que a fila demora.
     static func confirmationMessage(productCount: Int, target: OtherStoreTarget, pace: String) -> String {
+        productCount == 1 ? singleMessage(target: target) : batchMessage(target: target, pace: pace)
+    }
+
+    private static func singleMessage(target: OtherStoreTarget) -> String {
         let store = target.name
-        if productCount == 1 {
-            if target.existingCount > 0 {
-                return "\(store) já tem esse produto, pela última comparação (a mesma foto). "
-                    + "se postar, vira um anúncio repetido lá, com o mesmo título, descrição, preço e fotos."
-            }
-            if target.possibleCount > 0 {
-                return "\(store) pode já ter esse produto — a última comparação deixou um par pra revisar. "
-                    + "se postar, vira um anúncio novo lá, com o mesmo título, descrição, preço e fotos."
-            }
-            return "vira um anúncio novo em \(store), com o mesmo título, descrição, preço e fotos, "
-                + "e entra na fila de ações. o anúncio daqui continua como está."
+        if target.existingCount > 0 {
+            return "\(store) já tem esse produto, pela última comparação (a mesma foto). "
+                + "se postar, vira um anúncio repetido lá, com o mesmo título, descrição, preço e fotos."
         }
+        if target.possibleCount > 0 {
+            return "\(store) pode já ter esse produto — a última comparação deixou um par pra revisar. "
+                + "se postar, vira um anúncio novo lá, com o mesmo título, descrição, preço e fotos."
+        }
+        if target.otherVersionCount > 0 {
+            return "\(store) tem esse produto em outra versão (a mesma foto, com outro tamanho, banho, cor ou medida), "
+                + "mas não nesta, pela última comparação. vira um anúncio novo lá, com o mesmo título, descrição, preço e fotos."
+        }
+        return "vira um anúncio novo em \(store), com o mesmo título, descrição, preço e fotos, "
+            + "e entra na fila de ações. o anúncio daqui continua como está."
+    }
+
+    private static func batchMessage(target: OtherStoreTarget, pace: String) -> String {
+        let store = target.name
         let message = "cada um vira um anúncio novo em \(store), com título, descrição, preço e fotos, "
             + "e entra na fila de ações (\(pace)). os anúncios daqui continuam como estão."
         var risks: [String] = []
@@ -62,7 +72,12 @@ nonisolated enum PostToOtherStoreCopy {
         case 1: risks.append(target.existingCount > 0 ? "1 pode existir" : "1 deles pode existir em \(store)")
         case let count: risks.append(target.existingCount > 0 ? "\(count) podem existir" : "\(count) deles podem existir em \(store)")
         }
-        guard !risks.isEmpty else { return message }
-        return "\(risks.joined(separator: " e ")), pela última comparação. \(message)"
+        if !risks.isEmpty {
+            return "\(risks.joined(separator: " e ")), pela última comparação. \(message)"
+        }
+        switch target.otherVersionCount {
+        case 0: return message
+        case let count: return "\(store) tem \(count) deles em outra versão, mas não nesta, pela última comparação. \(message)"
+        }
     }
 }

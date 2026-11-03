@@ -280,6 +280,16 @@ final class SecondaryScreensUITests: XCTestCase {
         element(in: app.buttons, containing: "mesmo produto (").tap()
         XCTAssertTrue(element(in: app.staticTexts, containing: "você confirmou que é o mesmo produto").waitForExistence(timeout: 5))
 
+        // O anel em três versões com a mesma foto: a descrição diz aro e banho, e cada versão mostra
+        // onde está — o aro 18 só em antonia, o aro 20 só na loja B.
+        app.buttons["filtrar resultados"].tap()
+        element(in: app.buttons, containing: "com variantes (").tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "produtos com variantes ·").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app.staticTexts, containing: "aro 18 · ródio").exists)
+        XCTAssertTrue(element(in: app.staticTexts, containing: "só em antonia").exists)
+        XCTAssertTrue(element(in: app.staticTexts, containing: "nas duas").exists)
+        attachScreenshot("comparar variantes", of: app)
+
         // Os possivelmente ausentes ficam embaixo dos pares, e a lista só monta o que está à vista —
         // o filtro traz a seção pro topo.
         app.buttons["filtrar resultados"].tap()

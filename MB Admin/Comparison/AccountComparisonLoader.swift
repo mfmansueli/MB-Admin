@@ -6,9 +6,12 @@ import Observation
 /// 1. Busca a listagem das duas lojas (rota pública, em paralelo, sem passar pelo megafone) e
 ///    analisa as fotos já conhecidas — a capa de cada anúncio, mais as fotos dos templates já salvos
 ///    — e resolve os pares.
-/// 2. Só pros anúncios que a etapa 1 não resolveu (sem par forte) e que não têm template válido
-///    salvo, busca o template (todas as fotos, uma chamada por produto, no ritmo do
-///    `ProductDetailsLoader`), analisa as fotos novas e resolve de novo com tudo.
+/// 2. Só pros anúncios que a etapa 1 não resolveu (sem par forte) — mais os que têm par mas são de
+///    uma família de versões (a mesma foto em vários anúncios, `keysWantingDetails`), pra conferir a
+///    versão pela descrição/tamanho/marca — e que não têm template válido salvo, busca o template
+///    (todas as fotos, descrição, tamanho, marca; uma chamada por produto, no ritmo do
+///    `ProductDetailsLoader`), analisa as fotos novas e resolve de novo com tudo. Com
+///    `checkAllDetails`, busca o de todo anúncio (pares 1:1 com a mesma foto inclusive).
 ///
 /// Falha de rede nunca vira lista vazia: a listagem que falhou (ou veio faltando) fica marcada
 /// (`StoreListingStatus`) e nada da outra loja é dado como ausente nela. Cancelar deixa a fase em
@@ -45,6 +48,7 @@ final class AccountComparisonLoader {
         let accountB: AccountSession
         let services: ComparisonServices
         let matchMemory: ComparisonMatchMemory?
+        let checkAllDetails: Bool
     }
 
     /// O que a última rodada completa usou — pra uma revisão manual recalcular sem rede nenhuma.
@@ -70,11 +74,14 @@ final class AccountComparisonLoader {
         accountA: AccountSession,
         accountB: AccountSession,
         services: ComparisonServices,
-        matchMemory: ComparisonMatchMemory? = nil
+        matchMemory: ComparisonMatchMemory? = nil,
+        checkAllDetails: Bool = false
     ) {
         guard task == nil else { return }
         cachedListings = nil
-        session = Session(accountA: accountA, accountB: accountB, services: services, matchMemory: matchMemory)
+        session = Session(
+            accountA: accountA, accountB: accountB, services: services, matchMemory: matchMemory, checkAllDetails: checkAllDetails
+        )
         start(reusingListings: false)
     }
 
@@ -186,10 +193,12 @@ final class AccountComparisonLoader {
         var failures = DetailsFailures()
         var outcome = await resolve(session, listings, detailsA, detailsB, failures, photos, runID)
 
-        // Etapa 2: template só de quem ainda não tem par forte nem template válido.
+        // Etapa 2: template de quem ainda não tem par forte (ou tem, mas numa família de versões) e não
+        // tem template válido.
         let currentDate = now()
-        let pendingA = Self.pending(listings.a.products, details: detailsA, sellerID: accountA.user.id, resolved: outcome.matchedKeys, now: currentDate)
-        let pendingB = Self.pending(listings.b.products, details: detailsB, sellerID: accountB.user.id, resolved: outcome.matchedKeys, now: currentDate)
+        let settled = session.checkAllDetails ? [] : outcome.matchedKeys.subtracting(outcome.result.keysWantingDetails)
+        let pendingA = Self.pending(listings.a.products, details: detailsA, sellerID: accountA.user.id, resolved: settled, now: currentDate)
+        let pendingB = Self.pending(listings.b.products, details: detailsB, sellerID: accountB.user.id, resolved: settled, now: currentDate)
         if !pendingA.isEmpty || !pendingB.isEmpty {
             phase = .fetchingDetails
             async let reportA = accountA.productDetailsLoader.fetchDetails(for: pendingA, now: now)

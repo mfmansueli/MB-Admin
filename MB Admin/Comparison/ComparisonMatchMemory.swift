@@ -26,8 +26,11 @@ final class ComparisonMatchMemory {
         func mark(_ table: inout [Int: ComparisonPresence], _ productID: Int, _ presence: ComparisonPresence) {
             table[productID] = max(table[productID] ?? .possiblyMissing, presence)
         }
-        for product in result.possiblyMissingInB { mark(&fromA, product.id, .possiblyMissing) }
-        for product in result.possiblyMissingInA { mark(&fromB, product.id, .possiblyMissing) }
+        func missing(_ product: EnjoeiProduct, sellerID: Int) -> ComparisonPresence {
+            result.otherVersions[ListingKey(sellerID: sellerID, productID: product.id)]?.isEmpty == false ? .otherVersion : .possiblyMissing
+        }
+        for product in result.possiblyMissingInB { mark(&fromA, product.id, missing(product, sellerID: result.storeA.sellerID)) }
+        for product in result.possiblyMissingInA { mark(&fromB, product.id, missing(product, sellerID: result.storeB.sellerID)) }
         for listing in result.unverifiedA { mark(&fromA, listing.product.id, .unverified) }
         for listing in result.unverifiedB { mark(&fromB, listing.product.id, .unverified) }
         for match in result.reviews {

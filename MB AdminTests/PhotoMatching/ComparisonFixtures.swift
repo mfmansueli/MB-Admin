@@ -20,12 +20,13 @@ enum ComparisonFixtures {
 
     static func ring(_ seed: Int) -> Spec { Spec(shape: .ring, seed: seed) }
 
-    static func product(_ id: Int, title: String, cover: String?) -> EnjoeiProduct {
-        EnjoeiProduct(id: id, title: title, path: "produto-\(id)", photoPublicID: cover, currentPrice: 100, originalPrice: 100)
+    static func product(_ id: Int, title: String, cover: String?, price: Double = 100) -> EnjoeiProduct {
+        EnjoeiProduct(id: id, title: title, path: "produto-\(id)", photoPublicID: cover, currentPrice: price, originalPrice: price)
     }
 
     /// Um anúncio com as fotos dadas (id público → assinatura; `nil` = a foto falhou). Com
-    /// `hasDetails`, o template é conhecido (todas as fotos); sem, só a primeira (a capa) existe.
+    /// `hasDetails`, o template é conhecido (todas as fotos, descrição, tamanho, marca); sem, só a
+    /// primeira foto (a capa), o título e o preço existem.
     static func listing(
         seller: Int,
         id: Int,
@@ -34,17 +35,20 @@ enum ComparisonFixtures {
         hasDetails: Bool = true,
         size: String? = nil,
         categoryID: Int? = 327,
-        detailsFailure: String? = nil
+        detailsFailure: String? = nil,
+        description: String = "",
+        brand: String? = nil,
+        price: Double = 100
     ) -> ComparableListing {
-        let product = product(id, title: title, cover: photos.first?.id)
+        let product = product(id, title: title, cover: photos.first?.id, price: price)
         let details = hasDetails ? ProductListingDetails(
             productID: id,
             coverPublicID: photos.first?.id,
             photoPublicIDs: photos.map(\.id),
             categoryID: categoryID,
             size: size,
-            brand: nil,
-            description: "",
+            brand: brand,
+            description: description,
             fetchedAt: Date()
         ) : nil
         var signatures: [String: PhotoSignature] = [:]
@@ -123,7 +127,9 @@ enum ComparisonFixtures {
         missingInB: [EnjoeiProduct] = [],
         missingInA: [EnjoeiProduct] = [],
         unverifiedA: [UnverifiedListing] = [],
-        unverifiedB: [UnverifiedListing] = []
+        unverifiedB: [UnverifiedListing] = [],
+        families: [ProductFamily] = [],
+        otherVersions: [ListingKey: [OtherVersion]] = [:]
     ) -> AccountComparisonResult {
         AccountComparisonResult(
             storeA: summary(sellerA, name: "antonia"),
@@ -134,7 +140,14 @@ enum ComparisonFixtures {
             possiblyMissingInB: missingInB,
             possiblyMissingInA: missingInA,
             unverifiedA: unverifiedA,
-            unverifiedB: unverifiedB
+            unverifiedB: unverifiedB,
+            families: families,
+            otherVersions: otherVersions
         )
+    }
+
+    /// Uma família de versões pronta, com as versões dadas (rótulo, produto de A, de B, onde está).
+    static func family(_ id: String, title: String, versions: [ProductFamilyVersion]) -> ProductFamily {
+        ProductFamily(id: id, title: title, photoPublicID: nil, dimensions: [.size], versions: versions)
     }
 }

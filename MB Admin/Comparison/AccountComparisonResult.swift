@@ -8,6 +8,10 @@ import Foundation
 /// - `unverifiedA`/`unverifiedB`: sem par, mas algo impediu a verificação — nunca é "ausente".
 ///
 /// `rejected` são os pares que você marcou como produtos diferentes (pra poder desfazer).
+///
+/// Por cima dos estados, `families` agrupa os anúncios que dividem a mesma foto em versões (aro,
+/// banho, cor, medida) com onde cada versão está, e `otherVersions` diz, de um possivelmente
+/// ausente, quais versões dele a outra loja tem.
 nonisolated struct AccountComparisonResult: Equatable, Sendable {
     /// Da rodada de comparação — não muda quando uma revisão manual recalcula o resultado (só
     /// `revision`), pra tela não perder busca/filtro a cada decisão. Comparar de novo gera outro.
@@ -26,6 +30,13 @@ nonisolated struct AccountComparisonResult: Equatable, Sendable {
     let unverifiedB: [UnverifiedListing]
     /// Revisões manuais que deixaram de valer porque um dos anúncios mudou.
     let staleDecisionCount: Int
+    /// Produtos com versões (mesma foto em vários anúncios, ou atributos que discordam).
+    let families: [ProductFamily]
+    /// De cada possivelmente ausente (das duas lojas) que tem outra versão na outra loja: quais.
+    let otherVersions: [ListingKey: [OtherVersion]]
+    /// Anúncios com par mas de uma família de versões, sem o template buscado — a etapa 2 da
+    /// comparação busca o template deles também, pra conferir a versão pela descrição.
+    let keysWantingDetails: Set<ListingKey>
 
     init(
         id: UUID = UUID(),
@@ -39,7 +50,10 @@ nonisolated struct AccountComparisonResult: Equatable, Sendable {
         possiblyMissingInA: [EnjoeiProduct] = [],
         unverifiedA: [UnverifiedListing] = [],
         unverifiedB: [UnverifiedListing] = [],
-        staleDecisionCount: Int = 0
+        staleDecisionCount: Int = 0,
+        families: [ProductFamily] = [],
+        otherVersions: [ListingKey: [OtherVersion]] = [:],
+        keysWantingDetails: Set<ListingKey> = []
     ) {
         self.id = id
         self.revision = revision
@@ -53,6 +67,9 @@ nonisolated struct AccountComparisonResult: Equatable, Sendable {
         self.unverifiedA = unverifiedA
         self.unverifiedB = unverifiedB
         self.staleDecisionCount = staleDecisionCount
+        self.families = families
+        self.otherVersions = otherVersions
+        self.keysWantingDetails = keysWantingDetails
     }
 
     var unverifiedCount: Int { unverifiedA.count + unverifiedB.count }

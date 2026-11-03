@@ -12,6 +12,10 @@ import Foundation
 ///    de medidas) deixam de valer como evidência.
 /// 4. **Texto**: candidatos por Jaccard (`TextCandidateIndex`), e o Jaccard de todo par que já tem
 ///    evidência de foto.
+/// 5. **Capas iguais dentro de cada loja**: anúncios da mesma loja com a mesma capa (mesmo id ou a
+///    mesma fotografia) — versões do mesmo produto, pra montar as famílias (`ProductFamilyBuilder`)
+///    mesmo quando a outra loja não tem nenhuma delas. Só a capa, de propósito: a tabela de medidas
+///    ou a foto da embalagem repetida em todo anúncio nunca é a capa.
 nonisolated enum ComparisonEvidenceBuilder {
     private typealias Limits = PhotoMatchingParameters
 
@@ -25,6 +29,9 @@ nonisolated enum ComparisonEvidenceBuilder {
         /// Ids públicos tratados como genéricos em cada loja.
         var genericPhotosA: Set<String> = []
         var genericPhotosB: Set<String> = []
+        /// Anúncios de cada loja com a mesma capa (índices, grupos de 2 ou mais).
+        var coverGroupsA: [[Int]] = []
+        var coverGroupsB: [[Int]] = []
     }
 
     /// Uma foto de um anúncio, achatada pra varrer rápido.
@@ -73,7 +80,36 @@ nonisolated enum ComparisonEvidenceBuilder {
                 output.pairs[key] = ListingPairEvidence(indexA: candidate.indexA, indexB: candidate.indexB, textSimilarity: candidate.score)
             }
         }
+        output.coverGroupsA = coverGroups(listingsA)
+        output.coverGroupsB = coverGroups(listingsB)
         return output
+    }
+
+    /// Anúncios da mesma loja cuja capa é a mesma fotografia: o mesmo id público (anúncio duplicado)
+    /// ou a mesma foto reenviada. Força bruta nos hashes das capas — n²/2 XORs, barato.
+    private static func coverGroups(_ listings: [ComparableListing]) -> [[Int]] {
+        var groups = DisjointSet(count: listings.count)
+        var firstByPublicID: [String: Int] = [:]
+        for (index, listing) in listings.enumerated() {
+            guard let cover = listing.photos.first, cover.signature?.isInformative != false else { continue }
+            if let first = firstByPublicID[cover.publicID] {
+                groups.union(first, index)
+            } else {
+                firstByPublicID[cover.publicID] = index
+            }
+        }
+        let usable = listings.indices.filter { listings[$0].photos.first?.isUsable == true }
+        let signatures = usable.compactMap { listings[$0].photos.first?.signature }
+        let hashes = signatures.map(\.contentHash)
+        let radius = Limits.candidateContentHashRadius
+        for first in hashes.indices {
+            for second in (first + 1)..<hashes.count where (hashes[first] ^ hashes[second]).nonzeroBitCount <= radius {
+                if PhotoPairComparison.compare(signatures[first], signatures[second]).level >= .samePhoto {
+                    groups.union(usable[first], usable[second])
+                }
+            }
+        }
+        return groups.groups()
     }
 
     /// Mesmo id público dos dois lados. Foto que foi analisada e é lisa (placeholder) não liga nada.

@@ -12,6 +12,10 @@ struct AccountComparisonView: View {
     @State private var accountBID: EnjoeiAccountID?
     @State private var loader = AccountComparisonLoader()
     @State private var isShowingQueue = false
+    /// Busca o anúncio inteiro (descrição, tamanho, marca) de todo par, não só dos que ficaram em
+    /// dúvida ou dividem a foto com outras versões — mais lento na primeira vez; o template fica
+    /// salvo por 30 dias.
+    @AppStorage("comparison.checkAllDetails") private var checkAllDetails = false
     @Environment(\.dismiss) private var dismiss
     @Environment(AccountsStore.self) private var accountsStore
 
@@ -123,13 +127,25 @@ struct AccountComparisonView: View {
                         .frame(maxWidth: .infinity)
                 }
 
+                Toggle(isOn: $checkAllDetails) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("conferir a descrição de todos os pares")
+                            .font(.subheadline)
+                        Text("mais lento na primeira vez: busca o anúncio inteiro de cada produto pra checar aro, banho e marca.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .disabled(loader.isRunning)
+
                 Button {
                     guard let accountA, let accountB else { return }
                     loader.compare(
                         accountA: accountA,
                         accountB: accountB,
                         services: accountsStore.comparisonServices,
-                        matchMemory: accountsStore.comparisonMatches
+                        matchMemory: accountsStore.comparisonMatches,
+                        checkAllDetails: checkAllDetails
                     )
                 } label: {
                     // `.onTint`: o estilo proeminente pinta o texto de branco, que some em cima da
@@ -178,8 +194,9 @@ struct AccountComparisonView: View {
                 systemImage: "rectangle.on.rectangle",
                 description: Text(
                     "escolha as duas contas acima e toque em \"comparar\". a comparação procura a mesma foto nos "
-                        + "anúncios das duas lojas, com o texto ajudando nas dúvidas. na primeira vez, uma loja grande "
-                        + "demora mais: as fotos de cada anúncio ficam salvas pras próximas."
+                        + "anúncios das duas lojas e usa título, descrição, preço inicial e marca pra separar as versões "
+                        + "(aro, banho, cor). na primeira vez, uma loja grande demora mais: as fotos e os anúncios ficam "
+                        + "salvos pras próximas."
                 )
             )
             .frame(maxHeight: .infinity)
@@ -249,13 +266,13 @@ struct AccountComparisonView: View {
             if case .fetching(let fetched, let total) = account?.productDetailsLoader.phase {
                 ProgressView(value: Double(fetched), total: Double(total))
                     .frame(maxWidth: 140)
-                Text("buscando fotos dos anúncios… \(fetched) de \(total)")
+                Text("buscando fotos e descrições… \(fetched) de \(total)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
             } else {
                 ProgressView()
-                Text("buscando fotos dos anúncios…")
+                Text("buscando fotos e descrições…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

@@ -8,11 +8,17 @@ import Foundation
 ///
 /// - antonia põe a foto de fundo branco primeiro; as outras lojas, às vezes em segundo (atrás de uma
 ///   foto "de ambiente" diferente) — a capa sozinha não acha o par;
-/// - posição 3: mesma foto, tamanhos diferentes no template → revisão;
+/// - posição 3: mesma foto, tamanhos diferentes no template (17 × 16) → outra versão: cada loja tem
+///   uma que a outra não tem;
 /// - posição 6: a mesma pose em dourado nas outras lojas → variante de cor, revisão;
 /// - posição 9: mesmo título, outra peça na foto → texto quase igual, fotos diferentes, revisão;
-/// - posição 12: a mesma foto também na posição 21 das outras lojas (duplicata) → revisão;
-/// - posição 17: as fotos das outras lojas não carregam (404) → não foi possível verificar.
+/// - posição 12: a mesma foto também na posição 21 das outras lojas, num anúncio de outro título e
+///   outro preço → o título e o preço inicial desempatam: 12 × 12 vira par, 12 × 21 fica pra revisar;
+/// - posição 17: as fotos das outras lojas não carregam (404) → não foi possível verificar;
+/// - posições 22, 23 e 24: o mesmo anel (mesma foto, mesmo título, mesmo preço) em três versões que
+///   só a descrição diz (`DemoCatalog.description`): antonia tem aro 16 ródio, aro 18 ródio e aro 16
+///   ouro; as outras lojas, aro 16 ródio, **aro 20** ródio e aro 16 ouro → dois pares pela versão, e o
+///   aro 18 (antonia) e o aro 20 (outras) como versões que faltam.
 nonisolated enum DemoPhotoCatalog {
     typealias Spec = DemoPhotoRenderer.Spec
 
@@ -23,6 +29,8 @@ nonisolated enum DemoPhotoCatalog {
     static let duplicatePosition = 21
     static let brokenPhotosPosition = 17
     static let sizeConflictPosition = 3
+    /// As três versões do mesmo anel — a mesma foto da primeira posição.
+    static let variantFamilyPositions = 22...24
 
     private enum Kind: String {
         case white, ambient, detail
@@ -61,6 +69,7 @@ nonisolated enum DemoPhotoCatalog {
         let isAntonia = sellerID == antoniaSellerID
         var productPosition = position
         if !isAntonia, position == duplicatePosition { productPosition = duplicatedPosition }
+        if variantFamilyPositions.contains(position) { productPosition = variantFamilyPositions.lowerBound }
         var spec = productSpec(position: productPosition)
         if !isAntonia, position == variantPosition { spec.metal = .gold }
         if !isAntonia, position == differentPhotoPosition { spec.seed += 1000 }
@@ -82,6 +91,8 @@ nonisolated enum DemoPhotoCatalog {
     }
 
     private static func productSpec(position: Int) -> Spec {
+        // As versões do anel: uma foto de anel (a forma da posição seria brinco).
+        if variantFamilyPositions.contains(position) { return Spec(shape: .ring, seed: position + 1) }
         var spec = Spec(shape: Spec.Shape.allCases[position % Spec.Shape.allCases.count], seed: position + 1)
         if position % 7 == 2 { spec.metal = .gold }
         return spec
