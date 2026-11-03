@@ -1,10 +1,10 @@
 import SwiftUI
 
 /// Conteúdo do sheet aberto pelo botão "comparar produtos" em "suas contas": escolhe duas contas
-/// logadas e mostra quais produtos parecem ser o mesmo item nas duas, e quais só existem numa. O
-/// resultado em si (busca, filtro, seleção múltipla, as três seções) vive em
-/// `ComparisonResultView` — só criado depois que uma comparação termina, e aí ocupa a tela toda
-/// (as contas comparadas vão pro subtítulo); "nova comparação" volta pra escolha das contas.
+/// logadas e compara os anúncios das duas pelas fotos (com o texto ajudando nas dúvidas) —
+/// `AccountComparisonLoader` conduz, com progresso, "parar" e "continuar". O resultado em si (busca,
+/// filtro, seleção, revisão manual) vive em `ComparisonResultView` — só criado depois que uma
+/// comparação termina, e aí ocupa a tela toda; "nova comparação" volta pra escolha das contas.
 struct AccountComparisonView: View {
     let accounts: [AccountSession]
 
@@ -12,9 +12,6 @@ struct AccountComparisonView: View {
     @State private var accountBID: EnjoeiAccountID?
     @State private var loader = AccountComparisonLoader()
     @State private var isShowingQueue = false
-    /// Além do título, busca a descrição de cada produto das duas contas antes de comparar — mais
-    /// precisa, mas uma chamada de rede por produto (sem lote), então demorada numa loja grande.
-    @State private var isFullComparison = false
     @Environment(\.dismiss) private var dismiss
     @Environment(AccountsStore.self) private var accountsStore
 
@@ -90,7 +87,10 @@ struct AccountComparisonView: View {
                 accountA: accountA,
                 accountB: accountB,
                 poster: poster,
-                postQueue: accountsStore.postQueue
+                postQueue: accountsStore.postQueue,
+                onDecide: { verdict, match in Task { await loader.decide(verdict, for: match) } },
+                onUndo: { match in Task { await loader.undoDecision(for: match) } },
+                onRetry: { loader.retry() }
             )
             // `result.id` é novo a cada comparação — sem isso, SwiftUI trata essa view como a
             // mesma de antes e busca/filtro/seleção de uma comparação anterior (ex.: trocar a conta
@@ -110,11 +110,8 @@ struct AccountComparisonView: View {
         VStack(spacing: 16) {
             VStack(spacing: 12) {
                 HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        accountPicker("conta A", selection: $accountAID, excluding: accountBID)
-                        detailsStatsText(for: accountA)
-                    }
-                    .frame(maxWidth: .infinity)
+                    accountPicker("conta A", selection: $accountAID, excluding: accountBID)
+                        .frame(maxWidth: .infinity)
                     VStack(spacing: 4) {
                         Image(systemName: "arrow.left.arrow.right")
                             .font(.footnote)
@@ -122,22 +119,8 @@ struct AccountComparisonView: View {
                         cooldownStatus
                     }
                     .padding(.top, 34)
-                    VStack(alignment: .leading, spacing: 4) {
-                        accountPicker("conta B", selection: $accountBID, excluding: accountAID)
-                        detailsStatsText(for: accountB)
-                    }
-                    .frame(maxWidth: .infinity)
-                }
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Toggle("comparação completa", isOn: $isFullComparison)
-                    if isFullComparison {
-                        // Descrição já salva de uma comparação anterior sempre entra, com ou sem o
-                        // toggle — ele só decide se busca o que ainda falta pela rede agora.
-                        Text("mais precisa, mas demorada: busca a descrição de cada produto que ainda não tiver, uma requisição por vez.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    accountPicker("conta B", selection: $accountBID, excluding: accountAID)
+                        .frame(maxWidth: .infinity)
                 }
 
                 Button {
@@ -145,7 +128,7 @@ struct AccountComparisonView: View {
                     loader.compare(
                         accountA: accountA,
                         accountB: accountB,
-                        fullComparison: isFullComparison,
+                        services: accountsStore.comparisonServices,
                         matchMemory: accountsStore.comparisonMatches
                     )
                 } label: {
@@ -156,7 +139,7 @@ struct AccountComparisonView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(accountA == nil || accountB == nil || isLoadingProducts || isFetchingDetails)
+                .disabled(accountA == nil || accountB == nil || loader.isRunning)
                 // Distingue do "comparar" da lista de contas, por baixo da folha (testes de UI).
                 .accessibilityIdentifier("startComparison")
             }
@@ -186,11 +169,6 @@ struct AccountComparisonView: View {
         }
     }
 
-    private var isLoadingProducts: Bool {
-        if case .loadingProducts = loader.phase { return true }
-        return false
-    }
-
     @ViewBuilder
     private var resultView: some View {
         switch loader.phase {
@@ -198,39 +176,71 @@ struct AccountComparisonView: View {
             ContentUnavailableView(
                 "compare os produtos das duas contas",
                 systemImage: "rectangle.on.rectangle",
-                description: Text("escolha as duas contas acima e toque em \"comparar\".")
+                description: Text(
+                    "escolha as duas contas acima e toque em \"comparar\". a comparação procura a mesma foto nos "
+                        + "anúncios das duas lojas, com o texto ajudando nas dúvidas. na primeira vez, uma loja grande "
+                        + "demora mais: as fotos de cada anúncio ficam salvas pras próximas."
+                )
             )
             .frame(maxHeight: .infinity)
         case .loadingProducts(let loaded, let total):
-            Spacer()
-            if total > 0 {
-                VStack(spacing: 8) {
-                    ProgressView(value: Double(loaded), total: Double(total))
-                        .frame(maxWidth: 220)
-                    Text("carregando produtos… \(loaded) de \(total)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                ProgressView("carregando produtos…")
-            }
-            Spacer()
+            progress(total > 0 ? "carregando produtos… \(loaded) de \(total)" : "carregando produtos…", done: loaded, total: total)
+        case .analyzingPhotos(let done, let total):
+            progress(total > 0 ? "analisando fotos… \(done) de \(total)" : "analisando fotos…", done: done, total: total)
         case .fetchingDetails:
             Spacer()
             HStack(spacing: 24) {
                 detailsFetchingPanel(for: accountA)
                 detailsFetchingPanel(for: accountB)
             }
+            cancelButton
             Spacer()
+        case .matching:
+            progress("comparando…", done: 0, total: 0)
+        case .interrupted:
+            ContentUnavailableView {
+                Label("comparação interrompida", systemImage: "pause.circle")
+            } description: {
+                Text("o que já foi analisado ficou salvo. continuar retoma de onde parou.")
+            } actions: {
+                Button("continuar") { loader.resume() }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("resumeComparison")
+                Button("recomeçar") { loader.retry() }
+            }
+            .frame(maxHeight: .infinity)
         case .finished:
             // Com resultado, `content` mostra `ComparisonResultView` no lugar desta tela inteira.
             EmptyView()
         }
     }
 
-    /// Progresso individual de uma conta buscando detalhes (`ProductDetailsLoader`), durante a
-    /// "comparação completa" — as duas contas rodam ao mesmo tempo, cada uma com seu próprio
-    /// `phase`, por isso dois painéis lado a lado em vez de um progresso combinado só.
+    private func progress(_ text: String, done: Int, total: Int) -> some View {
+        VStack(spacing: 8) {
+            Spacer()
+            if total > 0 {
+                ProgressView(value: Double(min(done, total)), total: Double(total))
+                    .frame(maxWidth: 220)
+            } else {
+                ProgressView()
+            }
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            cancelButton
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var cancelButton: some View {
+        Button("parar", role: .cancel) { loader.cancel() }
+            .padding(.top, 8)
+            .accessibilityIdentifier("cancelComparison")
+    }
+
+    /// Progresso de uma conta buscando o template (todas as fotos) dos anúncios que a capa sozinha
+    /// não resolveu — as duas contas rodam ao mesmo tempo, cada uma com seu próprio `phase`.
     @ViewBuilder
     private func detailsFetchingPanel(for account: AccountSession?) -> some View {
         VStack(spacing: 8) {
@@ -239,33 +249,18 @@ struct AccountComparisonView: View {
             if case .fetching(let fetched, let total) = account?.productDetailsLoader.phase {
                 ProgressView(value: Double(fetched), total: Double(total))
                     .frame(maxWidth: 140)
-                Text("buscando detalhes… \(fetched) de \(total)")
+                Text("buscando fotos dos anúncios… \(fetched) de \(total)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             } else {
                 ProgressView()
-                Text("buscando detalhes…")
+                Text("buscando fotos dos anúncios…")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity)
-    }
-
-    /// Quantos produtos dessa conta já têm descrição salva localmente — mostrado embaixo de cada
-    /// seletor de conta, pra dar pra decidir se vale a pena rodar a comparação completa de novo
-    /// (que busca tudo de novo pela API) ou se boa parte já está salva de uma vez anterior.
-    @ViewBuilder
-    private func detailsStatsText(for account: AccountSession?) -> some View {
-        if let account, account.productDetailsLoader.totalCount > 0 {
-            Text("\(account.productDetailsLoader.detailedCount) de \(account.productDetailsLoader.totalCount) produtos já têm detalhes salvos")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private var isFetchingDetails: Bool {
-        loader.phase == .fetchingDetails
     }
 
     @ViewBuilder

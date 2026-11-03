@@ -261,21 +261,36 @@ final class SecondaryScreensUITests: XCTestCase {
         XCTAssertTrue(start.waitForExistence(timeout: 5))
         start.tap()
 
-        XCTAssertTrue(element(in: app.staticTexts, containing: "produtos em comum").waitForExistence(timeout: 20))
-        XCTAssertTrue(element(in: app.buttons, containing: "ver diferenças do par").exists)
+        // A demonstração busca as fotos e os templates de quem a capa não resolveu (com pausa entre
+        // cada um, como no app de verdade) — demora mais que a listagem sozinha.
+        XCTAssertTrue(element(in: app.staticTexts, containing: "mesmo produto ·").waitForExistence(timeout: 90))
+        XCTAssertTrue(element(in: app.buttons, containing: "ver detalhes do par").exists)
         attachScreenshot("comparar produtos", of: app)
 
-        // Os que faltam numa conta ficam embaixo dos 25 pares, e a lista só monta o que está à
-        // vista — o filtro traz a seção pro topo.
+        // Revisão: os dois botões na própria linha; confirmar tira o par de "precisa revisar".
         app.buttons["filtrar resultados"].tap()
-        element(in: app.buttons, containing: "não encontrados em loja B").tap()
-        XCTAssertTrue(element(in: app.staticTexts, containing: "só em antonia").waitForExistence(timeout: 5))
-        XCTAssertTrue(element(in: app.buttons, containing: "postar em loja B").exists)
-        attachScreenshot("comparar só em antonia", of: app)
+        element(in: app.buttons, containing: "precisa revisar").tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "precisa revisar ·").waitForExistence(timeout: 5))
+        let confirm = app.buttons["é o mesmo produto"].firstMatch
+        XCTAssertTrue(confirm.waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["são produtos diferentes"].firstMatch.exists)
+        attachScreenshot("comparar precisa revisar", of: app)
+        confirm.tap()
+        app.buttons["filtrar resultados"].tap()
+        element(in: app.buttons, containing: "mesmo produto (").tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "você confirmou que é o mesmo produto").waitForExistence(timeout: 5))
 
-        // Selecionar só marca quem falta numa conta; "todos" da seção conta na barra de cima.
+        // Os possivelmente ausentes ficam embaixo dos pares, e a lista só monta o que está à vista —
+        // o filtro traz a seção pro topo.
+        app.buttons["filtrar resultados"].tap()
+        element(in: app.buttons, containing: "possivelmente ausentes em loja B").tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "possivelmente ausentes em loja B ·").waitForExistence(timeout: 5))
+        XCTAssertTrue(element(in: app.buttons, containing: "postar em loja B").exists)
+        attachScreenshot("comparar possivelmente ausentes", of: app)
+
+        // Selecionar só marca quem possivelmente falta numa conta; "todos" da seção conta na barra.
         app.buttons["selecionar"].tap()
-        app.buttons["selecionar todos em só em antonia"].tap()
+        app.buttons["selecionar todos em possivelmente ausentes em loja B"].tap()
         XCTAssertTrue(element(in: app.buttons, containing: "à fila").waitForExistence(timeout: 5))
         attachScreenshot("comparar selecionando", of: app)
         app.buttons["concluir seleção"].tap()

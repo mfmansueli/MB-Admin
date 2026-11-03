@@ -4,44 +4,43 @@ import Testing
 
 @Suite("resultado da comparação depois do filtro e da busca")
 struct ComparisonFilteredResultTests {
-    private func product(_ id: Int, title: String) -> EnjoeiProduct {
-        EnjoeiProduct(id: id, title: title, path: "p-\(id)", photoPublicID: nil, currentPrice: 100, originalPrice: 100)
-    }
+    typealias Fixtures = ComparisonFixtures
 
     private var result: AccountComparisonResult {
-        AccountComparisonResult(
-            matches: [
-                ProductMatch(
-                    productA: product(1, title: "brinco argola estrela"),
-                    productB: product(2, title: "argola estrela leve"),
-                    similarity: 0.82
-                )
-            ],
-            onlyInA: [product(3, title: "colar coração"), product(4, title: "anel aro 17")],
-            onlyInB: [product(5, title: "pulseira elos")]
+        Fixtures.result(
+            matches: [Fixtures.match(1, 2, titleA: "brinco argola estrela", titleB: "argola estrela leve")],
+            reviews: [Fixtures.match(6, 7, status: .needsReview, titleA: "anel solitário", titleB: "anel solitário rosa")],
+            rejected: [Fixtures.match(8, 9, status: .rejected, titleA: "colar curto", titleB: "colar longo")],
+            missingInB: [Fixtures.product(3, title: "colar coração", cover: nil), Fixtures.product(4, title: "anel aro 17", cover: nil)],
+            missingInA: [Fixtures.product(5, title: "pulseira elos", cover: nil)],
+            unverifiedA: [UnverifiedListing(product: Fixtures.product(10, title: "tornozeleira", cover: nil), reasons: [.detailsUnavailable])],
+            unverifiedB: [UnverifiedListing(product: Fixtures.product(11, title: "piercing", cover: nil), reasons: [.photosFailed(2)])]
         )
     }
 
-    @Test("sem filtro nem busca, mostra as três seções inteiras")
+    @Test("sem filtro nem busca, mostra todas as seções inteiras")
     func semFiltro() {
         let filtered = ComparisonFilteredResult(result: result, filter: .all, searchText: "")
 
-        #expect(filtered.matches.count == 1)
-        #expect(filtered.onlyInA.map(\.id) == [3, 4])
-        #expect(filtered.onlyInB.map(\.id) == [5])
+        #expect(filtered.matches.map(\.id) == ["1-2"])
+        #expect(filtered.reviews.map(\.id) == ["6-7"])
+        #expect(filtered.rejected.map(\.id) == ["8-9"])
+        #expect(filtered.missingInB.map(\.id) == [3, 4])
+        #expect(filtered.missingInA.map(\.id) == [5])
+        #expect(filtered.unverifiedA.map(\.product.id) == [10])
+        #expect(filtered.unverifiedB.map(\.product.id) == [11])
     }
 
-    @Test("o filtro deixa só a seção escolhida")
-    func filtroDeixaUmaSecao() {
-        let onlyMatches = ComparisonFilteredResult(result: result, filter: .matches, searchText: "")
-        #expect(onlyMatches.matches.count == 1)
-        #expect(onlyMatches.onlyInA.isEmpty)
-        #expect(onlyMatches.onlyInB.isEmpty)
-
-        let onlyInB = ComparisonFilteredResult(result: result, filter: .onlyInB, searchText: "")
-        #expect(onlyInB.matches.isEmpty)
-        #expect(onlyInB.onlyInA.isEmpty)
-        #expect(onlyInB.onlyInB.map(\.id) == [5])
+    @Test("o filtro deixa só a seção escolhida", arguments: ComparisonResultFilter.allCases.filter { $0 != .all })
+    func filtroDeixaUmaSecao(filter: ComparisonResultFilter) {
+        let filtered = ComparisonFilteredResult(result: result, filter: filter, searchText: "")
+        #expect(filtered.matches.isEmpty == (filter != .matches))
+        #expect(filtered.reviews.isEmpty == (filter != .review))
+        #expect(filtered.rejected.isEmpty == (filter != .rejected))
+        #expect(filtered.missingInB.isEmpty == (filter != .missingInB))
+        #expect(filtered.missingInA.isEmpty == (filter != .missingInA))
+        #expect(filtered.unverifiedA.isEmpty == (filter != .unverified))
+        #expect(filtered.unverifiedB.isEmpty == (filter != .unverified))
     }
 
     @Test("a busca acha um par também pelo nome que ele tem na outra conta")
@@ -49,11 +48,19 @@ struct ComparisonFilteredResultTests {
         let filtered = ComparisonFilteredResult(result: result, filter: .all, searchText: "LEVE")
 
         #expect(filtered.matches.count == 1)
-        #expect(filtered.onlyInA.isEmpty)
-        #expect(filtered.onlyInB.isEmpty)
+        #expect(filtered.reviews.isEmpty)
+        #expect(filtered.missingInB.isEmpty)
+        #expect(filtered.missingInA.isEmpty)
     }
 
-    @Test("só os produtos que faltam numa conta entram na seleção — os pares nunca")
+    @Test("a busca também filtra os não verificados")
+    func buscaNosNaoVerificados() {
+        let filtered = ComparisonFilteredResult(result: result, filter: .unverified, searchText: "pier")
+        #expect(filtered.unverifiedA.isEmpty)
+        #expect(filtered.unverifiedB.map(\.product.id) == [11])
+    }
+
+    @Test("só os possivelmente ausentes entram na seleção — par, revisão e não verificado nunca")
     func selecionaveis() {
         let filtered = ComparisonFilteredResult(result: result, filter: .all, searchText: " ")
 

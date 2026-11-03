@@ -32,13 +32,18 @@ nonisolated enum PostToOtherStoreCopy {
     }
 
     /// Começa pelo risco quando a última comparação achou o produto (ou alguns deles) na loja de
-    /// destino. O intervalo (`pace`, ex. "1 a cada minuto") só aparece com mais de um — é aí que
+    /// destino — "já tem" só com a mesma foto (ou confirmado por você); "pode já ter" quando ficou
+    /// pra revisar. O intervalo (`pace`, ex. "1 a cada minuto") só aparece com mais de um — é aí que
     /// a fila demora.
     static func confirmationMessage(productCount: Int, target: OtherStoreTarget, pace: String) -> String {
         let store = target.name
         if productCount == 1 {
-            if let percent = target.highestSimilarityPercent, target.possibleDuplicateCount > 0 {
-                return "\(store) pode já ter esse produto (\(percent)% parecido). "
+            if target.existingCount > 0 {
+                return "\(store) já tem esse produto, pela última comparação (a mesma foto). "
+                    + "se postar, vira um anúncio repetido lá, com o mesmo título, descrição, preço e fotos."
+            }
+            if target.possibleCount > 0 {
+                return "\(store) pode já ter esse produto — a última comparação deixou um par pra revisar. "
                     + "se postar, vira um anúncio novo lá, com o mesmo título, descrição, preço e fotos."
             }
             return "vira um anúncio novo em \(store), com o mesmo título, descrição, preço e fotos, "
@@ -46,10 +51,18 @@ nonisolated enum PostToOtherStoreCopy {
         }
         let message = "cada um vira um anúncio novo em \(store), com título, descrição, preço e fotos, "
             + "e entra na fila de ações (\(pace)). os anúncios daqui continuam como estão."
-        switch target.possibleDuplicateCount {
-        case 0: return message
-        case 1: return "1 deles pode já existir em \(store), pela última comparação. \(message)"
-        case let count: return "\(count) deles podem já existir em \(store), pela última comparação. \(message)"
+        var risks: [String] = []
+        switch target.existingCount {
+        case 0: break
+        case 1: risks.append("1 deles já existe em \(store)")
+        case let count: risks.append("\(count) deles já existem em \(store)")
         }
+        switch target.possibleCount {
+        case 0: break
+        case 1: risks.append(target.existingCount > 0 ? "1 pode existir" : "1 deles pode existir em \(store)")
+        case let count: risks.append(target.existingCount > 0 ? "\(count) podem existir" : "\(count) deles podem existir em \(store)")
+        }
+        guard !risks.isEmpty else { return message }
+        return "\(risks.joined(separator: " e ")), pela última comparação. \(message)"
     }
 }

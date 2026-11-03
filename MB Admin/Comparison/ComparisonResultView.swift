@@ -1,16 +1,20 @@
 import SwiftUI
 
-/// Resultado de uma comparação já carregada: as três seções (produtos em comum, só em A, só em B)
-/// em cartões, com o filtro na barra de cima, a busca (no iPhone, a lupa na barra de baixo) e a
-/// seleção múltipla dos produtos que faltam numa das contas pra mandar pra fila de ações. Quem chama
-/// passa `.id(result.id)`, então cada comparação nova sempre nasce com busca/filtro/seleção zerados,
-/// em vez de arrastar o que sobrou marcado da comparação anterior.
+/// Resultado de uma comparação já carregada, em seções-cartão: mesmo produto, precisa revisar,
+/// possivelmente ausentes em cada loja, não deu pra verificar e marcados como diferentes — com o
+/// aviso de comparação incompleta no topo, o filtro na barra de cima, a busca (no iPhone, a lupa na
+/// barra de baixo) e a seleção múltipla **só** dos possivelmente ausentes pra mandar pra fila de
+/// ações. Quem chama passa `.id(result.id)`: cada comparação nova nasce com busca/filtro/seleção
+/// zerados, mas uma revisão manual (mesmo `id`, `revision` nova) só atualiza as seções.
 struct ComparisonResultView: View {
     let result: AccountComparisonResult
     let accountA: AccountSession
     let accountB: AccountSession
     let poster: CrossAccountPoster
     let postQueue: PostQueue
+    var onDecide: (ComparisonDecision.Verdict, ProductMatch) -> Void = { _, _ in }
+    var onUndo: (ProductMatch) -> Void = { _ in }
+    var onRetry: () -> Void = {}
 
     @State private var resultFilter: ComparisonResultFilter = .all
     @State private var searchText = ""
@@ -24,7 +28,6 @@ struct ComparisonResultView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private var isCompact: Bool { horizontalSizeClass != .regular }
-    private var totalCount: Int { result.matches.count + result.onlyInA.count + result.onlyInB.count }
 
     var body: some View {
         resultList
@@ -48,6 +51,8 @@ struct ComparisonResultView: View {
             }
             .toolbar(isSelecting ? .hidden : .automatic, for: .bottomBar)
             .task { recomputeFilteredItems() }
+            // Uma revisão manual recalcula o resultado com o mesmo `id` — só refiltra.
+            .onChange(of: result.revision) { _, _ in recomputeFilteredItems() }
             .onChange(of: resultFilter) { _, _ in
                 // Trocar de filtro com itens marcados deixaria parte da seleção escondida, mas
                 // ainda indo pra fila.
@@ -68,6 +73,8 @@ struct ComparisonResultView: View {
 
     private func recomputeFilteredItems() {
         filtered = ComparisonFilteredResult(result: result, filter: resultFilter, searchText: searchText)
+        // Um produto que deixou de ser "possivelmente ausente" (revisão manual) sai da seleção.
+        selectedProductIDs.formIntersection(filtered.selectableIDs)
     }
 
     private var selectionTitle: String {
@@ -83,14 +90,15 @@ struct ComparisonResultView: View {
             let search = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
             return search.isEmpty ? "" : "buscando \"\(search)\""
         }
-        return "\(accountA.user.name) ↔ \(accountB.user.name) · \(totalCount.formatted()) produtos"
+        return "\(accountA.user.name) \(result.storeA.listingCount.formatted()) ↔ "
+            + "\(accountB.user.name) \(result.storeB.listingCount.formatted()) produtos"
     }
 
     // MARK: - Lista
 
     @ViewBuilder
     private var resultList: some View {
-        if filtered.isEmpty {
+        if filtered.isEmpty, !showsProblems {
             ContentUnavailableView.search(text: searchText)
                 .frame(maxHeight: .infinity)
         } else {
@@ -100,25 +108,21 @@ struct ComparisonResultView: View {
             // esta view) reconstrói esta lista inteira a cada comparação nova.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    if !filtered.matches.isEmpty {
-                        sectionHeader("produtos em comum", count: filtered.matches.count, selectableIDs: nil)
-                        card {
-                            ForEach(filtered.matches) { match in
-                                ProductMatchRowView(match: match, accountBName: accountB.user.name)
-                                if match.id != filtered.matches.last?.id {
-                                    Divider().padding(.leading, 68)
-                                }
-                            }
-                        }
+                    if showsProblems {
+                        ComparisonProblemsCard(result: result, onRetry: onRetry)
                     }
-                    if !filtered.onlyInA.isEmpty {
+                    pairSection("mesmo produto", filtered.matches)
+                    pairSection("precisa revisar", filtered.reviews)
+                    if !filtered.missingInB.isEmpty {
                         // Só existe em A — postar cria ele em B.
-                        unmatchedSection(filtered.onlyInA, source: accountA, destination: accountB)
+                        missingSection(filtered.missingInB, source: accountA, destination: accountB)
                     }
-                    if !filtered.onlyInB.isEmpty {
+                    if !filtered.missingInA.isEmpty {
                         // Só existe em B — postar cria ele em A.
-                        unmatchedSection(filtered.onlyInB, source: accountB, destination: accountA)
+                        missingSection(filtered.missingInA, source: accountB, destination: accountA)
                     }
+                    unverifiedSection
+                    pairSection("marcados como diferentes", filtered.rejected)
                 }
                 .frame(maxWidth: isCompact ? .infinity : 760)
                 .frame(maxWidth: .infinity)
@@ -127,13 +131,58 @@ struct ComparisonResultView: View {
         }
     }
 
-    private func unmatchedSection(
+    private var showsProblems: Bool {
+        searchText.isEmpty && (result.hasProblems || result.staleDecisionCount > 0)
+    }
+
+    @ViewBuilder
+    private func pairSection(_ title: String, _ matches: [ProductMatch]) -> some View {
+        if !matches.isEmpty {
+            sectionHeader(title, count: matches.count, selectableIDs: nil)
+            card {
+                ForEach(matches) { match in
+                    ProductMatchRowView(
+                        match: match,
+                        accountAName: accountA.user.name,
+                        accountBName: accountB.user.name,
+                        onDecide: { verdict in onDecide(verdict, match) },
+                        onUndo: { onUndo(match) }
+                    )
+                    if match.id != matches.last?.id {
+                        Divider().padding(.leading, 16 + 108 + 12)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var unverifiedSection: some View {
+        let listings = filtered.unverifiedA.map { ($0, accountA.user.name) } + filtered.unverifiedB.map { ($0, accountB.user.name) }
+        if !listings.isEmpty {
+            sectionHeader("não deu pra verificar", count: listings.count, selectableIDs: nil)
+            card {
+                ForEach(listings, id: \.0.id) { listing, storeName in
+                    UnverifiedProductRowView(listing: listing, storeName: storeName)
+                    if listing.id != listings.last?.0.id {
+                        Divider().padding(.leading, 16 + 64 + 12)
+                    }
+                }
+            }
+        }
+    }
+
+    private func missingSection(
         _ products: [EnjoeiProduct],
         source: AccountSession,
         destination: AccountSession
     ) -> some View {
         Group {
-            sectionHeader("só em \(source.user.name)", count: products.count, selectableIDs: products.map(\.id))
+            sectionHeader(
+                "possivelmente ausentes em \(destination.user.name)",
+                count: products.count,
+                selectableIDs: products.map(\.id)
+            )
             card {
                 ForEach(products) { product in
                     UnmatchedProductRowView(
@@ -154,7 +203,7 @@ struct ComparisonResultView: View {
         }
     }
 
-    /// "produtos em comum · 90" — nas seções selecionáveis, com "todos"/"nenhum" daquela seção à
+    /// "mesmo produto · 90" — nas seções selecionáveis, com "todos"/"nenhum" daquela seção à
     /// direita durante a seleção.
     private func sectionHeader(_ title: String, count: Int, selectableIDs: [Int]?) -> some View {
         HStack(spacing: 8) {
@@ -232,7 +281,7 @@ struct ComparisonResultView: View {
         }
     }
 
-    /// Sempre habilitado — sem nada selecionável (só pares, ou tudo filtrado) o toque não faz
+    /// Sempre habilitado — sem nada selecionável (só pares/revisões, ou tudo filtrado) o toque não faz
     /// nada; um item da barra que se desabilita sozinho derruba o app no Mac (ver
     /// `ToolbarItemDisabled`).
     private var selectButton: some View {
@@ -259,8 +308,8 @@ struct ComparisonResultView: View {
         }
     }
 
-    /// Uma ação só: mandar o que está marcado pra fila de ações, cada um pra conta que ainda não
-    /// tem ele.
+    /// Uma ação só: mandar o que está marcado pra fila de ações, cada um pra conta onde ele
+    /// possivelmente não existe.
     private var selectionBar: some View {
         Button {
             enqueueSelected()
@@ -300,10 +349,10 @@ struct ComparisonResultView: View {
     /// Resolve cada id selecionado contra o resultado **completo** (não o filtrado pela busca),
     /// pra achar a origem/destino certos mesmo se o texto de busca mudar antes de confirmar.
     private func enqueueSelected() {
-        for product in result.onlyInA where selectedProductIDs.contains(product.id) {
+        for product in result.possiblyMissingInB where selectedProductIDs.contains(product.id) {
             postQueue.enqueue(product: product, source: accountA, destination: accountB)
         }
-        for product in result.onlyInB where selectedProductIDs.contains(product.id) {
+        for product in result.possiblyMissingInA where selectedProductIDs.contains(product.id) {
             postQueue.enqueue(product: product, source: accountB, destination: accountA)
         }
         endSelection()

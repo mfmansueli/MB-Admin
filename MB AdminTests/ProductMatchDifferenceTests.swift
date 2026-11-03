@@ -4,13 +4,16 @@ import Testing
 
 @Suite("diferença detalhada entre os dois lados de um par")
 struct ProductMatchDifferenceTests {
+    private func pair(_ productA: EnjoeiProduct, _ productB: EnjoeiProduct) -> ProductMatch {
+        ComparisonFixtures.match(productA, productB, status: .needsReview)
+    }
+
     @Test("títulos idênticos, sem descrição: nenhuma palavra diferente")
     func titulosIdenticosSemDiferenca() {
-        let a = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925")
-        let b = EnjoeiFixtures.product(id: 2, title: "colar curto prata 925")
-        let match = ProductMatch(productA: a, productB: b, similarity: 1)
+        let productA = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925")
+        let productB = EnjoeiFixtures.product(id: 2, title: "colar curto prata 925")
 
-        let difference = ProductMatchDifference(match: match)
+        let difference = ProductMatchDifference(match: pair(productA, productB))
 
         #expect(difference.onlyInA.isEmpty)
         #expect(difference.onlyInB.isEmpty)
@@ -18,11 +21,10 @@ struct ProductMatchDifferenceTests {
 
     @Test("aponta exatamente a palavra que só existe de um lado")
     func apontaPalavraQueSoExisteDeUmLado() {
-        let a = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925 zircônia branca")
-        let b = EnjoeiFixtures.product(id: 2, title: "colar curto prata 925 zircônia")
-        let match = ProductMatch(productA: a, productB: b, similarity: 0.83)
+        let productA = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925 zircônia branca")
+        let productB = EnjoeiFixtures.product(id: 2, title: "colar curto prata 925 zircônia")
 
-        let difference = ProductMatchDifference(match: match)
+        let difference = ProductMatchDifference(match: pair(productA, productB))
 
         #expect(difference.onlyInA == ["branca"])
         #expect(difference.onlyInB.isEmpty)
@@ -37,22 +39,12 @@ struct ProductMatchDifferenceTests {
         let commonDescription = "brinco oval zircônia lavanda cravejado com zircônia crystal - prata 925\ncódigo: x379249"
         let descriptionA = commonDescription + "\npeso: 2.6 gramas o par\nmedidas: 1.0 cm x 0.9 mm"
         let descriptionB = commonDescription + "\npeso: 1 grama o par\nmedidas: 1.0 cm x 0.9 mm"
-        let a = EnjoeiFixtures.product(id: 1, title: title).withDescription(descriptionA)
-        let b = EnjoeiFixtures.product(id: 2, title: title).withDescription(descriptionB)
-        let match = ProductMatch(productA: a, productB: b, similarity: 0.92)
+        let productA = EnjoeiFixtures.product(id: 1, title: title).withDescription(descriptionA)
+        let productB = EnjoeiFixtures.product(id: 2, title: title).withDescription(descriptionB)
 
-        let difference = ProductMatchDifference(match: match)
+        let difference = ProductMatchDifference(match: pair(productA, productB))
 
         #expect(difference.onlyInA == ["2", "6"])
         #expect(difference.onlyInB.isEmpty)
-    }
-
-    @Test("similarity vem direto do match, sem recalcular")
-    func similarityVemDoMatch() {
-        let a = EnjoeiFixtures.product(id: 1, title: "colar curto prata 925")
-        let b = EnjoeiFixtures.product(id: 2, title: "tênis esportivo azul")
-        let match = ProductMatch(productA: a, productB: b, similarity: 0.42)
-
-        #expect(ProductMatchDifference(match: match).similarity == 0.42)
     }
 }

@@ -39,12 +39,16 @@ enum DemoMode {
                 AccountDependencies(
                     client: DemoEnjoeiClient(profile: DemoCatalog.profile(for: accountID)),
                     sessionClearer: DemoSessionClearer(),
-                    webView: nil
+                    webView: nil,
+                    detailsPacing: .milliseconds(10)
                 )
             },
             persistence: DemoAccountsPersistence(),
             postHistoryPersistence: InMemoryPostHistoryPersistence(),
-            postQueueItemsPersistence: InMemoryPostQueueItemsPersistence()
+            postQueueItemsPersistence: InMemoryPostQueueItemsPersistence(),
+            // Fotos geradas na hora (`DemoPhotoURLProtocol`, pela mesma sessão das miniaturas) e
+            // nada gravado em disco: cada abertura compara do zero.
+            comparisonServices: { .inMemory() }
         )
     }
 }

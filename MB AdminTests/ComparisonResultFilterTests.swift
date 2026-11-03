@@ -4,32 +4,37 @@ import Testing
 
 @Suite("filtro do resultado da comparação")
 struct ComparisonResultFilterTests {
-    private let result = AccountComparisonResult(
-        matches: [
-            ProductMatch(productA: EnjoeiFixtures.product(id: 1), productB: EnjoeiFixtures.product(id: 2), similarity: 0.9)
-        ],
-        onlyInA: [EnjoeiFixtures.product(id: 3), EnjoeiFixtures.product(id: 4)],
-        onlyInB: [EnjoeiFixtures.product(id: 5)]
+    typealias Fixtures = ComparisonFixtures
+
+    private let result = Fixtures.result(
+        matches: [Fixtures.match(1, 2)],
+        reviews: [Fixtures.match(6, 7, status: .needsReview), Fixtures.match(8, 9, status: .needsReview)],
+        rejected: [Fixtures.match(10, 11, status: .rejected)],
+        missingInB: [Fixtures.product(3, title: "colar", cover: nil), Fixtures.product(4, title: "anel", cover: nil)],
+        missingInA: [Fixtures.product(5, title: "pulseira", cover: nil)],
+        unverifiedB: [UnverifiedListing(product: Fixtures.product(12, title: "brinco", cover: nil), reasons: [.noUsablePhoto])]
     )
 
-    @Test("cada opção do menu diz quantos produtos mostra — \"só em A\" é o que falta em B")
+    private func label(_ filter: ComparisonResultFilter) -> String {
+        filter.label(result: result, accountAName: "loja A", accountBName: "loja B")
+    }
+
+    @Test("cada opção do menu diz quantos produtos mostra — \"ausentes em B\" são produtos de A")
     func rotulos() {
-        #expect(ComparisonResultFilter.all.label(result: result, accountAName: "loja A", accountBName: "loja B") == "todos (4)")
-        #expect(ComparisonResultFilter.matches.label(result: result, accountAName: "loja A", accountBName: "loja B") == "em comum (1)")
-        #expect(
-            ComparisonResultFilter.onlyInA.label(result: result, accountAName: "loja A", accountBName: "loja B")
-                == "não encontrados em loja B (2)"
-        )
-        #expect(
-            ComparisonResultFilter.onlyInB.label(result: result, accountAName: "loja A", accountBName: "loja B")
-                == "não encontrados em loja A (1)"
-        )
+        #expect(label(.all) == "todos (8)")
+        #expect(label(.matches) == "mesmo produto (1)")
+        #expect(label(.review) == "precisa revisar (2)")
+        #expect(label(.missingInB) == "possivelmente ausentes em loja B (2)")
+        #expect(label(.missingInA) == "possivelmente ausentes em loja A (1)")
+        #expect(label(.unverified) == "não verificados (1)")
+        #expect(label(.rejected) == "marcados como diferentes (1)")
     }
 
     @Test("\"todos\" inclui qualquer seção; os outros, só a própria")
     func inclui() {
-        #expect(ComparisonResultFilter.all.includes(.onlyInB))
+        #expect(ComparisonResultFilter.all.includes(.missingInA))
         #expect(ComparisonResultFilter.matches.includes(.matches))
-        #expect(!ComparisonResultFilter.matches.includes(.onlyInA))
+        #expect(!ComparisonResultFilter.matches.includes(.review))
+        #expect(!ComparisonResultFilter.unverified.includes(.missingInB))
     }
 }

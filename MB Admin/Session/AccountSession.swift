@@ -79,13 +79,17 @@ final class AccountSession: Identifiable {
 
         let productDetailsLoader = ProductDetailsLoader(
             client: dependencies.client,
-            itemsPersistence: megaphoneItemsPersistence
+            itemsPersistence: megaphoneItemsPersistence,
+            detailsPersistence: SwiftDataListingDetailsPersistence(accountID: id)
         )
         // A descrição buscada não tem pra onde ir sozinha — este loader só busca e persiste, quem
         // atualiza a lista ao vivo (pra a tela e a comparação enxergarem sem reabrir o app) é o
         // runner. `weak`: mesmo raciocínio do `titleResolver` acima.
         productDetailsLoader.onDescriptionFetched = { [weak runner] productID, description in
             runner?.applyDescription(productID: productID, description: description)
+        }
+        if let pacing = dependencies.detailsPacing {
+            productDetailsLoader.delayBetweenProducts = pacing
         }
         self.productDetailsLoader = productDetailsLoader
     }

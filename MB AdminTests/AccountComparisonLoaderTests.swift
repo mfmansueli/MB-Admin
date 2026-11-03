@@ -4,333 +4,366 @@ import Testing
 
 @Suite("carregador da comparação entre duas contas")
 struct AccountComparisonLoaderTests {
-    private func makeAccount(id: EnjoeiAccountID = EnjoeiAccountID(), client: StubEnjoeiClient) -> AccountSession {
-        AccountSession(
-            id: id,
-            user: .stub,
+    typealias Fixtures = ComparisonFixtures
+
+    private static let sellerA = 1001
+    private static let sellerB = 2002
+
+    private static let ringWhiteA = DemoPhotoRenderer.jpeg(Fixtures.ring(1), side: 300, quality: 0.9)
+    private static let ringWhiteB = DemoPhotoRenderer.jpeg(Fixtures.ring(1), side: 300, quality: 0.6)
+    private static let otherRing = DemoPhotoRenderer.jpeg(Fixtures.ring(2), side: 300, quality: 0.6)
+    private static let pendant = DemoPhotoRenderer.jpeg(DemoPhotoRenderer.Spec(shape: .pendant, seed: 5), side: 300)
+    private static let ambient: Data? = {
+        var spec = Fixtures.ring(50)
+        spec.background = .init(red: 0.6, green: 0.5, blue: 0.45)
+        spec.backgroundGradient = 0.4
+        spec.rotation = 0.3
+        return DemoPhotoRenderer.jpeg(spec, side: 300)
+    }()
+
+    private func makeAccount(seller: Int, client: StubEnjoeiClient) -> AccountSession {
+        let account = AccountSession(
+            id: EnjoeiAccountID(),
+            user: EnjoeiUser(
+                id: seller,
+                nickname: "loja-\(seller)",
+                name: seller == Self.sellerA ? "antonia" : "loja B",
+                avatarPublicID: nil,
+                availableProductsCount: nil
+            ),
             dependencies: AccountDependencies(client: client, sessionClearer: FakeSessionClearer(), webView: nil)
+        )
+        account.productDetailsLoader.delayBetweenProducts = .zero
+        account.productDetailsLoader.retryDelay = .zero
+        return account
+    }
+
+    /// Compara duas contas novas (A = antonia, B = loja B) feitas em cima dos clients dados.
+    private func compare(_ loader: AccountComparisonLoader, _ clientA: StubEnjoeiClient, _ clientB: StubEnjoeiClient, services: ComparisonServices? = nil) {
+        loader.compare(
+            accountA: makeAccount(seller: Self.sellerA, client: clientA),
+            accountB: makeAccount(seller: Self.sellerB, client: clientB),
+            services: services ?? .inMemory(fetcher: photos())
         )
     }
 
-    @Test("mesmo com o runner já carregado, comparar busca de novo — não reaproveita a lista, que pode estar desatualizada")
-    func buscaDeNovoMesmoJaCarregado() async {
-        let title = "colar curto prata 925 zircônia branca"
-        let clientA = StubEnjoeiClient(pages: [
-            // Primeira página: consumida pelo carregamento manual do runner abaixo, simulando um
-            // estado velho na conta (produto id 1).
-            StoreProductsPage(products: [EnjoeiFixtures.product(id: 1, title: title)], total: 1, endCursor: nil),
-            // Segunda página: o que o servidor devolve agora, com um produto novo (id 99) — como se
-            // tivesse sido ativado/editado depois do carregamento manual.
-            StoreProductsPage(products: [EnjoeiFixtures.product(id: 99, title: title)], total: 1, endCursor: nil)
-        ])
-        let accountA = makeAccount(client: clientA)
-        accountA.runner.load(sellerID: 1)
-        await accountA.runner.waitUntilFinished()
-        #expect(accountA.runner.items.map(\.id) == [1])
+    private func template(photos: [String], size: String? = nil) -> ProductTemplate {
+        ProductTemplate(
+            title: "produto", description: "", brand: nil, used: false, price: 10_000, originalPrice: 10_000,
+            weight: "0.3", quantity: 1, category: .init(id: 327), size: size,
+            shipping: .init(type: "charge_by_weight", hasInsurance: true),
+            photos: photos.enumerated().map { ProductTemplate.Photo(imagePublicID: $1, position: $0) },
+            originPlanID: 1, smartPrice: nil
+        )
+    }
 
-        let clientB = StubEnjoeiClient(pages: [
-            StoreProductsPage(products: [EnjoeiFixtures.product(id: 2, title: title)], total: 1, endCursor: nil)
-        ])
-        let accountB = makeAccount(client: clientB)
+    private func page(_ products: [EnjoeiProduct], total: Int? = nil) -> StoreProductsPage {
+        StoreProductsPage(products: products, total: total ?? products.count, endCursor: nil)
+    }
 
-        let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB)
-        await loader.waitUntilFinished()
-
-        // "comparar" é um pedido explícito de estado atual — precisa buscar de novo, não reaproveitar
-        // `runner.items`, senão um produto ativado/editado depois do carregamento anterior nunca
-        // apareceria na comparação.
-        #expect(await clientA.requestedCursors.count == 2)
-
+    private func finishedResult(_ loader: AccountComparisonLoader) -> AccountComparisonResult? {
         guard case .finished(let result) = loader.phase else {
             Issue.record("esperava .finished, veio \(loader.phase)")
-            return
+            return nil
         }
-        // Casou com o produto 99 (buscado agora pela comparação), não o 1 (que ficou só na lista
-        // velha do runner).
-        #expect(result.matches.map(\.productA.id) == [99])
-        #expect(result.matches.map(\.productB.id) == [2])
+        return result
+    }
+
+    private func photos() -> StubPhotoFetcher {
+        StubPhotoFetcher(photos: [
+            "a1": Self.ringWhiteA ?? Data(),
+            "b1": Self.ringWhiteB ?? Data(),
+            "b1-ambiente": Self.ambient ?? Data(),
+            "a2": Self.pendant ?? Data(),
+            "b2-outro": Self.otherRing ?? Data()
+        ])
+    }
+
+    // MARK: - Listagem
+
+    @Test("mesmo com o runner já carregado, comparar busca de novo — não reaproveita a lista, que pode estar desatualizada")
+    func buscaDeNovoMesmoJaCarregado() async {
+        let clientA = StubEnjoeiClient(pages: [
+            page([Fixtures.product(1, title: "anel", cover: "velha")]),
+            page([Fixtures.product(99, title: "anel", cover: "a1")])
+        ])
+        let accountA = makeAccount(seller: Self.sellerA, client: clientA)
+        accountA.runner.load(sellerID: Self.sellerA)
+        await accountA.runner.waitUntilFinished()
+        let clientB = StubEnjoeiClient(pages: [page([Fixtures.product(2, title: "anel", cover: "b1")])])
+        let accountB = makeAccount(seller: Self.sellerB, client: clientB)
+
+        let loader = AccountComparisonLoader()
+        loader.compare(accountA: accountA, accountB: accountB, services: .inMemory(fetcher: photos()))
+        await loader.waitUntilFinished()
+
+        #expect(await clientA.requestedCursors.count == 2)
+        #expect(finishedResult(loader)?.matches.map(\.productA.id) == [99])
     }
 
     @Test("comparar não consulta exposição — isso é coisa do megafone e deixaria a comparação lenta à toa")
     func naoConsultaExposicao() async {
-        let clientA = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)])
-        let accountA = makeAccount(client: clientA)
-        let clientB = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)])
-        let accountB = makeAccount(client: clientB)
-
+        let clientA = StubEnjoeiClient(pages: [page([Fixtures.product(1, title: "anel", cover: "a1")])])
+        let clientB = StubEnjoeiClient(pages: [page([Fixtures.product(2, title: "anel", cover: "b1")])])
         let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB)
+        compare(loader, clientA, clientB)
         await loader.waitUntilFinished()
-
         #expect(await clientA.requestedExposureBatches.isEmpty)
         #expect(await clientB.requestedExposureBatches.isEmpty)
     }
 
-    @Test("conta sem produtos carregados busca sozinha antes de comparar")
-    func buscaSozinhoQuandoVazio() async {
-        let clientA = StubEnjoeiClient(pages: [
-            EnjoeiFixtures.page(ids: [1], endCursor: nil)
-        ])
-        let accountA = makeAccount(client: clientA)
-        let clientB = StubEnjoeiClient(pages: [
-            EnjoeiFixtures.page(ids: [2], endCursor: nil)
-        ])
-        let accountB = makeAccount(client: clientB)
-
-        #expect(accountA.runner.items.isEmpty)
-        #expect(accountB.runner.items.isEmpty)
-
+    @Test("uma página que falha não vira lista vazia: nada da outra loja é dado como ausente, e tentar de novo resolve")
+    func listagemQueFalha() async {
+        let clientA = StubEnjoeiClient(
+            pages: [page([Fixtures.product(1, title: "anel", cover: "a1")])],
+            templatesByProductID: [1: template(photos: ["a1"])]
+        )
+        let clientB = StubEnjoeiClient()
+        await clientB.setPageError(.http(status: 503, message: nil), onCall: 0)
         let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB)
+        let services = ComparisonServices.inMemory(fetcher: photos())
+        compare(loader, clientA, clientB, services: services)
         await loader.waitUntilFinished()
 
-        #expect(await clientA.requestedCursors.count == 1)
-        #expect(await clientB.requestedCursors.count == 1)
-        guard case .finished = loader.phase else {
-            Issue.record("esperava .finished, veio \(loader.phase)")
-            return
+        let failed = finishedResult(loader)
+        #expect(failed?.possiblyMissingInB.isEmpty == true)
+        #expect(failed?.unverifiedA.first?.reasons.contains(.otherStoreListingIncomplete(storeName: "loja B")) == true)
+        if case .failed(let loaded, _) = failed?.storeB.status {
+            #expect(loaded == 0)
+        } else {
+            Issue.record("esperava a lista de B como falha")
         }
+
+        await clientA.setPages([page([Fixtures.product(1, title: "anel", cover: "a1")])])
+        await clientB.setPageError(nil, onCall: nil)
+        await clientB.setPages([page([Fixtures.product(2, title: "anel", cover: "b1")])])
+        loader.retry()
+        await loader.waitUntilFinished()
+        #expect(finishedResult(loader)?.matches.map(\.id) == ["1-2"])
     }
 
-    @Test("nova comparação volta pra escolha das contas")
-    func resetVoltaParaIdle() async {
-        let accountA = makeAccount(client: StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)]))
-        let accountB = makeAccount(client: StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)]))
+    @Test("lista com menos produtos que o total informado fica marcada como incompleta")
+    func listaIncompleta() async {
+        let clientA = StubEnjoeiClient(pages: [page([Fixtures.product(1, title: "anel", cover: "a1")], total: 3)])
+        let clientB = StubEnjoeiClient(pages: [page([Fixtures.product(2, title: "pingente", cover: "a2")])])
         let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB)
+        compare(loader, clientA, clientB)
+        await loader.waitUntilFinished()
+        let result = finishedResult(loader)
+        #expect(result?.storeA.status == .incomplete(loaded: 1, expected: 3))
+        #expect(result?.possiblyMissingInA.isEmpty == true)
+    }
+
+    // MARK: - Duas etapas
+
+    @Test("capa igual nas duas lojas: par forte sem buscar template nenhum")
+    func capaResolveSemTemplate() async {
+        let clientA = StubEnjoeiClient(pages: [page([Fixtures.product(1, title: "anel aro 17", cover: "a1")])])
+        let clientB = StubEnjoeiClient(pages: [page([Fixtures.product(2, title: "joia linda", cover: "b1")])])
+        let memory = ComparisonMatchMemory()
+        let accountA = makeAccount(seller: Self.sellerA, client: clientA)
+        let accountB = makeAccount(seller: Self.sellerB, client: clientB)
+        let loader = AccountComparisonLoader()
+        loader.compare(accountA: accountA, accountB: accountB, services: .inMemory(fetcher: photos()), matchMemory: memory)
         await loader.waitUntilFinished()
 
-        loader.reset()
+        #expect(finishedResult(loader)?.matches.first?.status == .strong)
+        #expect(await clientA.requestedTemplateIDs.isEmpty)
+        #expect(await clientB.requestedTemplateIDs.isEmpty)
+        #expect(memory.presence(of: 1, from: accountA.id, to: accountB.id) == .present)
+        #expect(memory.presence(of: 2, from: accountB.id, to: accountA.id) == .present)
+    }
 
+    @Test("capa diferente: busca o template só de quem ficou sem par e acha a mesma foto na segunda posição")
+    func templateSoDeQuemFicouSemPar() async {
+        let clientA = StubEnjoeiClient(
+            pages: [page([Fixtures.product(1, title: "anel aro 17", cover: "a1"), Fixtures.product(3, title: "pingente", cover: "a2")])],
+            templatesByProductID: [1: template(photos: ["a1"]), 3: template(photos: ["a2"])]
+        )
+        let clientB = StubEnjoeiClient(
+            pages: [page([Fixtures.product(2, title: "joia linda", cover: "b1-ambiente")])],
+            templatesByProductID: [2: template(photos: ["b1-ambiente", "b1"])]
+        )
+        let fetcher = photos()
+        let services = ComparisonServices.inMemory(fetcher: fetcher)
+        let accountA = makeAccount(seller: Self.sellerA, client: clientA)
+        let accountB = makeAccount(seller: Self.sellerB, client: clientB)
+        let loader = AccountComparisonLoader()
+        loader.compare(accountA: accountA, accountB: accountB, services: services)
+        await loader.waitUntilFinished()
+
+        let result = finishedResult(loader)
+        #expect(result?.matches.map(\.id) == ["1-2"])
+        #expect(result?.matches.first?.photoB == "b1")
+        #expect(result?.possiblyMissingInB.map(\.id) == [3])
+        #expect(await clientA.requestedTemplateIDs == [1, 3])
+        #expect(await clientB.requestedTemplateIDs == [2])
+
+        // Comparar de novo: template salvo e assinatura em cache — nada é pedido outra vez.
+        await clientA.setPages([page([Fixtures.product(1, title: "anel aro 17", cover: "a1"), Fixtures.product(3, title: "pingente", cover: "a2")])])
+        await clientB.setPages([page([Fixtures.product(2, title: "joia linda", cover: "b1-ambiente")])])
+        loader.reset()
+        loader.compare(accountA: accountA, accountB: accountB, services: services)
+        await loader.waitUntilFinished()
+        #expect(finishedResult(loader)?.matches.map(\.id) == ["1-2"])
+        #expect(await clientA.requestedTemplateIDs == [1, 3])
+        #expect(await clientB.requestedTemplateIDs == [2])
+        #expect(await fetcher.requestCount(for: "b1") == 1)
+    }
+
+    @Test("template que falha deixa o anúncio como não verificado, nunca ausente")
+    func templateQueFalha() async {
+        let clientA = StubEnjoeiClient(pages: [page([Fixtures.product(3, title: "pingente", cover: "a2")])], templateError: .http(status: 500, message: nil))
+        let clientB = StubEnjoeiClient(
+            pages: [page([Fixtures.product(4, title: "anel", cover: "b2-outro")])],
+            templatesByProductID: [4: template(photos: ["b2-outro"])]
+        )
+        let loader = AccountComparisonLoader()
+        compare(loader, clientA, clientB)
+        await loader.waitUntilFinished()
+        let result = finishedResult(loader)
+        #expect(result?.possiblyMissingInB.isEmpty == true)
+        #expect(result?.unverifiedA.first?.reasons.contains(.detailsUnavailable) == true)
+        #expect(result?.storeA.listingsWithDetailsFailures == 1)
+        // Tentou de novo uma vez antes de desistir.
+        #expect(await clientA.requestedTemplateIDs == [3, 3])
+    }
+
+    // MARK: - Cancelar e continuar
+
+    @Test("parar no meio deixa a comparação interrompida (nunca terminada) e continuar retoma de onde parou")
+    func cancelarEContinuar() async throws {
+        let products = [
+            Fixtures.product(1, title: "anel um", cover: "a2"),
+            Fixtures.product(3, title: "anel três", cover: "a2"),
+            Fixtures.product(5, title: "anel cinco", cover: "a2")
+        ]
+        let clientA = StubEnjoeiClient(
+            pages: [page(products)],
+            templatesByProductID: [1: template(photos: ["a2"]), 3: template(photos: ["a2"]), 5: template(photos: ["a2"])]
+        )
+        await clientA.setTemplateDelay(.milliseconds(300))
+        let clientB = StubEnjoeiClient(
+            pages: [page([Fixtures.product(2, title: "outro", cover: "b2-outro")])],
+            templatesByProductID: [2: template(photos: ["b2-outro"])]
+        )
+        let loader = AccountComparisonLoader()
+        compare(loader, clientA, clientB)
+        while await clientA.requestedTemplateIDs.count < 2 {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        loader.cancel()
+        await loader.waitUntilFinished()
+        #expect(loader.phase == .interrupted)
+
+        await clientA.setTemplateDelay(.zero)
+        let cursorsBefore = await clientA.requestedCursors.count
+        loader.resume()
+        await loader.waitUntilFinished()
+        #expect(finishedResult(loader) != nil)
+        // A listagem não foi buscada de novo, e o template que já tinha chegado não foi pedido outra vez.
+        #expect(await clientA.requestedCursors.count == cursorsBefore)
+        #expect(await clientA.requestedTemplateIDs.count { $0 == 1 } == 1)
+    }
+
+    // MARK: - Revisão manual
+
+    @Test("confirmar e desfazer recalculam na hora, sem rede, com o mesmo id de comparação")
+    func confirmarEDesfazer() async throws {
+        let clientA = StubEnjoeiClient(
+            pages: [page([Fixtures.product(1, title: "anel solitário zircônia rosa", cover: "a1")])],
+            templatesByProductID: [1: template(photos: ["a1"])]
+        )
+        let clientB = StubEnjoeiClient(
+            pages: [page([Fixtures.product(2, title: "anel solitário zircônia rosa", cover: "b2-outro")])],
+            templatesByProductID: [2: template(photos: ["b2-outro"])]
+        )
+        let decisions = InMemoryComparisonDecisionStore()
+        let services = ComparisonServices.inMemory(fetcher: photos(), decisions: decisions)
+        let accountA = makeAccount(seller: Self.sellerA, client: clientA)
+        let accountB = makeAccount(seller: Self.sellerB, client: clientB)
+        let memory = ComparisonMatchMemory()
+        let loader = AccountComparisonLoader()
+        loader.compare(accountA: accountA, accountB: accountB, services: services, matchMemory: memory)
+        await loader.waitUntilFinished()
+        let review = try #require(finishedResult(loader)?.reviews.first)
+        #expect(memory.presence(of: 1, from: accountA.id, to: accountB.id) == .possible)
+        let cursors = await clientA.requestedCursors.count
+
+        await loader.decide(.sameProduct, for: review)
+        let confirmed = finishedResult(loader)
+        #expect(confirmed?.matches.first?.status == .confirmed)
+        #expect(confirmed?.id == finishedResult(loader)?.id)
+        #expect(confirmed?.revision == 1)
+        #expect(decisions.stored.count == 1)
+        #expect(memory.presence(of: 1, from: accountA.id, to: accountB.id) == .present)
+
+        await loader.undoDecision(for: try #require(confirmed?.matches.first))
+        #expect(finishedResult(loader)?.reviews.map(\.id) == ["1-2"])
+        #expect(finishedResult(loader)?.revision == 2)
+        #expect(decisions.stored.isEmpty)
+        #expect(await clientA.requestedCursors.count == cursors)
+    }
+
+    @Test("revisão salva vale na comparação seguinte")
+    func revisaoValeNaProxima() async throws {
+        let clientA = StubEnjoeiClient(templatesByProductID: [1: template(photos: ["a1"])])
+        let clientB = StubEnjoeiClient(templatesByProductID: [2: template(photos: ["b2-outro"])])
+        let pagesA = [page([Fixtures.product(1, title: "anel solitário zircônia rosa", cover: "a1")])]
+        let pagesB = [page([Fixtures.product(2, title: "anel solitário zircônia rosa", cover: "b2-outro")])]
+        await clientA.setPages(pagesA)
+        await clientB.setPages(pagesB)
+        let services = ComparisonServices.inMemory(fetcher: photos())
+        let accountA = makeAccount(seller: Self.sellerA, client: clientA)
+        let accountB = makeAccount(seller: Self.sellerB, client: clientB)
+        let loader = AccountComparisonLoader()
+        loader.compare(accountA: accountA, accountB: accountB, services: services)
+        await loader.waitUntilFinished()
+        await loader.decide(.differentProducts, for: try #require(finishedResult(loader)?.reviews.first))
+
+        await clientA.setPages(pagesA)
+        await clientB.setPages(pagesB)
+        loader.reset()
+        loader.compare(accountA: accountB, accountB: accountA, services: services)
+        await loader.waitUntilFinished()
+        // Mesmo com as lojas na ordem inversa.
+        #expect(finishedResult(loader)?.rejected.map(\.id) == ["2-1"])
+        #expect(finishedResult(loader)?.reviews.isEmpty == true)
+    }
+
+    // MARK: - Fases
+
+    @Test("nova comparação volta pra escolha das contas; não larga uma comparação em andamento")
+    func novaComparacao() async {
+        let clientA = StubEnjoeiClient(pages: [page([Fixtures.product(1, title: "anel", cover: "a1")])])
+        let clientB = StubEnjoeiClient(pages: [page([Fixtures.product(2, title: "anel", cover: "b1")])])
+        let loader = AccountComparisonLoader()
+        compare(loader, clientA, clientB)
+        loader.reset()
+        #expect(loader.phase != .idle)
+        await loader.waitUntilFinished()
+        loader.reset()
         #expect(loader.phase == .idle)
     }
 
-    @Test("nova comparação não larga uma comparação ainda em andamento")
-    func resetNaoInterrompeComparacao() async {
-        let accountA = makeAccount(client: StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)]))
-        let accountB = makeAccount(client: StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)]))
-        let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB)
-
-        loader.reset()
-
-        #expect(loader.phase != .idle)
-        await loader.waitUntilFinished()
-    }
-
     @Test("cada comparação tem um id diferente, mesmo comparando o mesmo par de contas de novo")
-    func cadaComparacaoTemIDDiferente() async {
-        let clientA = StubEnjoeiClient(pages: [
-            EnjoeiFixtures.page(ids: [1], endCursor: nil),
-            EnjoeiFixtures.page(ids: [1], endCursor: nil)
-        ])
-        let accountA = makeAccount(client: clientA)
-        let clientB = StubEnjoeiClient(pages: [
-            EnjoeiFixtures.page(ids: [2], endCursor: nil),
-            EnjoeiFixtures.page(ids: [2], endCursor: nil)
-        ])
-        let accountB = makeAccount(client: clientB)
+    func idNovoACadaComparacao() async {
+        let clientA = StubEnjoeiClient()
+        let clientB = StubEnjoeiClient()
+        let accountA = makeAccount(seller: Self.sellerA, client: clientA)
+        let accountB = makeAccount(seller: Self.sellerB, client: clientB)
+        let services = ComparisonServices.inMemory(fetcher: photos())
         let loader = AccountComparisonLoader()
-
-        loader.compare(accountA: accountA, accountB: accountB)
-        await loader.waitUntilFinished()
-        guard case .finished(let firstResult) = loader.phase else {
-            Issue.record("esperava .finished, veio \(loader.phase)")
-            return
+        var ids: [UUID] = []
+        for _ in 0..<2 {
+            await clientA.setPages([page([Fixtures.product(1, title: "anel", cover: "a1")])])
+            await clientB.setPages([page([Fixtures.product(2, title: "anel", cover: "b1")])])
+            loader.reset()
+            loader.compare(accountA: accountA, accountB: accountB, services: services)
+            await loader.waitUntilFinished()
+            if let result = finishedResult(loader) { ids.append(result.id) }
         }
-
-        // Comparar de novo, mesmo par de contas — a tela usa esse id (`.id(result.id)`) pra saber
-        // quando zerar busca/filtro/seleção de `ComparisonResultView`; sem um id novo aqui, uma
-        // seleção feita antes de comparar de novo sobreviveria pro resultado novo.
-        loader.compare(accountA: accountA, accountB: accountB)
-        await loader.waitUntilFinished()
-        guard case .finished(let secondResult) = loader.phase else {
-            Issue.record("esperava .finished, veio \(loader.phase)")
-            return
-        }
-
-        #expect(firstResult.id != secondResult.id)
-    }
-
-    @Test("terminada, a comparação guarda os pares pra postar em outra loja avisar de duplicado")
-    func guardaOsParesNaMemoria() async {
-        let title = "colar curto prata 925 zircônia branca"
-        let accountA = makeAccount(client: StubEnjoeiClient(pages: [
-            StoreProductsPage(products: [EnjoeiFixtures.product(id: 1, title: title)], total: 1, endCursor: nil)
-        ]))
-        let accountB = makeAccount(client: StubEnjoeiClient(pages: [
-            StoreProductsPage(products: [EnjoeiFixtures.product(id: 2, title: title)], total: 1, endCursor: nil)
-        ]))
-        let memory = ComparisonMatchMemory()
-        let loader = AccountComparisonLoader()
-
-        loader.compare(accountA: accountA, accountB: accountB, matchMemory: memory)
-        await loader.waitUntilFinished()
-
-        #expect(memory.similarity(of: 1, from: accountA.id, to: accountB.id) == 1)
-        #expect(memory.similarity(of: 2, from: accountB.id, to: accountA.id) == 1)
-    }
-
-    @Test("comparação completa busca a descrição de cada produto das duas contas antes de comparar")
-    func comparacaoCompletaBuscaDescricaoDasDuasContas() async {
-        let clientA = StubEnjoeiClient(
-            pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)],
-            templatesByProductID: [1: EnjoeiFixtures.productTemplate(description: "colar curto prata 925 zircônia branca")]
-        )
-        let accountA = makeAccount(client: clientA)
-        let clientB = StubEnjoeiClient(
-            pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)],
-            templatesByProductID: [2: EnjoeiFixtures.productTemplate(description: "colar curto prata 925 zircônia branca")]
-        )
-        let accountB = makeAccount(client: clientB)
-
-        let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB, fullComparison: true)
-        await loader.waitUntilFinished()
-
-        #expect(await clientA.requestedTemplateIDs == [1])
-        #expect(await clientB.requestedTemplateIDs == [2])
-        // Guardou no banco local das duas contas, não só usou pra comparar na hora.
-        #expect(accountA.productDetailsLoader.detailedCount == 1)
-        #expect(accountB.productDetailsLoader.detailedCount == 1)
-
-        guard case .finished(let result) = loader.phase else {
-            Issue.record("esperava .finished, veio \(loader.phase)")
-            return
-        }
-        // Títulos sozinhos (fixture padrão "brinco prata 925", ids diferentes) não bateriam o
-        // threshold — casaram porque a descrição buscada é idêntica dos dois lados.
-        #expect(result.matches.count == 1)
-    }
-
-    /// Regressão: um produto pulado nesta rodada (já tinha descrição salva de uma comparação
-    /// anterior, com QUALQUER conta) não pode comparar só por título enquanto o outro lado (buscado
-    /// agora de verdade) compara por título+descrição — isso derrubava o score de pares idênticos
-    /// pra ~50% em vez de 100%.
-    @Test("produto já com descrição salva de uma comparação anterior ainda casa 100%, não fica pra trás")
-    func produtoJaComDescricaoAntigaAindaCasaCemPorCento() async {
-        let title = "bracelete feminino aro amassado - banho de ouro 18k"
-        let description = "bracelete aro amassado com banho de ouro. código:177 18cm de curvatura interna peso: 9gr"
-        let productA = EnjoeiFixtures.product(id: 1, title: title)
-        let productB = EnjoeiFixtures.product(id: 2, title: title)
-
-        // Conta A já teve o produto 1 buscado numa comparação completa anterior, com uma terceira
-        // conta — ele já tem descrição salva, então `fetchAll` vai pulá-lo nesta rodada.
-        let clientA = StubEnjoeiClient(
-            pages: [StoreProductsPage(products: [productA], total: 1, endCursor: nil)],
-            templatesByProductID: [1: EnjoeiFixtures.productTemplate(description: description)]
-        )
-        let accountA = makeAccount(client: clientA)
-        accountA.productDetailsLoader.fetchAll(products: [productA])
-        await accountA.productDetailsLoader.waitUntilFinished()
-        #expect(await clientA.requestedTemplateIDs == [1])
-
-        // Conta B nunca buscou detalhe nenhum — vai buscar de verdade nesta comparação.
-        let clientB = StubEnjoeiClient(
-            pages: [StoreProductsPage(products: [productB], total: 1, endCursor: nil)],
-            templatesByProductID: [2: EnjoeiFixtures.productTemplate(description: description)]
-        )
-        let accountB = makeAccount(client: clientB)
-
-        let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB, fullComparison: true)
-        await loader.waitUntilFinished()
-
-        // O produto 1 não devia ser buscado de novo (já tinha descrição) — só o 2.
-        #expect(await clientA.requestedTemplateIDs == [1])
-        #expect(await clientB.requestedTemplateIDs == [2])
-
-        guard case .finished(let result) = loader.phase else {
-            Issue.record("esperava .finished, veio \(loader.phase)")
-            return
-        }
-        #expect(result.matches.count == 1)
-        #expect(result.matches.first?.similarity == 1)
-    }
-
-    @Test("sem comparação completa, não busca template nenhum — comportamento de sempre")
-    func semComparacaoCompletaNaoBuscaTemplate() async {
-        let clientA = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)])
-        let accountA = makeAccount(client: clientA)
-        let clientB = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)])
-        let accountB = makeAccount(client: clientB)
-
-        let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB, fullComparison: false)
-        await loader.waitUntilFinished()
-
-        #expect(await clientA.requestedTemplateIDs.isEmpty)
-        #expect(await clientB.requestedTemplateIDs.isEmpty)
-    }
-
-    /// Mesmo sem o toggle "comparação completa" ligado nesta chamada, uma descrição já salva
-    /// localmente (de uma comparação completa anterior, com qualquer conta) deve valer — o toggle
-    /// só controla se busca coisa NOVA pela rede, não se usa o que já está disponível.
-    @Test("sem comparação completa, ainda usa descrição já salva localmente, sem buscar nada novo")
-    func semComparacaoCompletaAindaUsaDescricaoJaSalva() async {
-        let title = "peça exclusiva prata"
-        let description = "colar curto prata 925 zircônia branca clássico elegante"
-        let productA = EnjoeiFixtures.product(id: 1, title: title)
-        let productB = EnjoeiFixtures.product(id: 2, title: "joia linda presente")
-
-        let clientA = StubEnjoeiClient(
-            pages: [StoreProductsPage(products: [productA], total: 1, endCursor: nil)],
-            templatesByProductID: [1: EnjoeiFixtures.productTemplate(description: description)]
-        )
-        let accountA = makeAccount(client: clientA)
-        // Descrição já salva de antes — simula uma comparação completa anterior com outra conta.
-        accountA.productDetailsLoader.fetchAll(products: [productA])
-        await accountA.productDetailsLoader.waitUntilFinished()
-
-        let clientB = StubEnjoeiClient(
-            pages: [StoreProductsPage(products: [productB], total: 1, endCursor: nil)],
-            templatesByProductID: [2: EnjoeiFixtures.productTemplate(description: description)]
-        )
-        let accountB = makeAccount(client: clientB)
-        accountB.productDetailsLoader.fetchAll(products: [productB])
-        await accountB.productDetailsLoader.waitUntilFinished()
-
-        // Reseta a contagem de chamadas antes de comparar, pra confirmar que a comparação em si
-        // (sem o toggle) não pede nada novo.
-        #expect(await clientA.requestedTemplateIDs == [1])
-        #expect(await clientB.requestedTemplateIDs == [2])
-
-        let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB, fullComparison: false)
-        await loader.waitUntilFinished()
-
-        // Nenhuma chamada nova — só usou o que já estava salvo.
-        #expect(await clientA.requestedTemplateIDs == [1])
-        #expect(await clientB.requestedTemplateIDs == [2])
-
-        guard case .finished(let result) = loader.phase else {
-            Issue.record("esperava .finished, veio \(loader.phase)")
-            return
-        }
-        // Títulos sozinhos não bateriam o threshold — casou porque a descrição já salva entrou na
-        // comparação mesmo com o toggle desligado.
-        #expect(result.matches.count == 1)
-    }
-
-    @Test("phase passa por loadingProducts antes de finished")
-    func phasePassaPorLoadingProducts() async {
-        let clientA = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)])
-        let accountA = makeAccount(client: clientA)
-        let clientB = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [2], endCursor: nil)])
-        let accountB = makeAccount(client: clientB)
-
-        let loader = AccountComparisonLoader()
-        loader.compare(accountA: accountA, accountB: accountB)
-
-        // O phase muda pra loadingProducts na hora, antes de qualquer await — sincronamente.
-        #expect(loader.phase == .loadingProducts(loaded: 0, total: 0))
-
-        await loader.waitUntilFinished()
-
-        guard case .finished = loader.phase else {
-            Issue.record("esperava .finished, veio \(loader.phase)")
-            return
-        }
+        #expect(ids.count == 2)
+        #expect(Set(ids).count == 2)
     }
 }

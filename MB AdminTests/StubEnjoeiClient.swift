@@ -120,6 +120,33 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     }
 
     private(set) var reloadingPageCalls: [Bool] = []
+    /// Erro a lançar na chamada de `storeProductsPage` de número `failingPageCall` (0 = a primeira).
+    private var pageError: EnjoeiError?
+    private var failingPageCall: Int?
+    /// Espera artificial antes de responder `productTemplate` — pra testar cancelamento no meio.
+    private var templateDelay: Duration = .zero
+    private var templateFailuresRemaining = 0
+    private var transientTemplateError: EnjoeiError?
+
+    func setPageError(_ error: EnjoeiError?, onCall call: Int?) {
+        pageError = error
+        failingPageCall = call
+    }
+
+    func setPages(_ pages: [StoreProductsPage]) {
+        self.pages = pages
+    }
+
+    func setTemplateDelay(_ delay: Duration) {
+        templateDelay = delay
+    }
+
+    /// As próximas `count` chamadas a `productTemplate` falham com `error` — pra testar "tenta de
+    /// novo e dá certo".
+    func setTemplateFailures(_ count: Int, error: EnjoeiError = .http(status: 503, message: nil)) {
+        templateFailuresRemaining = count
+        transientTemplateError = error
+    }
 
     /// Pra testes trocarem o erro entre uma chamada e outra (ex.: `retryCheckingSession`), sem
     /// precisar criar um client novo.
@@ -154,6 +181,7 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
 
     func storeProductsPage(sellerID: Int, after: String?) async throws -> StoreProductsPage {
         requestedCursors.append(after)
+        if let pageError, failingPageCall == requestedCursors.count - 1 { throw pageError }
         guard !pages.isEmpty else {
             return StoreProductsPage(products: [], total: 0, endCursor: nil)
         }
@@ -218,7 +246,12 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
 
     func productTemplate(productID: Int) async throws -> ProductTemplate {
         requestedTemplateIDs.append(productID)
+        if templateDelay > .zero { try await Task.sleep(for: templateDelay) }
         if let templateError { throw templateError }
+        if templateFailuresRemaining > 0, let transientTemplateError {
+            templateFailuresRemaining -= 1
+            throw transientTemplateError
+        }
         guard let template = templatesByProductID[productID] else { throw EnjoeiError.unexpectedResponse }
         return template
     }

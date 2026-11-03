@@ -16,3 +16,7 @@ xcuserdata/
 # CocoaPods / Carthage (not currently used, kept for safety)
 Pods/
 Carthage/Build/
+
+# Amostras reais de fotos de anúncios: ficam só na máquina (ver PhotoSamples/README.md)
+PhotoSamples/*
+!PhotoSamples/README.md

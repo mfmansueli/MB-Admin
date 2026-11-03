@@ -6,23 +6,32 @@ nonisolated struct OtherStoreTarget: Identifiable, Equatable, Sendable {
     let accountID: EnjoeiAccountID
     let name: String
     let nickname: String
-    /// Quantos dos produtos a postar a última comparação entre as duas lojas casou com um de lá.
-    let possibleDuplicateCount: Int
-    /// O par mais parecido entre eles, de 0 a 100 — `nil` quando nenhum casou.
-    let highestSimilarityPercent: Int?
+    /// Quantos dos produtos a postar a última comparação achou lá com certeza (mesma foto, ou
+    /// confirmado por você).
+    let existingCount: Int
+    /// Quantos ficaram "pra revisar" com algum anúncio de lá — pode ser o mesmo produto.
+    let possibleCount: Int
 
     var id: EnjoeiAccountID { accountID }
 
+    /// Algum dos produtos pode já existir lá (certo ou provável).
+    var possibleDuplicateCount: Int { existingCount + possibleCount }
+
     /// A linha de baixo de cada loja no menu: o "@nick", ou o risco de duplicar quando a última
-    /// comparação achou o produto lá.
+    /// comparação achou o produto (ou um indício dele) lá.
     func subtitle(productCount: Int) -> String {
         guard possibleDuplicateCount > 0 else { return "@\(nickname)" }
-        if productCount == 1, let highestSimilarityPercent {
-            return "pode já ter esse produto · \(highestSimilarityPercent)%"
+        if productCount == 1 {
+            return existingCount > 0 ? "já tem esse produto" : "pode já ter esse produto"
         }
-        return possibleDuplicateCount == 1
-            ? "1 pode já existir lá"
-            : "\(possibleDuplicateCount) podem já existir lá"
+        var parts: [String] = []
+        if existingCount > 0 {
+            parts.append(existingCount == 1 ? "1 já existe lá" : "\(existingCount) já existem lá")
+        }
+        if possibleCount > 0 {
+            parts.append(possibleCount == 1 ? "1 pode existir lá" : "\(possibleCount) podem existir lá")
+        }
+        return parts.joined(separator: " · ")
     }
 
     /// As outras lojas com sessão aberta agora, na ordem da lista de contas. Sessão vencida ou não
@@ -38,15 +47,15 @@ nonisolated struct OtherStoreTarget: Identifiable, Equatable, Sendable {
         accounts
             .filter { $0.id != sourceAccountID && $0.status == .active }
             .map { account in
-                let similarities = productIDs.compactMap {
-                    matches.similarity(of: $0, from: sourceAccountID, to: account.id)
+                let presences = productIDs.compactMap {
+                    matches.presence(of: $0, from: sourceAccountID, to: account.id)
                 }
                 return OtherStoreTarget(
                     accountID: account.id,
                     name: account.user.name,
                     nickname: account.user.nickname,
-                    possibleDuplicateCount: similarities.count,
-                    highestSimilarityPercent: similarities.max().map { Int(($0 * 100).rounded()) }
+                    existingCount: presences.count { $0 == .present },
+                    possibleCount: presences.count { $0 == .possible }
                 )
             }
     }

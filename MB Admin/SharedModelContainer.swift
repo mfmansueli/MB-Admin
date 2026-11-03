@@ -1,8 +1,10 @@
 import Foundation
 import SwiftData
 
-/// Um `ModelContainer` só pra dado que cruza conta — hoje, só `PostHistoryRecord` (o histórico de
-/// ações da fila é intencionalmente global, não por conta). As três listas por conta
+/// Um `ModelContainer` só pra dado que cruza conta — o histórico de ações da fila
+/// (`PostHistoryRecord`, intencionalmente global), as assinaturas de foto da comparação
+/// (`PhotoSignatureRecord`: a mesma foto vale pra qualquer loja) e as revisões manuais de pares
+/// (`ComparisonDecisionRecord`, que por definição envolvem duas contas). As três listas por conta
 /// (`InactiveProductRecord`/`SmartPriceProductRecord`/`MegaphoneItemRecord`) moraram aqui antes, mas
 /// migraram pra um container próprio por conta — ver `PerAccountModelContainer`.
 ///
@@ -15,7 +17,7 @@ import SwiftData
 /// cacheado, garante que só existe UM container de verdade no processo inteiro pra esse schema.
 nonisolated enum SharedModelContainer {
     static let shared: ModelContainer = {
-        let schema = Schema([PostHistoryRecord.self])
+        let schema = Schema([PostHistoryRecord.self, PhotoSignatureRecord.self, ComparisonDecisionRecord.self])
         do {
             return try ModelContainer(for: schema, configurations: [ModelConfiguration(schema: schema)])
         } catch {

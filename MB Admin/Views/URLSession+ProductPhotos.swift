@@ -11,6 +11,11 @@ nonisolated extension URLSession {
         let cache = URLCache(memoryCapacity: 20 * 1024 * 1024, diskCapacity: 300 * 1024 * 1024, directory: nil)
         let configuration = URLSessionConfiguration.default
         configuration.urlCache = cache
+        #if DEBUG
+        if DemoPhotoURLProtocol.isEnabled {
+            configuration.protocolClasses = [DemoPhotoURLProtocol.self] + (configuration.protocolClasses ?? [])
+        }
+        #endif
         return URLSession(configuration: configuration)
     }()
 }

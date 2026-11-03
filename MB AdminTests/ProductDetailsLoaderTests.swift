@@ -8,6 +8,7 @@ struct ProductDetailsLoaderTests {
     private func makeLoader(client: StubEnjoeiClient, itemsPersistence: MegaphoneItemsPersisting) -> ProductDetailsLoader {
         let loader = ProductDetailsLoader(client: client, itemsPersistence: itemsPersistence)
         loader.delayBetweenProducts = .zero
+        loader.retryDelay = .zero
         return loader
     }
 
@@ -90,7 +91,8 @@ struct ProductDetailsLoaderTests {
 
         #expect(persistence.loadItems().first { $0.id == 1 }?.product.description == nil)
         #expect(persistence.loadItems().first { $0.id == 2 }?.product.description == "descrição 2")
-        #expect(await client.requestedTemplateIDs == [1, 2])
+        // O 1 é tentado de novo uma vez antes de desistir.
+        #expect(await client.requestedTemplateIDs == [1, 1, 2])
     }
 
     @Test("pula produtos que já têm descrição salva localmente")
@@ -171,5 +173,102 @@ struct ProductDetailsLoaderTests {
         for _ in 0..<10_000 where !condition() {
             await Task.yield()
         }
+    }
+
+    // MARK: - fetchDetails (comparação)
+
+    private func photoTemplate(photos: [(id: String, position: Int)], size: String? = "17") -> ProductTemplate {
+        ProductTemplate(
+            title: "anel", description: "anel prata", brand: "vivara", used: false, price: 10_000, originalPrice: 10_000,
+            weight: "0.3", quantity: 1, category: .init(id: 327), size: size,
+            shipping: .init(type: "charge_by_weight", hasInsurance: true),
+            photos: photos.map { ProductTemplate.Photo(imagePublicID: $0.id, position: $0.position) },
+            originPlanID: 1, smartPrice: nil
+        )
+    }
+
+    private func makeDetailsLoader(client: StubEnjoeiClient, details: InMemoryProductListingDetailsPersistence) -> ProductDetailsLoader {
+        let loader = ProductDetailsLoader(client: client, itemsPersistence: InMemoryMegaphoneItemsPersistence(), detailsPersistence: details)
+        loader.delayBetweenProducts = .zero
+        loader.retryDelay = .zero
+        return loader
+    }
+
+    @Test("fetchDetails ordena as fotos pela posição do template e guarda tudo (capa, categoria, tamanho, descrição)")
+    func fetchDetailsOrdenaEGuarda() async {
+        let client = StubEnjoeiClient(templatesByProductID: [
+            1: photoTemplate(photos: [("terceira", 2), ("capa", 0), ("segunda", 1)])
+        ])
+        let persistence = InMemoryProductListingDetailsPersistence()
+        let loader = makeDetailsLoader(client: client, details: persistence)
+        let product = EnjoeiProduct(id: 1, title: "anel", path: "anel-1", photoPublicID: "capa", currentPrice: 100, originalPrice: 100)
+        let fetchedAt = Date(timeIntervalSince1970: 1_000)
+
+        let report = await loader.fetchDetails(for: [product], now: { fetchedAt })
+
+        let details = report.details[1]
+        #expect(details?.photoPublicIDs == ["capa", "segunda", "terceira"])
+        #expect(details?.coverPublicID == "capa")
+        #expect(details?.categoryID == 327)
+        #expect(details?.size == "17")
+        #expect(details?.description == "anel prata")
+        #expect(details?.fetchedAt == fetchedAt)
+        #expect(report.failures.isEmpty)
+        #expect(!report.wasCancelled)
+        #expect(persistence.stored[1] == details)
+        #expect(loader.storedDetails(for: [1, 2]) == [1: details].compactMapValues { $0 })
+        #expect(loader.fetchedDescriptions[1] == "anel prata")
+    }
+
+    @Test("fetchDetails tenta de novo um template que falhou e segue quando responde")
+    func fetchDetailsTentaDeNovo() async {
+        let client = StubEnjoeiClient(templatesByProductID: [1: photoTemplate(photos: [("capa", 0)])])
+        await client.setTemplateFailures(1)
+        let loader = makeDetailsLoader(client: client, details: InMemoryProductListingDetailsPersistence())
+
+        let report = await loader.fetchDetails(for: [makeProduct(id: 1)])
+
+        #expect(report.details[1] != nil)
+        #expect(report.failures.isEmpty)
+        #expect(await client.requestedTemplateIDs == [1, 1])
+    }
+
+    @Test("fetchDetails não insiste com sessão caída: falha na primeira e diz por quê")
+    func fetchDetailsSessaoCaida() async {
+        let client = StubEnjoeiClient(templateError: .notAuthenticated)
+        let loader = makeDetailsLoader(client: client, details: InMemoryProductListingDetailsPersistence())
+
+        let report = await loader.fetchDetails(for: [makeProduct(id: 1), makeProduct(id: 2)])
+
+        #expect(report.details.isEmpty)
+        #expect(Set(report.failures.keys) == [1, 2])
+        #expect(await client.requestedTemplateIDs == [1, 2])
+    }
+
+    @Test("fetchDetails cancelado no meio devolve o que já chegou e marca como cancelado")
+    func fetchDetailsCancelado() async throws {
+        let client = StubEnjoeiClient(templatesByProductID: [
+            1: photoTemplate(photos: [("um", 0)]),
+            2: photoTemplate(photos: [("dois", 0)]),
+            3: photoTemplate(photos: [("três", 0)])
+        ])
+        let persistence = InMemoryProductListingDetailsPersistence()
+        let loader = makeDetailsLoader(client: client, details: persistence)
+        loader.delayBetweenProducts = .milliseconds(300)
+        let products = [makeProduct(id: 1), makeProduct(id: 2), makeProduct(id: 3)]
+
+        let task = Task { await loader.fetchDetails(for: products) }
+        while await client.requestedTemplateIDs.isEmpty {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        task.cancel()
+        let report = await task.value
+
+        #expect(report.wasCancelled)
+        #expect(report.details.keys.sorted() == [1])
+        // O que chegou antes de parar ficou salvo — continuar não pede de novo.
+        #expect(persistence.stored.keys.sorted() == [1])
+        #expect(report.failures.isEmpty)
+        #expect(!loader.isRunning)
     }
 }

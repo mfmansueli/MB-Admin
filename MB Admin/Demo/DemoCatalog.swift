@@ -63,6 +63,10 @@ nonisolated enum DemoCatalog {
     /// Posições (no catálogo de cada loja) dos produtos que pedem desconto — três, como no mock.
     private static let discountPositions: [Int: Double] = [3: 0.44, 7: 0.85, 12: 0.7]
 
+    /// Acrescentados aos títulos a partir da segunda volta — duas palavras, pra produtos diferentes
+    /// com o mesmo começo de título não ficarem "quase iguais" na comparação.
+    private static let titleVariants = ["banho ouro", "linha infantil", "tamanho grande", "peça delicada", "modelo duplo"]
+
     static func products(for profile: Profile) -> [EnjoeiProduct] {
         (0..<profile.productCount).map { position in
             let base = Double([99, 149, 273, 299, 459, 799][position % 6])
@@ -70,13 +74,24 @@ nonisolated enum DemoCatalog {
             let hasStoreDiscount = position % 4 == 0 && discountPositions[position] == nil
             return EnjoeiProduct(
                 id: productID(profile: profile, position: position),
-                title: titles[position % titles.count] + (position >= titles.count ? " \(position / titles.count + 1)" : ""),
+                title: title(position: position),
                 path: "produto-demo-\(position)",
-                photoPublicID: nil,
+                photoPublicID: DemoPhotoCatalog.photoIDs(sellerID: profile.user.id, position: position).first,
                 currentPrice: base,
                 originalPrice: hasStoreDiscount ? (base * 1.46).rounded() : base
             )
         }
+    }
+
+    static func title(position: Int) -> String {
+        let base = titles[position % titles.count]
+        guard position >= titles.count else { return base }
+        return "\(base) \(titleVariants[(position / titles.count - 1) % titleVariants.count])"
+    }
+
+    /// A posição de um produto da demonstração dentro da loja, pelo id.
+    static func position(of productID: Int, in profile: Profile) -> Int {
+        productID - profile.user.id * 1000
     }
 
     static func exposures(for profile: Profile, productIDs: [Int]) -> [MegaphoneExposure] {

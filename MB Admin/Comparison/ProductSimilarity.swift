@@ -9,13 +9,15 @@ nonisolated enum ProductSimilarity {
     /// Robusto à ordem das palavras; sensível ao tamanho do título (poucas palavras diferentes
     /// pesam mais num título curto do que num longo, o que já é o comportamento desejado).
     static func score(_ titleA: String, _ titleB: String) -> Double {
-        let tokensA = tokenize(titleA)
-        let tokensB = tokenize(titleB)
+        jaccard(tokenize(titleA), tokenize(titleB))
+    }
+
+    /// Jaccard de dois conjuntos de palavras já normalizadas — 0 se qualquer um estiver vazio.
+    static func jaccard(_ tokensA: Set<String>, _ tokensB: Set<String>) -> Double {
         guard !tokensA.isEmpty, !tokensB.isEmpty else { return 0 }
         let intersection = tokensA.intersection(tokensB).count
-        let union = tokensA.union(tokensB).count
-        guard union > 0 else { return 0 }
-        return Double(intersection) / Double(union)
+        guard intersection > 0 else { return 0 }
+        return Double(intersection) / Double(tokensA.count + tokensB.count - intersection)
     }
 
     /// Minúsculas, sem acento, sem pontuação, separado em palavras — pra "Colar Curto!" e "colar

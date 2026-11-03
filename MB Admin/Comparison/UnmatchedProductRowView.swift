@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// Uma linha nas seções "só em loja A" — produto sem par na outra conta: foto, título, preço e, logo
-/// embaixo, o botão de postar o mesmo produto direto na conta que ainda não tem ele. Em modo de
-/// seleção, vira uma linha marcável pra entrar na fila de ações junto com outras. Compartilhar o
-/// link fica no menu de contexto.
+/// Uma linha nas seções "possivelmente ausentes em loja B" — produto sem nenhum indício na outra
+/// conta, com tudo dos dois lados analisado: foto, título, preço e, logo embaixo, o botão de postar
+/// o mesmo produto direto na conta onde ele possivelmente não existe. Em modo de seleção, vira uma
+/// linha marcável pra entrar na fila de ações junto com outras. Compartilhar o link fica no menu de
+/// contexto. Revisões e não verificados nunca usam esta linha — não dá pra postar o que pode já
+/// estar lá.
 struct UnmatchedProductRowView: View {
     let product: EnjoeiProduct
     let sourceAccount: AccountSession

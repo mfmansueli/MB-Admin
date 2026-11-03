@@ -46,14 +46,99 @@ final class ProductDetailsLoader {
 
     private let client: EnjoeiClientProtocol
     private let itemsPersistence: MegaphoneItemsPersisting
+    /// Fotos (com posição), categoria, tamanho e marca de cada anúncio — o que a comparação por foto
+    /// usa. Gravado junto com a descrição, a cada template que responde.
+    let detailsPersistence: ProductListingDetailsPersisting
+    /// Rodadas de `fetchDetails` em andamento (a comparação chama direto, sem passar por `task`).
+    private var activeFetches = 0
+    /// Espera antes de tentar de novo um template que falhou. `var` pros testes zerarem.
+    var retryDelay: Duration = .seconds(1)
 
-    init(client: EnjoeiClientProtocol, itemsPersistence: MegaphoneItemsPersisting) {
+    init(
+        client: EnjoeiClientProtocol,
+        itemsPersistence: MegaphoneItemsPersisting,
+        detailsPersistence: ProductListingDetailsPersisting? = nil
+    ) {
         self.client = client
         self.itemsPersistence = itemsPersistence
+        self.detailsPersistence = detailsPersistence ?? InMemoryProductListingDetailsPersistence()
         refreshDetailsStats()
     }
 
-    var isRunning: Bool { task != nil }
+    var isRunning: Bool { task != nil || activeFetches > 0 }
+
+    /// Os templates já salvos desses anúncios (de qualquer idade — quem usa decide com
+    /// `ProductListingDetails.isFresh`).
+    func storedDetails(for productIDs: [Int]) -> [Int: ProductListingDetails] {
+        detailsPersistence.details(for: productIDs)
+    }
+
+    /// Busca o template de cada produto da lista, nessa ordem, um de cada vez no ritmo de
+    /// `delayBetweenProducts` — estruturado (quem chama espera e cancela pela própria `Task`), com até
+    /// `PhotoMatchingParameters.detailsFetchAttempts` tentativas por produto. Cada resposta é gravada na
+    /// hora (detalhes + descrição), então uma rodada interrompida retoma de onde parou.
+    func fetchDetails(for products: [EnjoeiProduct], now: () -> Date = { Date() }) async -> ProductDetailsFetchReport {
+        var report = ProductDetailsFetchReport()
+        guard !products.isEmpty else { return report }
+        activeFetches += 1
+        defer {
+            activeFetches -= 1
+            refreshDetailsStats()
+        }
+        phase = .fetching(fetched: 0, total: products.count)
+        products: for (index, product) in products.enumerated() {
+            if Task.isCancelled {
+                report.wasCancelled = true
+                break products
+            }
+            switch await fetchTemplate(productID: product.id) {
+            case .success(let template):
+                let details = ProductListingDetails(product: product, template: template, fetchedAt: now())
+                detailsPersistence.upsert(details)
+                itemsPersistence.upsertDescription(for: product, description: template.description)
+                fetchedDescriptions[product.id] = template.description
+                onDescriptionFetched?(product.id, template.description)
+                report.details[product.id] = details
+            case .failure(let message):
+                // Falha por ter sido cancelado não é falha do anúncio — fica pra quando continuar.
+                if Task.isCancelled {
+                    report.wasCancelled = true
+                    break products
+                }
+                report.failures[product.id] = message
+            }
+            phase = .fetching(fetched: index + 1, total: products.count)
+            if index < products.count - 1, delayBetweenProducts > .zero {
+                try? await Task.sleep(for: delayBetweenProducts)
+            }
+        }
+        if Task.isCancelled { report.wasCancelled = true }
+        phase = .finished
+        return report
+    }
+
+    private enum TemplateOutcome {
+        case success(ProductTemplate)
+        case failure(String)
+    }
+
+    private func fetchTemplate(productID: Int) async -> TemplateOutcome {
+        var lastMessage = "sem resposta"
+        for attempt in 0..<PhotoMatchingParameters.detailsFetchAttempts {
+            if Task.isCancelled { return .failure("cancelado") }
+            if attempt > 0, retryDelay > .zero { try? await Task.sleep(for: retryDelay) }
+            do {
+                return .success(try await client.productTemplate(productID: productID))
+            } catch let error as EnjoeiError {
+                lastMessage = error.localizedDescription
+                // Sessão caída não volta tentando de novo.
+                if case .notAuthenticated = error { break }
+            } catch {
+                lastMessage = error.localizedDescription
+            }
+        }
+        return .failure(lastMessage)
+    }
 
     /// Busca a descrição de cada produto da lista que ainda não tem uma salva localmente.
     func fetchAll(products: [EnjoeiProduct]) {
@@ -102,23 +187,9 @@ final class ProductDetailsLoader {
     }
 
     private func run(products: [EnjoeiProduct]) async {
-        for (index, product) in products.enumerated() {
-            guard !Task.isCancelled else { return }
-            // Um produto falhar (removido, sem permissão, erro passageiro) não para os demais —
-            // mesmo raciocínio de `MegaphoneRunner.megaphoneAll`. Sem retry: o próximo toque no
-            // botão já pega só o que ainda falta.
-            if let template = try? await client.productTemplate(productID: product.id) {
-                itemsPersistence.upsertDescription(for: product, description: template.description)
-                fetchedDescriptions[product.id] = template.description
-                onDescriptionFetched?(product.id, template.description)
-            }
-            phase = .fetching(fetched: index + 1, total: products.count)
-            if index < products.count - 1, delayBetweenProducts > .zero {
-                try? await Task.sleep(for: delayBetweenProducts)
-            }
-        }
-        phase = .finished
-        refreshDetailsStats()
+        // Um produto falhar (removido, sem permissão, erro passageiro) não para os demais — mesmo
+        // raciocínio de `MegaphoneRunner.megaphoneAll`. O próximo toque já pega só o que ainda falta.
+        _ = await fetchDetails(for: products)
     }
 
     private func refreshDetailsStats() {

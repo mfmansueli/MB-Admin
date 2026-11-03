@@ -4,13 +4,13 @@ import Testing
 
 @Suite("textos de postar em outra loja")
 struct PostToOtherStoreCopyTests {
-    private func target(_ name: String, duplicates: Int = 0, percent: Int? = nil) -> OtherStoreTarget {
+    private func target(_ name: String, existing: Int = 0, possible: Int = 0) -> OtherStoreTarget {
         OtherStoreTarget(
             accountID: EnjoeiAccountID(),
             name: name,
             nickname: "nick",
-            possibleDuplicateCount: duplicates,
-            highestSimilarityPercent: percent
+            existingCount: existing,
+            possibleCount: possible
         )
     }
 
@@ -41,15 +41,20 @@ struct PostToOtherStoreCopyTests {
         )
     }
 
-    @Test("um produto que a última comparação achou lá: começa pelo risco")
-    func mensagemDeUmProdutoComRisco() {
-        let message = PostToOtherStoreCopy.confirmationMessage(
-            productCount: 1,
-            target: target("loja C", duplicates: 1, percent: 82),
-            pace: "1 a cada minuto"
-        )
+    @Test("um produto que a última comparação achou lá (mesma foto): diz que vira repetido")
+    func mensagemDeUmProdutoQueJaExiste() {
+        let message = PostToOtherStoreCopy.confirmationMessage(productCount: 1, target: target("loja C", existing: 1), pace: "1 a cada minuto")
         #expect(
-            message == "loja C pode já ter esse produto (82% parecido). "
+            message == "loja C já tem esse produto, pela última comparação (a mesma foto). "
+                + "se postar, vira um anúncio repetido lá, com o mesmo título, descrição, preço e fotos."
+        )
+    }
+
+    @Test("um produto que ficou pra revisar: diz que pode já existir")
+    func mensagemDeUmProdutoQuePodeExistir() {
+        let message = PostToOtherStoreCopy.confirmationMessage(productCount: 1, target: target("loja C", possible: 1), pace: "1 a cada minuto")
+        #expect(
+            message == "loja C pode já ter esse produto — a última comparação deixou um par pra revisar. "
                 + "se postar, vira um anúncio novo lá, com o mesmo título, descrição, preço e fotos."
         )
     }
@@ -63,21 +68,16 @@ struct PostToOtherStoreCopyTests {
         )
     }
 
-    @Test("vários com alguns já lá: avisa quantos antes")
+    @Test("vários com alguns já lá: avisa quantos antes, separando certo de possível")
     func mensagemDeVariosComRisco() {
-        let one = PostToOtherStoreCopy.confirmationMessage(
-            productCount: 3,
-            target: target("loja C", duplicates: 1, percent: 82),
-            pace: "1 a cada 30s"
-        )
-        #expect(one.hasPrefix("1 deles pode já existir em loja C, pela última comparação. cada um vira"))
+        let one = PostToOtherStoreCopy.confirmationMessage(productCount: 3, target: target("loja C", existing: 1), pace: "1 a cada 30s")
+        #expect(one.hasPrefix("1 deles já existe em loja C, pela última comparação. cada um vira"))
         #expect(one.contains("(1 a cada 30s)"))
 
-        let two = PostToOtherStoreCopy.confirmationMessage(
-            productCount: 3,
-            target: target("loja C", duplicates: 2, percent: 90),
-            pace: "1 a cada minuto"
-        )
-        #expect(two.hasPrefix("2 deles podem já existir em loja C"))
+        let possible = PostToOtherStoreCopy.confirmationMessage(productCount: 3, target: target("loja C", possible: 2), pace: "1 a cada minuto")
+        #expect(possible.hasPrefix("2 deles podem existir em loja C, pela última comparação."))
+
+        let both = PostToOtherStoreCopy.confirmationMessage(productCount: 3, target: target("loja C", existing: 2, possible: 1), pace: "1 a cada minuto")
+        #expect(both.hasPrefix("2 deles já existem em loja C e 1 pode existir, pela última comparação."))
     }
 }

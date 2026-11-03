@@ -63,8 +63,12 @@ actor DemoEnjoeiClient: EnjoeiClientProtocol {
     }
 
     func productTemplate(productID: Int) async throws -> ProductTemplate {
-        await pause(milliseconds: 200)
+        await pause(milliseconds: 40)
         let product = DemoCatalog.products(for: profile).first { $0.id == productID }
+        let position = DemoCatalog.position(of: productID, in: profile)
+        let photos = DemoPhotoCatalog.photoIDs(sellerID: profile.user.id, position: position)
+            .enumerated()
+            .map { ProductTemplate.Photo(imagePublicID: $1, position: $0) }
         let price = Int((product?.currentPrice ?? 100) * 100)
         return ProductTemplate(
             title: product?.title ?? "produto",
@@ -76,9 +80,9 @@ actor DemoEnjoeiClient: EnjoeiClientProtocol {
             weight: "0.3",
             quantity: 1,
             category: .init(id: 327),
-            size: nil,
+            size: DemoPhotoCatalog.size(sellerID: profile.user.id, position: position),
             shipping: .init(type: "charge_by_weight", hasInsurance: true),
-            photos: [],
+            photos: photos,
             originPlanID: 1,
             smartPrice: nil
         )

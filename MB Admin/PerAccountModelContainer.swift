@@ -25,7 +25,8 @@ enum PerAccountModelContainer {
         let schema = Schema([
             InactiveProductRecord.self,
             SmartPriceProductRecord.self,
-            MegaphoneItemRecord.self
+            MegaphoneItemRecord.self,
+            ProductListingDetailsRecord.self
         ])
         let configuration = ModelConfiguration(schema: schema, url: storeURL(for: accountID))
         let container: ModelContainer

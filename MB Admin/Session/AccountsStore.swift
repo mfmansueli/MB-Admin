@@ -24,6 +24,16 @@ final class AccountsStore {
     /// Os pares da última comparação entre cada duas lojas — pra "postar em outra loja" avisar
     /// quando o produto talvez já exista no destino (ver `ComparisonMatchMemory`).
     let comparisonMatches = ComparisonMatchMemory()
+    /// Cache/análise de fotos e revisões manuais da comparação — criados só na primeira comparação
+    /// (abrir o `SharedModelContainer` à toa em todo teste que cria um `AccountsStore` não precisa).
+    var comparisonServices: ComparisonServices {
+        if let existing = storedComparisonServices { return existing }
+        let services = comparisonServicesFactory()
+        storedComparisonServices = services
+        return services
+    }
+    @ObservationIgnored private var storedComparisonServices: ComparisonServices?
+    @ObservationIgnored private let comparisonServicesFactory: () -> ComparisonServices
     /// Compartilhada entre todas as contas (ver `MegaphoneQueue`) — sem limite de propósito: agora
     /// que a listagem de produtos não passa mais por `List`/`NSTableView` (ver
     /// `AccountPublishedTabView.productList`), o gargalo que motivava travar tudo numa conta de cada
@@ -64,9 +74,11 @@ final class AccountsStore {
         postHistoryPersistence: PostHistoryPersisting? = nil,
         postQueueItemsPersistence: PostQueueItemsPersisting? = nil,
         memoryPressureObserver: (any MemoryPressureObserving)? = nil,
-        memoryWarningCapsMegaphoneQueue: Bool? = nil
+        memoryWarningCapsMegaphoneQueue: Bool? = nil,
+        comparisonServices: (() -> ComparisonServices)? = nil
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
+        comparisonServicesFactory = comparisonServices ?? { .live() }
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
         self.memoryPressureObserver = memoryPressureObserver ?? SystemMemoryPressureObserver()
         // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
