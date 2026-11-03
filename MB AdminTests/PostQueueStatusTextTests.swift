@@ -27,23 +27,22 @@ struct PostQueueStatusTextTests {
     @Test("com o grupo da próxima ação, o resumo diz pra quem vale o ritmo")
     func resumoComGrupo() {
         #expect(
-            PostQueueStatusText.summary(interval: 10, waitingCount: 12, group: .listingChange)
-                == "1 a cada 10s pra ativar, inativar e apagar · 12 na fila"
+            PostQueueStatusText.summary(interval: 15, waitingCount: 12, group: .inactivating)
+                == "1 a cada 15s pra inativar · 12 na fila"
         )
         #expect(
             PostQueueStatusText.summary(interval: 30, waitingCount: 0, group: .posting)
-                == "1 a cada 30s pra postar e repostar"
+                == "1 a cada 30s pra postar, repostar e apagar"
         )
     }
 
     @Test("menu de intervalo mostra os dois ritmos, postar primeiro")
     func rotuloDoMenuDeIntervalo() {
-        #expect(PostQueueStatusText.intervalMenuLabel(posting: 30, listingChange: 10) == "30s · 10s")
-        #expect(PostQueueStatusText.intervalMenuLabel(posting: 30, listingChange: 5) == "30s · 5s")
-        #expect(PostQueueStatusText.intervalMenuLabel(posting: 120, listingChange: 60) == "2 min · 1 min")
+        #expect(PostQueueStatusText.intervalMenuLabel(posting: 30, inactivating: 15) == "30s · 15s")
+        #expect(PostQueueStatusText.intervalMenuLabel(posting: 120, inactivating: 60) == "2 min · 1 min")
         #expect(
-            PostQueueStatusText.intervalMenuAccessibilityValue(posting: 30, listingChange: 10)
-                == "postar e repostar: 1 a cada 30s; ativar, inativar e apagar: 1 a cada 10s"
+            PostQueueStatusText.intervalMenuAccessibilityValue(posting: 30, inactivating: 15)
+                == "postar, repostar e apagar: 1 a cada 30s; inativar: 1 a cada 15s"
         )
     }
 

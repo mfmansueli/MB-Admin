@@ -627,16 +627,16 @@ struct PostQueueTests {
         #expect(itemsPersistence.loadItems().isEmpty)
     }
 
-    @Test("sem nada escolhido, postar/repostar começam em 30s e ativar/inativar/apagar em 10s")
+    @Test("sem nada escolhido, postar/repostar/apagar começam em 30s e inativar em 15s")
     func intervalosPadrao() {
         let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: makeIntervalDefaults())
 
         #expect(queue.interval(for: .posting) == 30)
-        #expect(queue.interval(for: .listingChange) == 10)
+        #expect(queue.interval(for: .inactivating) == 15)
         #expect(queue.interval(for: .post) == 30)
-        #expect(queue.interval(for: .delete) == 10)
-        #expect(queue.interval(for: .inactivate) == 10)
-        #expect(queue.interval(for: .activate) == 10)
+        #expect(queue.interval(for: .delete) == 30)
+        #expect(queue.interval(for: .inactivate) == 15)
+        #expect(queue.interval(for: .activate) == 15)
     }
 
     @Test("mudar o intervalo de um grupo persiste a escolha só dele")
@@ -647,14 +647,16 @@ struct PostQueueTests {
         queue.setInterval(120, for: .posting)
 
         #expect(queue.interval(for: .posting) == 120)
-        #expect(queue.interval(for: .listingChange) == 10)
+        #expect(queue.interval(for: .delete) == 120)
+        #expect(queue.interval(for: .inactivating) == 15)
         #expect(defaults.double(forKey: "postQueue.interval") == 120)
 
-        queue.setInterval(5, for: .listingChange)
+        queue.setInterval(60, for: .inactivating)
 
-        #expect(queue.interval(for: .listingChange) == 5)
-        #expect(queue.interval(for: .delete) == 5)
-        #expect(defaults.double(forKey: "postQueue.interval.listingChange") == 5)
+        #expect(queue.interval(for: .inactivating) == 60)
+        #expect(queue.interval(for: .inactivate) == 60)
+        #expect(queue.interval(for: .delete) == 120)
+        #expect(defaults.double(forKey: "postQueue.interval.inactivate") == 60)
     }
 
     @Test("fila nova recupera os dois intervalos persistidos, sem cair no padrão")
@@ -662,7 +664,7 @@ struct PostQueueTests {
         let defaults = makeIntervalDefaults()
         let firstQueue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
         firstQueue.setInterval(120, for: .posting)
-        firstQueue.setInterval(60, for: .listingChange)
+        firstQueue.setInterval(60, for: .inactivating)
 
         // Simula reabrir o app: uma fila nova, mesmo `UserDefaults`, sem `interval` explícito.
         let secondQueue = PostQueue(
@@ -672,7 +674,7 @@ struct PostQueueTests {
         )
 
         #expect(secondQueue.interval(for: .posting) == 120)
-        #expect(secondQueue.interval(for: .listingChange) == 60)
+        #expect(secondQueue.interval(for: .inactivating) == 60)
     }
 
     @Test("o intervalo escolhido antes de existirem dois grupos continua valendo pra postar")
@@ -683,42 +685,56 @@ struct PostQueueTests {
         let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
 
         #expect(queue.interval(for: .posting) == 180)
-        #expect(queue.interval(for: .listingChange) == 10)
-        // Apagar saiu do ritmo de postar: a escolha antiga não arrasta mais ele junto.
-        #expect(queue.interval(for: .delete) == 10)
+        // Apagar voltou pro ritmo de postar: segue a escolha de lá.
+        #expect(queue.interval(for: .delete) == 180)
+        #expect(queue.interval(for: .inactivating) == 15)
     }
 
-    @Test("a escolha de quando o grupo era só ativar/inativar não vale mais — começa nos 10s novos")
+    @Test("a escolha de quando ativar, inativar e apagar andavam juntos (até 5s) não vale mais — inativar começa nos 15s")
     func escolhaDoGrupoAntigoNaoVale() {
         let defaults = makeIntervalDefaults()
-        defaults.set(TimeInterval(15), forKey: "postQueue.interval.statusChange")
+        defaults.set(TimeInterval(5), forKey: "postQueue.interval.listingChange")
+        defaults.set(TimeInterval(10), forKey: "postQueue.interval.statusChange")
 
         let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
 
-        #expect(queue.interval(for: .listingChange) == 10)
+        #expect(queue.interval(for: .inactivating) == 15)
+        #expect(queue.interval(for: .delete) == 30)
+    }
+
+    @Test("uma escolha guardada abaixo do mínimo do grupo sobe pro mínimo ao abrir")
+    func escolhaAbaixoDoMinimoSobe() {
+        let defaults = makeIntervalDefaults()
+        defaults.set(TimeInterval(10), forKey: "postQueue.interval")
+        defaults.set(TimeInterval(5), forKey: "postQueue.interval.inactivate")
+
+        let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, defaults: defaults)
+
+        #expect(queue.interval(for: .posting) == 30)
+        #expect(queue.interval(for: .inactivating) == 15)
     }
 
     @Test("um interval explícito no init vale pros dois grupos, por cima de qualquer coisa persistida")
     func intervalExplicitoIgnoraOPersistido() {
         let defaults = makeIntervalDefaults()
         defaults.set(TimeInterval(30), forKey: "postQueue.interval")
-        defaults.set(TimeInterval(60), forKey: "postQueue.interval.listingChange")
+        defaults.set(TimeInterval(60), forKey: "postQueue.interval.inactivate")
 
         let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [] }, interval: .zero, defaults: defaults)
 
         #expect(queue.interval(for: .posting) == .zero)
-        #expect(queue.interval(for: .listingChange) == .zero)
+        #expect(queue.interval(for: .inactivating) == .zero)
     }
 
-    @Test("apagar espera o intervalo de ativar/inativar/apagar, não o de postar")
-    func apagarUsaIntervaloDeAtivarEInativar() async {
+    @Test("apagar espera o intervalo de postar, não o de inativar")
+    func apagarUsaIntervaloDePostar() async {
         let client = StubEnjoeiClient()
         let account = makeAccount(name: "conta", client: client)
         let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [account] }, defaults: makeIntervalDefaults())
-        // Postar bem mais lento que a duração do teste — se a espera entre os dois apagar usasse
+        // Inativar bem mais lento que a duração do teste — se a espera entre os dois apagar usasse
         // esse, o segundo não sairia a tempo.
-        queue.setInterval(300, for: .posting)
-        queue.setInterval(0, for: .listingChange)
+        queue.setInterval(300, for: .inactivating)
+        queue.setInterval(0, for: .posting)
 
         queue.enqueueDelete(product: EnjoeiFixtures.product(id: 1), account: account)
         queue.enqueueDelete(product: EnjoeiFixtures.product(id: 2), account: account)
@@ -729,7 +745,7 @@ struct PostQueueTests {
         #expect(await client.deleteProductCalls.map(\.productID) == [1, 2])
     }
 
-    @Test("inativar espera o intervalo de ativar/inativar, não o de postar")
+    @Test("inativar espera o intervalo de inativar, não o de postar")
     func inativarUsaIntervaloDoProprioGrupo() async {
         let client = StubEnjoeiClient(templatesByProductID: [1: makeTemplate(productID: 1), 2: makeTemplate(productID: 2)])
         let account = makeAccount(name: "conta", client: client)
@@ -737,7 +753,7 @@ struct PostQueueTests {
         // Postar bem mais lento que a duração do teste — se a espera entre as duas inativações
         // usasse esse, a segunda não sairia a tempo.
         queue.setInterval(300, for: .posting)
-        queue.setInterval(0, for: .listingChange)
+        queue.setInterval(0, for: .inactivating)
 
         queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 1), account: account)
         queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 2), account: account)
@@ -753,7 +769,7 @@ struct PostQueueTests {
         let account = makeAccount(name: "conta", client: client)
         let queue = PostQueue(poster: CrossAccountPoster(), accountsProvider: { [account] }, defaults: makeIntervalDefaults())
         queue.setInterval(120, for: .posting)
-        queue.setInterval(0, for: .listingChange)
+        queue.setInterval(0, for: .inactivating)
 
         queue.enqueueInactivate(product: EnjoeiFixtures.product(id: 1), account: account)
         queue.enqueue(product: EnjoeiFixtures.product(id: 2), source: account, destination: account)

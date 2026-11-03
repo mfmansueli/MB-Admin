@@ -4,34 +4,37 @@ import Testing
 
 @Suite("intervalos da fila por tipo de ação")
 struct PostQueueIntervalGroupTests {
-    @Test("postar e repostar num grupo; ativar, inativar e apagar no outro")
+    @Test("postar, repostar e apagar num grupo; inativar no outro")
     func grupoDeCadaAcao() {
         #expect(PostQueueIntervalGroup(kind: .post) == .posting)
-        #expect(PostQueueIntervalGroup(kind: .delete) == .listingChange)
-        #expect(PostQueueIntervalGroup(kind: .inactivate) == .listingChange)
-        #expect(PostQueueIntervalGroup(kind: .activate) == .listingChange)
+        #expect(PostQueueIntervalGroup(kind: .delete) == .posting)
+        #expect(PostQueueIntervalGroup(kind: .inactivate) == .inactivating)
+        // Um "ativar" que ficou na fila de antes anda no ritmo de inativar.
+        #expect(PostQueueIntervalGroup(kind: .activate) == .inactivating)
     }
 
-    @Test("30s de padrão pra postar; ativar, inativar e apagar começam em 10s e descem até 5s")
+    @Test("postar, repostar e apagar: 30s de padrão e de mínimo; inativar: 15s")
     func padroesEOpcoes() {
         #expect(PostQueueIntervalGroup.posting.defaultInterval == 30)
-        #expect(PostQueueIntervalGroup.listingChange.defaultInterval == 10)
+        #expect(PostQueueIntervalGroup.posting.minimumInterval == 30)
+        #expect(PostQueueIntervalGroup.inactivating.defaultInterval == 15)
+        #expect(PostQueueIntervalGroup.inactivating.minimumInterval == 15)
         #expect(PostQueueIntervalGroup.posting.presets == [30, 60, 120, 180, 240, 300])
-        #expect(PostQueueIntervalGroup.listingChange.presets == [5, 10, 15, 30, 60, 120, 180, 240, 300])
+        #expect(PostQueueIntervalGroup.inactivating.presets == [15, 30, 60, 120, 180, 240, 300])
         for group in PostQueueIntervalGroup.allCases {
-            #expect(group.presets.contains(group.defaultInterval))
+            #expect(group.presets.allSatisfy { $0 >= group.minimumInterval })
         }
     }
 
     @Test("os nomes dos grupos no menu e no cartão da fila")
     func titulos() {
-        #expect(PostQueueIntervalGroup.posting.title == "postar e repostar")
-        #expect(PostQueueIntervalGroup.listingChange.title == "ativar, inativar e apagar")
+        #expect(PostQueueIntervalGroup.posting.title == "postar, repostar e apagar")
+        #expect(PostQueueIntervalGroup.inactivating.title == "inativar")
     }
 
-    @Test("postar guarda na chave de antes dos grupos; o grupo de apagar ganhou chave nova, pra começar nos 10s")
+    @Test("postar guarda na chave de antes dos grupos; inativar ganhou chave nova, pra começar nos 15s")
     func chaves() {
         #expect(PostQueueIntervalGroup.posting.defaultsKey == "postQueue.interval")
-        #expect(PostQueueIntervalGroup.listingChange.defaultsKey == "postQueue.interval.listingChange")
+        #expect(PostQueueIntervalGroup.inactivating.defaultsKey == "postQueue.interval.inactivate")
     }
 }

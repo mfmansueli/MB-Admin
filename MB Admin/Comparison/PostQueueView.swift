@@ -8,7 +8,7 @@ import SwiftUI
 /// embaixo dele, uma seção por situação ("agora", "na fila", "com erro", "feitos"), cada uma com o
 /// título grande na cor da situação. Pausar e limpar (a vassoura azul — só esvazia a fila, nunca
 /// apaga produto da loja) ficam na barra de cima; histórico e os dois intervalos
-/// (postar/repostar e ativar/inativar/apagar), na de baixo.
+/// (postar/repostar/apagar e inativar), na de baixo.
 struct PostQueueView: View {
     let postQueue: PostQueue
     let poster: CrossAccountPoster
@@ -183,15 +183,15 @@ struct PostQueueView: View {
     }
 
     /// Os dois intervalos da fila num menu só: um submenu por grupo, com o nome dele e, embaixo, o
-    /// ritmo escolhido ("ativar, inativar e apagar / 1 a cada 10s") — postar/repostar (30s a
-    /// 5 min) e ativar/inativar/apagar (5s a 5 min). `Section` com um `Picker` em linha não
-    /// mostrava o título no menu, e as duas listas iguais ficavam sem dizer qual era qual. O
-    /// rótulo da barra mostra os dois, postar primeiro ("30s · 10s"). `.menuOrder(.fixed)`:
+    /// ritmo escolhido ("inativar / 1 a cada 15s") — postar/repostar/apagar (30s a 5 min) e
+    /// inativar (15s a 5 min). `Section` com um `Picker` em linha não mostrava o título no menu, e
+    /// as duas listas iguais ficavam sem dizer qual era qual. O rótulo da barra mostra os dois,
+    /// postar primeiro ("30s · 15s"). `.menuOrder(.fixed)`:
     /// abrindo pra cima a partir da barra de baixo, o sistema inverteria a ordem. A escolha é
     /// persistida por `PostQueue.setInterval` — sobrevive a fechar e abrir o app.
     private var intervalMenu: some View {
         let posting = postQueue.interval(for: .posting)
-        let listingChange = postQueue.interval(for: .listingChange)
+        let inactivating = postQueue.interval(for: .inactivating)
         return Menu {
             ForEach(PostQueueIntervalGroup.allCases, id: \.self) { group in
                 Picker(selection: intervalBinding(for: group)) {
@@ -207,7 +207,7 @@ struct PostQueueView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "timer")
-                Text(PostQueueStatusText.intervalMenuLabel(posting: posting, listingChange: listingChange))
+                Text(PostQueueStatusText.intervalMenuLabel(posting: posting, inactivating: inactivating))
                     .monospacedDigit()
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.caption2)
@@ -218,7 +218,7 @@ struct PostQueueView: View {
         .menuOrder(.fixed)
         .accessibilityLabel("intervalo entre ações")
         .accessibilityValue(
-            PostQueueStatusText.intervalMenuAccessibilityValue(posting: posting, listingChange: listingChange)
+            PostQueueStatusText.intervalMenuAccessibilityValue(posting: posting, inactivating: inactivating)
         )
     }
 

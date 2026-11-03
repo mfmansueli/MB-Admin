@@ -3,7 +3,7 @@ import Observation
 
 /// Fila de ações entre contas: posta (numa conta diferente, ou reposta na mesma), apaga, inativa
 /// ou ativa um produto de cada vez, esperando antes de cada uma o intervalo do grupo dela —
-/// postar/repostar num ritmo, ativar/inativar/apagar noutro (`PostQueueIntervalGroup`, ver
+/// postar/repostar/apagar num ritmo, inativar noutro (`PostQueueIntervalGroup`, ver
 /// `waitInterval`). Também é o único ponto de entrada
 /// pra postar — tanto a fila quanto o botão avulso "postar em X" de uma linha passam por aqui, pra
 /// `currentItem` sempre refletir o que está em voo agora, esteja vindo da fila ou não.
@@ -42,7 +42,7 @@ final class PostQueue {
     /// (dentro do próprio `init` de quem a possui) e liga ele de verdade logo em seguida.
     var accountsProvider: () -> [AccountSession]
     /// Intervalo antes de cada ação, por grupo — o menu da tela da fila deixa escolher um pra
-    /// postar/repostar (30s a 5 min) e outro pra ativar/inativar/apagar (5s a 5 min).
+    /// postar/repostar/apagar (30s a 5 min) e outro pra inativar (15s a 5 min).
     /// `waitInterval` relê o valor a cada pedaço da espera, e a escolha sobrevive a fechar e abrir
     /// o app (ver `setInterval(_:for:)`). Só mutável por aqui dentro — `setInterval` é quem
     /// persiste, então a UI nunca atribui direto.
@@ -64,13 +64,14 @@ final class PostQueue {
         history = historyPersistence.loadEntries()
         // Um `interval` explícito (testes, sobretudo) vale pros dois grupos, por cima de qualquer
         // coisa persistida. Sem ele, a última escolha do usuário em cada grupo — se existir —
-        // prevalece sobre o padrão do grupo (30s pra postar, 10s pra ativar/inativar/apagar).
+        // prevalece sobre o padrão do grupo (30s pra postar/repostar/apagar, 15s pra inativar),
+        // nunca abaixo do mínimo dele.
         for group in PostQueueIntervalGroup.allCases {
             if let interval {
                 intervals[group] = interval
             } else {
                 let stored = defaults.double(forKey: group.defaultsKey)
-                intervals[group] = stored > 0 ? stored : group.defaultInterval
+                intervals[group] = stored > 0 ? max(stored, group.minimumInterval) : group.defaultInterval
             }
         }
         items = itemsPersistence.loadItems()
@@ -87,7 +88,8 @@ final class PostQueue {
     }
 
     /// Muda o intervalo de um grupo e já persiste a escolha — chamado pelo menu de intervalo da
-    /// fila (`PostQueueView`), pra sobreviver a fechar e abrir o app de novo.
+    /// fila (`PostQueueView`), pra sobreviver a fechar e abrir o app de novo. O menu só oferece os
+    /// `presets` do grupo (a partir do mínimo); os testes usam 0 pra não esperar.
     func setInterval(_ newValue: TimeInterval, for group: PostQueueIntervalGroup) {
         intervals[group] = newValue
         defaults.set(newValue, forKey: group.defaultsKey)
