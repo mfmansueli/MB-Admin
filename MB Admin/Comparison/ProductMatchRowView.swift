@@ -5,7 +5,7 @@ import SwiftUI
 /// motivo e o índice de correspondência. Em revisão, os dois botões de decidir ficam numa faixa
 /// embaixo da linha; a lupa abre o detalhe (fotos grandes, todos os motivos, as parcelas do índice,
 /// os atributos lado a lado, diferenças de texto, desfazer).
-struct ProductMatchRowView: View {
+struct ProductMatchRowView: View, Equatable {
     let match: ProductMatch
     let accountAName: String
     let accountBName: String
@@ -13,6 +13,12 @@ struct ProductMatchRowView: View {
     var onUndo: () -> Void = {}
 
     @State private var isShowingDetail = false
+
+    /// Só o dado mostrado decide se a linha muda — os closures são recriados a cada render da lista
+    /// (ver `ComparisonResultView`).
+    static func == (lhs: ProductMatchRowView, rhs: ProductMatchRowView) -> Bool {
+        lhs.match == rhs.match && lhs.accountAName == rhs.accountAName && lhs.accountBName == rhs.accountBName
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

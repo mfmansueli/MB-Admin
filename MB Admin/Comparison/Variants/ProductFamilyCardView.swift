@@ -4,7 +4,7 @@ import SwiftUI
 /// ("3 versões · 1 só em antonia") e uma linha por versão — "aro 16 · ródio" e onde ela está: nas
 /// duas lojas, só numa, pra revisar ou não verificada. Pra postar uma versão que falta, a mesma
 /// versão aparece em "possivelmente ausentes", com o botão.
-struct ProductFamilyCardView: View {
+struct ProductFamilyCardView: View, Equatable {
     let family: ProductFamily
     let accountAName: String
     let accountBName: String

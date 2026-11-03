@@ -2,7 +2,7 @@ import Foundation
 
 /// Se a listagem de uma loja veio inteira. Só com `.complete` dá pra dizer que um produto da outra
 /// loja "possivelmente não existe" nesta — lista faltando pedaço não é prova de ausência.
-nonisolated enum StoreListingStatus: Equatable, Sendable {
+nonisolated enum StoreListingStatus: Equatable, Sendable, Codable {
     case complete
     /// Veio menos produto do que o `total` que a própria busca informou.
     case incomplete(loaded: Int, expected: Int)

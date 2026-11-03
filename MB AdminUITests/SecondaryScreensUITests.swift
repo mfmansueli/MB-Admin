@@ -278,7 +278,17 @@ final class SecondaryScreensUITests: XCTestCase {
         confirm.tap()
         app.buttons["filtrar resultados"].tap()
         element(in: app.buttons, containing: "mesmo produto (").tap()
-        XCTAssertTrue(element(in: app.staticTexts, containing: "você confirmou que é o mesmo produto").waitForExistence(timeout: 5))
+        // A lista só monta as linhas perto da tela — rola até a do par confirmado existir.
+        XCTAssertTrue(element(in: app.staticTexts, containing: "mesmo produto ·").waitForExistence(timeout: 5))
+        let confirmed = element(in: app.staticTexts, containing: "você confirmou que é o mesmo produto")
+        for _ in 0..<12 where !confirmed.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(confirmed.waitForExistence(timeout: 5))
+        // Volta pro topo, onde fica o botão de filtro.
+        for _ in 0..<12 where !app.buttons["filtrar resultados"].isHittable {
+            app.swipeDown()
+        }
 
         // O anel em três versões com a mesma foto: a descrição diz aro e banho, e cada versão mostra
         // onde está — o aro 18 só em antonia, o aro 20 só na loja B.
@@ -307,6 +317,40 @@ final class SecondaryScreensUITests: XCTestCase {
 
         app.buttons["nova comparação"].tap()
         XCTAssertTrue(start.waitForExistence(timeout: 5))
+    }
+
+    /// Fechar a tela não perde a comparação: abrir de novo mostra o mesmo resultado na hora, sem
+    /// buscar nada; "nova comparação" volta pra escolha, com "ver o último resultado" até começar outra.
+    @MainActor
+    func testCompararGuardaOResultadoAoFechar() {
+        let app = launchApp()
+        XCTAssertTrue(app.staticTexts["antonia"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["loja B"].waitForExistence(timeout: 10))
+
+        element(in: app.buttons, containing: "comparar").tap()
+        let start = app.buttons["startComparison"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "mesmo produto ·").waitForExistence(timeout: 90))
+
+        // O mesmo produto cadastrado duas vezes em antonia.
+        app.buttons["filtrar resultados"].tap()
+        element(in: app.buttons, containing: "repetidos na mesma loja (").tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "2 anúncios iguais em antonia").waitForExistence(timeout: 5))
+        attachScreenshot("comparar repetidos na loja", of: app)
+
+        app.buttons["fechar"].tap()
+        XCTAssertFalse(start.waitForExistence(timeout: 2))
+        element(in: app.buttons, containing: "comparar").tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "mesmo produto ·").waitForExistence(timeout: 5))
+        XCTAssertFalse(start.exists)
+        attachScreenshot("comparar reaberta", of: app)
+
+        app.buttons["nova comparação"].tap()
+        let showLast = app.buttons["showLastComparison"]
+        XCTAssertTrue(showLast.waitForExistence(timeout: 5))
+        showLast.tap()
+        XCTAssertTrue(element(in: app.staticTexts, containing: "mesmo produto ·").waitForExistence(timeout: 5))
     }
 
     @MainActor

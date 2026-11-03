@@ -5,12 +5,13 @@ import SwiftUI
 /// `AccountComparisonLoader` conduz, com progresso, "parar" e "continuar". O resultado em si (busca,
 /// filtro, seleção, revisão manual) vive em `ComparisonResultView` — só criado depois que uma
 /// comparação termina, e aí ocupa a tela toda; "nova comparação" volta pra escolha das contas.
+///
+/// O loader é o do app (`AccountsStore.comparisonLoader`), não desta tela: fechar e abrir de novo
+/// mostra o mesmo resultado (ou a comparação ainda rodando), e depois de reabrir o app a última
+/// comparação volta do disco — até você começar outra.
 struct AccountComparisonView: View {
     let accounts: [AccountSession]
 
-    @State private var accountAID: EnjoeiAccountID?
-    @State private var accountBID: EnjoeiAccountID?
-    @State private var loader = AccountComparisonLoader()
     @State private var isShowingQueue = false
     /// Busca o anúncio inteiro (descrição, tamanho, marca) de todo par, não só dos que ficaram em
     /// dúvida ou dividem a foto com outras versões — mais lento na primeira vez; o template fica
@@ -20,6 +21,7 @@ struct AccountComparisonView: View {
     @Environment(AccountsStore.self) private var accountsStore
 
     private var poster: CrossAccountPoster { accountsStore.poster }
+    private var loader: AccountComparisonLoader { accountsStore.comparisonLoader }
 
     var body: some View {
         NavigationStack {
@@ -77,7 +79,10 @@ struct AccountComparisonView: View {
                 }
             }
         }
-        .onAppear(perform: preselectAccounts)
+        .onAppear {
+            preselectAccounts()
+            showLastComparison()
+        }
         .macCatalystSizedSheet(isPresented: $isShowingQueue) {
             PostQueueView(postQueue: accountsStore.postQueue, poster: poster)
         }
@@ -94,6 +99,8 @@ struct AccountComparisonView: View {
                 postQueue: accountsStore.postQueue,
                 onDecide: { verdict, match in Task { await loader.decide(verdict, for: match) } },
                 onUndo: { match in Task { await loader.undoDecision(for: match) } },
+                onDecideDuplicate: { verdict, group in Task { await loader.decideDuplicate(verdict, for: group) } },
+                onUndoDuplicate: { group in Task { await loader.undoDuplicateDecision(for: group) } },
                 onRetry: { loader.retry() }
             )
             // `result.id` é novo a cada comparação — sem isso, SwiftUI trata essa view como a
@@ -114,7 +121,7 @@ struct AccountComparisonView: View {
         VStack(spacing: 16) {
             VStack(spacing: 12) {
                 HStack(alignment: .top, spacing: 12) {
-                    accountPicker("conta A", selection: $accountAID, excluding: accountBID)
+                    accountPicker("conta A", selection: accountSelection(\.accountAID), excluding: loader.accountBID)
                         .frame(maxWidth: .infinity)
                     VStack(spacing: 4) {
                         Image(systemName: "arrow.left.arrow.right")
@@ -123,7 +130,7 @@ struct AccountComparisonView: View {
                         cooldownStatus
                     }
                     .padding(.top, 34)
-                    accountPicker("conta B", selection: $accountBID, excluding: accountAID)
+                    accountPicker("conta B", selection: accountSelection(\.accountBID), excluding: loader.accountAID)
                         .frame(maxWidth: .infinity)
                 }
 
@@ -158,6 +165,14 @@ struct AccountComparisonView: View {
                 .disabled(accountA == nil || accountB == nil || loader.isRunning)
                 // Distingue do "comparar" da lista de contas, por baixo da folha (testes de UI).
                 .accessibilityIdentifier("startComparison")
+
+                // Depois de "nova comparação", o resultado anterior continua valendo até outra
+                // comparação começar.
+                if loader.phase == .idle, loader.hasLastResult {
+                    Button("ver o último resultado", action: showLastComparison)
+                        .font(.subheadline.weight(.semibold))
+                        .accessibilityIdentifier("showLastComparison")
+                }
             }
             .padding(16)
             .background(
@@ -200,6 +215,16 @@ struct AccountComparisonView: View {
                 )
             )
             .frame(maxHeight: .infinity)
+        case .restoring:
+            VStack(spacing: 8) {
+                Spacer()
+                ProgressView()
+                Text("abrindo a última comparação…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
         case .loadingProducts(let loaded, let total):
             progress(total > 0 ? "carregando produtos… \(loaded) de \(total)" : "carregando produtos…", done: loaded, total: total)
         case .analyzingPhotos(let done, let total):
@@ -310,17 +335,33 @@ struct AccountComparisonView: View {
     }
 
     private var accountA: AccountSession? {
-        accounts.first { $0.id == accountAID }
+        accounts.first { $0.id == loader.accountAID }
     }
 
     private var accountB: AccountSession? {
-        accounts.first { $0.id == accountBID }
+        accounts.first { $0.id == loader.accountBID }
     }
 
-    /// Já pré-seleciona as duas primeiras contas, pra quem só tem duas logadas ir direto no botão.
+    private func accountSelection(_ keyPath: ReferenceWritableKeyPath<AccountComparisonLoader, EnjoeiAccountID?>) -> Binding<EnjoeiAccountID?> {
+        Binding(get: { loader[keyPath: keyPath] }, set: { loader[keyPath: keyPath] = $0 })
+    }
+
+    /// Já pré-seleciona as duas primeiras contas, pra quem só tem duas logadas ir direto no botão — e
+    /// troca uma conta escolhida que não está mais logada.
     private func preselectAccounts() {
         guard accounts.count >= 2 else { return }
-        if accountAID == nil { accountAID = accounts[0].id }
-        if accountBID == nil { accountBID = accounts[1].id }
+        let ids = Set(accounts.map(\.id))
+        if let id = loader.accountAID, !ids.contains(id) { loader.accountAID = nil }
+        if let id = loader.accountBID, !ids.contains(id) { loader.accountBID = nil }
+        if loader.accountAID == nil { loader.accountAID = accounts.first { $0.id != loader.accountBID }?.id }
+        if loader.accountBID == nil { loader.accountBID = accounts.first { $0.id != loader.accountAID }?.id }
+    }
+
+    private func showLastComparison() {
+        loader.showLastComparison(
+            accounts: accounts,
+            services: { accountsStore.comparisonServices },
+            matchMemory: accountsStore.comparisonMatches
+        )
     }
 }

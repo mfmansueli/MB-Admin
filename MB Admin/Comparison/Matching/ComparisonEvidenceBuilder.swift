@@ -16,6 +16,8 @@ import Foundation
 ///    mesma fotografia) — versões do mesmo produto, pra montar as famílias (`ProductFamilyBuilder`)
 ///    mesmo quando a outra loja não tem nenhuma delas. Só a capa, de propósito: a tabela de medidas
 ///    ou a foto da embalagem repetida em todo anúncio nunca é a capa.
+/// 6. **Fotos iguais dentro de cada loja** (todas, não só a capa — `StorePairEvidenceBuilder`): de
+///    onde saem os anúncios repetidos na própria loja (`StoreDuplicateFinder`).
 nonisolated enum ComparisonEvidenceBuilder {
     private typealias Limits = PhotoMatchingParameters
 
@@ -32,6 +34,9 @@ nonisolated enum ComparisonEvidenceBuilder {
         /// Anúncios de cada loja com a mesma capa (índices, grupos de 2 ou mais).
         var coverGroupsA: [[Int]] = []
         var coverGroupsB: [[Int]] = []
+        /// Pares de anúncios da mesma loja ligados por foto (`indexA < indexB`, os dois da loja).
+        var storePairsA: [ListingPairEvidence] = []
+        var storePairsB: [ListingPairEvidence] = []
     }
 
     /// Uma foto de um anúncio, achatada pra varrer rápido.
@@ -82,6 +87,8 @@ nonisolated enum ComparisonEvidenceBuilder {
         }
         output.coverGroupsA = coverGroups(listingsA)
         output.coverGroupsB = coverGroups(listingsB)
+        output.storePairsA = StorePairEvidenceBuilder.build(listingsA)
+        output.storePairsB = StorePairEvidenceBuilder.build(listingsB)
         return output
     }
 

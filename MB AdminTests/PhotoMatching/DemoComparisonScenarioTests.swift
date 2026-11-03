@@ -126,6 +126,18 @@ struct DemoComparisonScenarioTests {
         #expect(family?.versions.map(\.presence) == [.both, .both, .onlyInA, .onlyInB])
     }
 
+    @Test("o produto cadastrado duas vezes em antonia: repetido na loja, sem virar família de versões")
+    func repetidoNaLoja() {
+        let group = Self.result.duplicatesA.first
+        #expect(Self.result.duplicatesA.count == 1)
+        #expect(group?.products.map(\.id) == DemoPhotoCatalog.relistedPositions.flatMap { [idA($0.value), idA($0.key)] })
+        #expect(group?.status == .repeated)
+        #expect(Self.result.duplicatesB.isEmpty)
+        #expect(!Self.result.families.contains { family in family.versions.contains { $0.productA?.id == idA(45) } })
+        // As versões do anel (mesma foto, aro/banho só na descrição) não são repetidos.
+        #expect(!Self.result.duplicatesA.contains { $0.products.contains { $0.id == idA(22) } })
+    }
+
     @Test("título parecido com um anúncio da loja B cujas fotos não carregaram: não verificado, não ausente")
     func bloqueadoPorQuemNaoCarregou() {
         // 27 = "tornozeleira bolinhas prata 925 linha infantil"; o 17 da loja B ("… banho ouro") não carregou.

@@ -2,7 +2,7 @@ import Foundation
 
 /// Por que uma foto não virou assinatura — sempre tratado como "não deu pra verificar", nunca como
 /// evidência de que o produto não existe na outra loja.
-nonisolated enum PhotoSignatureError: Error, Equatable, Sendable {
+nonisolated enum PhotoSignatureError: Error, Equatable, Sendable, Codable {
     /// Os bytes não são uma imagem que o ImageIO consiga abrir.
     case undecodable
     /// Decodificou, mas é pequena demais pra identificar uma fotografia.

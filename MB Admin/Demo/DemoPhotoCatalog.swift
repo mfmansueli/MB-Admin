@@ -18,7 +18,9 @@ import Foundation
 /// - posições 22, 23 e 24: o mesmo anel (mesma foto, mesmo título, mesmo preço) em três versões que
 ///   só a descrição diz (`DemoCatalog.description`): antonia tem aro 16 ródio, aro 18 ródio e aro 16
 ///   ouro; as outras lojas, aro 16 ródio, **aro 20** ródio e aro 16 ouro → dois pares pela versão, e o
-///   aro 18 (antonia) e o aro 20 (outras) como versões que faltam.
+///   aro 18 (antonia) e o aro 20 (outras) como versões que faltam;
+/// - posição 45 de antonia: o produto da posição 35 cadastrado de novo (mesmas fotos, título, preço e
+///   descrição, outro anúncio) → repetido dentro da loja.
 nonisolated enum DemoPhotoCatalog {
     typealias Spec = DemoPhotoRenderer.Spec
 
@@ -31,6 +33,14 @@ nonisolated enum DemoPhotoCatalog {
     static let sizeConflictPosition = 3
     /// As três versões do mesmo anel — a mesma foto da primeira posição.
     static let variantFamilyPositions = 22...24
+    /// Só em antonia: posição do anúncio repetido → posição do produto original.
+    static let relistedPositions: [Int: Int] = [45: 35]
+
+    /// De qual produto do catálogo é o anúncio — o mesmo da posição, menos nos repetidos de antonia.
+    static func catalogPosition(sellerID: Int, position: Int) -> Int {
+        guard sellerID == antoniaSellerID, let original = relistedPositions[position] else { return position }
+        return original
+    }
 
     private enum Kind: String {
         case white, ambient, detail
@@ -67,7 +77,7 @@ nonisolated enum DemoPhotoCatalog {
 
     private static func spec(kind: Kind, sellerID: Int, position: Int) -> Spec {
         let isAntonia = sellerID == antoniaSellerID
-        var productPosition = position
+        var productPosition = catalogPosition(sellerID: sellerID, position: position)
         if !isAntonia, position == duplicatePosition { productPosition = duplicatedPosition }
         if variantFamilyPositions.contains(position) { productPosition = variantFamilyPositions.lowerBound }
         var spec = productSpec(position: productPosition)

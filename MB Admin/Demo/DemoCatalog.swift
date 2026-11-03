@@ -74,13 +74,15 @@ nonisolated enum DemoCatalog {
 
     static func products(for profile: Profile) -> [EnjoeiProduct] {
         (0..<profile.productCount).map { position in
-            let isVariant = DemoPhotoCatalog.variantFamilyPositions.contains(position)
-            let base = isVariant ? variantFamilyPrice : Double([99, 149, 273, 299, 459, 799][position % 6])
+            // Um anúncio repetido tem título e preço do original (`DemoPhotoCatalog.relistedPositions`).
+            let source = DemoPhotoCatalog.catalogPosition(sellerID: profile.user.id, position: position)
+            let isVariant = DemoPhotoCatalog.variantFamilyPositions.contains(source)
+            let base = isVariant ? variantFamilyPrice : Double([99, 149, 273, 299, 459, 799][source % 6])
             // Quem pede desconto fica sem desconto da loja, pra o preço sugerido sair abaixo do atual.
-            let hasStoreDiscount = position % 4 == 0 && discountPositions[position] == nil && !isVariant
+            let hasStoreDiscount = source % 4 == 0 && discountPositions[source] == nil && !isVariant
             return EnjoeiProduct(
                 id: productID(profile: profile, position: position),
-                title: title(position: position),
+                title: title(position: source),
                 path: "produto-demo-\(position)",
                 photoPublicID: DemoPhotoCatalog.photoIDs(sellerID: profile.user.id, position: position).first,
                 currentPrice: base,

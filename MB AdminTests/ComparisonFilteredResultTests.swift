@@ -22,7 +22,16 @@ struct ComparisonFilteredResultTests {
                         label: "60 cm", productA: nil, productB: Fixtures.product(12, title: "gargantilha coração", cover: nil), presence: .onlyInB
                     )
                 ])
-            ]
+            ],
+            duplicatesA: [Fixtures.duplicates(Fixtures.sellerA, [
+                Fixtures.product(13, title: "brinco gota", cover: nil), Fixtures.product(14, title: "brinco gota", cover: nil)
+            ])],
+            duplicatesB: [Fixtures.duplicates(Fixtures.sellerB, [
+                Fixtures.product(15, title: "choker veludo", cover: nil), Fixtures.product(16, title: "choker veludo", cover: nil)
+            ], status: .possible)],
+            dismissedDuplicates: [Fixtures.duplicates(Fixtures.sellerA, [
+                Fixtures.product(17, title: "argola lisa", cover: nil), Fixtures.product(18, title: "argola lisa", cover: nil)
+            ], status: .dismissed)]
         )
     }
 
@@ -38,6 +47,9 @@ struct ComparisonFilteredResultTests {
         #expect(filtered.unverifiedA.map(\.product.id) == [10])
         #expect(filtered.unverifiedB.map(\.product.id) == [11])
         #expect(filtered.families.map(\.id) == ["familia-A3"])
+        #expect(filtered.duplicatesA.map(\.title) == ["brinco gota"])
+        #expect(filtered.duplicatesB.map(\.title) == ["choker veludo"])
+        #expect(filtered.dismissedDuplicates.map(\.title) == ["argola lisa"])
     }
 
     @Test("o filtro deixa só a seção escolhida", arguments: ComparisonResultFilter.allCases.filter { $0 != .all })
@@ -46,7 +58,11 @@ struct ComparisonFilteredResultTests {
         #expect(filtered.matches.isEmpty == (filter != .matches))
         #expect(filtered.reviews.isEmpty == (filter != .review))
         #expect(filtered.families.isEmpty == (filter != .variants))
+        #expect(filtered.duplicatesA.isEmpty == (filter != .duplicates))
+        #expect(filtered.duplicatesB.isEmpty == (filter != .duplicates))
         #expect(filtered.rejected.isEmpty == (filter != .rejected))
+        // Os não repetidos ficam junto dos pares marcados como diferentes.
+        #expect(filtered.dismissedDuplicates.isEmpty == (filter != .rejected))
         #expect(filtered.missingInB.isEmpty == (filter != .missingInB))
         #expect(filtered.missingInA.isEmpty == (filter != .missingInA))
         #expect(filtered.unverifiedA.isEmpty == (filter != .unverified))
@@ -67,6 +83,20 @@ struct ComparisonFilteredResultTests {
     func buscaNasFamilias() {
         #expect(ComparisonFilteredResult(result: result, filter: .variants, searchText: "gargantilha").families.count == 1)
         #expect(ComparisonFilteredResult(result: result, filter: .variants, searchText: "pulseira").families.isEmpty)
+    }
+
+    @Test("a busca acha os repetidos de cada loja pelo título de qualquer anúncio do grupo")
+    func buscaNosRepetidos() {
+        let filtered = ComparisonFilteredResult(result: result, filter: .all, searchText: "choker")
+        #expect(filtered.duplicatesA.isEmpty)
+        #expect(filtered.duplicatesB.map(\.title) == ["choker veludo"])
+        #expect(ComparisonFilteredResult(result: result, filter: .rejected, searchText: "argola").dismissedDuplicates.count == 1)
+    }
+
+    @Test("o filtro de repetidos conta os grupos das duas lojas; \"todos\" não soma os grupos de novo")
+    func rotuloDosRepetidos() {
+        #expect(ComparisonResultFilter.duplicates.label(result: result, accountAName: "antonia", accountBName: "loja B") == "repetidos na mesma loja (2)")
+        #expect(ComparisonResultFilter.all.label(result: result, accountAName: "antonia", accountBName: "loja B") == "todos (8)")
     }
 
     @Test("a busca também filtra os não verificados")

@@ -34,6 +34,10 @@ final class AccountsStore {
     }
     @ObservationIgnored private var storedComparisonServices: ComparisonServices?
     @ObservationIgnored private let comparisonServicesFactory: () -> ComparisonServices
+    /// A comparação entre lojas mora aqui, não na tela: fechar "comparar produtos" não perde o
+    /// resultado (nem para uma comparação em andamento), e a última terminada fica salva em disco até
+    /// outra começar (ver `AccountComparisonLoader`).
+    let comparisonLoader: AccountComparisonLoader
     /// Compartilhada entre todas as contas (ver `MegaphoneQueue`) — sem limite de propósito: agora
     /// que a listagem de produtos não passa mais por `List`/`NSTableView` (ver
     /// `AccountPublishedTabView.productList`), o gargalo que motivava travar tudo numa conta de cada
@@ -75,10 +79,12 @@ final class AccountsStore {
         postQueueItemsPersistence: PostQueueItemsPersisting? = nil,
         memoryPressureObserver: (any MemoryPressureObserving)? = nil,
         memoryWarningCapsMegaphoneQueue: Bool? = nil,
-        comparisonServices: (() -> ComparisonServices)? = nil
+        comparisonServices: (() -> ComparisonServices)? = nil,
+        comparisonSnapshots: ComparisonSnapshotStoring? = nil
     ) {
         self.dependenciesFactory = dependenciesFactory ?? EnjoeiWebSession.makeDependencies
         comparisonServicesFactory = comparisonServices ?? { .live() }
+        comparisonLoader = AccountComparisonLoader(snapshots: comparisonSnapshots ?? FileComparisonSnapshotStore())
         self.persistence = persistence ?? UserDefaultsAccountsPersistence()
         self.memoryPressureObserver = memoryPressureObserver ?? SystemMemoryPressureObserver()
         // Construído sem capturar `self` (o compilador recusa isso antes do `init` terminar) — o
@@ -207,6 +213,7 @@ final class AccountsStore {
         await account.clearSession()
         accounts.removeAll { $0.id == accountID }
         comparisonMatches.forget(accountID: accountID)
+        await comparisonLoader.forget(accountID: accountID)
         clearLocalData(accountID: accountID)
         persist()
     }
@@ -350,6 +357,9 @@ final class AccountsStore {
         for account in accounts where isEligibleForMemoryRelease(account) {
             Task { await account.client.releaseMemoryIfIdle() }
         }
+        // A evidência da última comparação (todas as assinaturas das duas lojas) é refeita do disco
+        // na próxima revisão manual — o resultado continua na tela.
+        comparisonLoader.releaseMemory()
     }
 
     private func persist() {

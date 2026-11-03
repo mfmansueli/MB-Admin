@@ -25,6 +25,10 @@ import Foundation
 /// Revisões manuais valem acima de tudo enquanto os anúncios não mudarem (`ListingFingerprint`):
 /// "mesmo produto" vira par confirmado (mesmo com atributo em conflito); "produtos diferentes"
 /// remove a ligação.
+///
+/// Por cima disso, cada loja é comparada com ela mesma (`StoreDuplicateFinder`): o mesmo produto
+/// cadastrado mais de uma vez na mesma loja. Repetidos não são versões um do outro, então não formam
+/// família entre eles. As revisões manuais entre dois anúncios da mesma loja valem só pra isso.
 nonisolated enum ComparisonResolver {
     static func resolve(
         _ sideA: ComparisonSide,
@@ -35,7 +39,8 @@ nonisolated enum ComparisonResolver {
         revision: Int = 0
     ) -> AccountComparisonResult {
         var run = Run(sideA: sideA, sideB: sideB, evidence: evidence)
-        run.applyDecisions(decisions)
+        run.applyDecisions(decisions.filter { $0.first.sellerID != $0.second.sellerID })
+        run.findDuplicates(decisions.filter { $0.first.sellerID == $0.second.sellerID })
         run.classifyEdges()
         return run.result(runID: runID, revision: revision)
     }
@@ -81,6 +86,8 @@ nonisolated enum ComparisonResolver {
         private let coverageA: [[UnverifiedReason]]
         private let coverageB: [[UnverifiedReason]]
         private var staleDecisionCount = 0
+        private var duplicatesA = StoreDuplicateFinder.Output()
+        private var duplicatesB = StoreDuplicateFinder.Output()
 
         init(sideA: ComparisonSide, sideB: ComparisonSide, evidence: ComparisonEvidenceBuilder.Output) {
             self.sideA = sideA
@@ -165,6 +172,23 @@ nonisolated enum ComparisonResolver {
                     edgeByPair[pair] = edges.count - 1
                 }
             }
+        }
+
+        /// Os anúncios repetidos dentro de cada loja, com as revisões manuais entre anúncios da própria
+        /// loja.
+        mutating func findDuplicates(_ decisions: [ComparisonDecision]) {
+            duplicatesA = StoreDuplicateFinder.find(.init(
+                side: sideA,
+                pairs: evidence.storePairsA,
+                photosComplete: coverageA.map(\.isEmpty),
+                decisions: decisions.filter { $0.first.sellerID == sideA.sellerID }
+            ))
+            duplicatesB = StoreDuplicateFinder.find(.init(
+                side: sideB,
+                pairs: evidence.storePairsB,
+                photosComplete: coverageB.map(\.isEmpty),
+                decisions: decisions.filter { $0.first.sellerID == sideB.sellerID }
+            ))
         }
 
         private static func pairIndex(
@@ -364,6 +388,10 @@ nonisolated enum ComparisonResolver {
                 families: families.families,
                 otherVersions: otherVersions(missingA: absenceA.missing, missingB: absenceB.missing),
                 keysWantingDetails: families.memberKeys.intersection(matchedKeys).intersection(incompleteKeys)
+                    .union(duplicatesA.keysWantingDetails).union(duplicatesB.keysWantingDetails),
+                duplicatesA: duplicatesA.groups,
+                duplicatesB: duplicatesB.groups,
+                dismissedDuplicates: duplicatesA.dismissed + duplicatesB.dismissed
             )
         }
 
@@ -447,6 +475,8 @@ nonisolated enum ComparisonResolver {
                 photoLinks: edges.filter { $0.isPhotoLink && sharesBaseTitle($0) }.map(link),
                 coverGroupsA: evidence.coverGroupsA,
                 coverGroupsB: evidence.coverGroupsB,
+                duplicatePairsA: duplicatesA.linkedPairs,
+                duplicatePairsB: duplicatesB.linkedPairs,
                 matches: edges.filter(\.isMatch).map(link),
                 reviewA: Set(edges.filter(\.isReview).map(\.indexA)),
                 reviewB: Set(edges.filter(\.isReview).map(\.indexB)),

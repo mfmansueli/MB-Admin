@@ -72,3 +72,20 @@ anúncio duplicado).
 
 Se mudar algum parâmetro de **normalização** (a parte que entra na assinatura), suba
 `PhotoMatchingParameters.signatureVersion`, para o cache do app recalcular as assinaturas.
+
+## Repetidos na mesma loja
+
+A busca por anúncios repetidos (`StorePairEvidenceBuilder` + `StoreDuplicateFinder`) usa as mesmas
+assinaturas e o mesmo `PairAssessor`, mas com regras mais estreitas, porque peças da mesma linha
+numa loja de joias têm fotos parecidas e títulos que só mudam no fim:
+
+- só liga **a mesma fotografia** (ou o mesmo arquivo), nunca "foto parecida";
+- a foto tem que ser a **capa** de pelo menos um dos dois (ambiente, embalagem e mão se repetem
+  entre produtos diferentes);
+- foto genérica da loja (`genericPhotoMinimumListingsPerStore`, `familyMaximumListings`) não liga;
+- versão (aro, banho, cor, medida) nunca é repetido; preço bem diferente, outra cor numa outra
+  foto, marca ou categoria diferente, ou template não buscado deixam em "talvez repetidos".
+
+Essas regras foram conferidas só com as fotos sintéticas da demonstração e os testes
+(`StoreDuplicateFinderTests`); este harness ainda não tem uma divisão para casos de dentro da
+mesma loja.

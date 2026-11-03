@@ -7,7 +7,7 @@ import SwiftUI
 /// linha marcável pra entrar na fila de ações junto com outras. Compartilhar o link fica no menu de
 /// contexto. Revisões e não verificados nunca usam esta linha — não dá pra postar o que pode já
 /// estar lá.
-struct UnmatchedProductRowView: View {
+struct UnmatchedProductRowView: View, Equatable {
     let product: EnjoeiProduct
     let sourceAccount: AccountSession
     let destinationAccount: AccountSession
@@ -22,6 +22,18 @@ struct UnmatchedProductRowView: View {
 
     @State private var isConfirmingPost = false
     @State private var isShowingPostStatus = false
+
+    /// O que a linha mostra — contas, poster e fila são as mesmas instâncias do app, e o estado da
+    /// postagem a própria linha observa (`poster.statuses`). Os closures são recriados a cada render
+    /// da lista (ver `ComparisonResultView`).
+    static func == (lhs: UnmatchedProductRowView, rhs: UnmatchedProductRowView) -> Bool {
+        lhs.product == rhs.product
+            && lhs.sourceAccount === rhs.sourceAccount
+            && lhs.destinationAccount === rhs.destinationAccount
+            && lhs.otherVersionsNote == rhs.otherVersionsNote
+            && lhs.isSelecting == rhs.isSelecting
+            && lhs.isSelected == rhs.isSelected
+    }
 
     private var postTarget: PostTarget { PostTarget(productID: product.id, destinationAccountID: destinationAccount.id) }
     private var postStatus: MegaphoneStatus { poster.statuses[postTarget] ?? .pending }

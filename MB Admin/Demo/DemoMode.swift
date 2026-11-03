@@ -48,7 +48,8 @@ enum DemoMode {
             postQueueItemsPersistence: InMemoryPostQueueItemsPersistence(),
             // Fotos geradas na hora (`DemoPhotoURLProtocol`, pela mesma sessão das miniaturas) e
             // nada gravado em disco: cada abertura compara do zero.
-            comparisonServices: { .inMemory() }
+            comparisonServices: { .inMemory() },
+            comparisonSnapshots: InMemoryComparisonSnapshotStore()
         )
     }
 }

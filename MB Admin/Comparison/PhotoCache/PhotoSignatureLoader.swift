@@ -103,6 +103,17 @@ nonisolated final class PhotoSignatureLoader: Sendable {
         return batch
     }
 
+    /// Só o que já está no cache, na versão atual do algoritmo, vencido ou não — sem baixar nada.
+    /// Reabrir a última comparação usa isso: as assinaturas são as que ela mesma deixou salvas.
+    @concurrent
+    func cachedSignatures(for publicIDs: [String]) async -> [String: PhotoSignature] {
+        let unique = Array(Set(publicIDs.filter { !$0.isEmpty }))
+        guard !unique.isEmpty else { return [:] }
+        return await store.signatures(for: unique).compactMapValues { entry in
+            entry.signature.algorithmVersion == Limits.signatureVersion ? entry.signature : nil
+        }
+    }
+
     /// O que já está pronto no cache e o que precisa ser baixado (novo, de outra versão, ou vencido).
     private func plan(_ publicIDs: [String], stored: [String: StoredPhotoSignature]) -> (ready: [String: PhotoSignature], jobs: [Job]) {
         let currentDate = now()

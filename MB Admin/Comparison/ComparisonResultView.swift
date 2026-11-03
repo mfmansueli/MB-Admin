@@ -1,22 +1,29 @@
 import SwiftUI
 
 /// Resultado de uma comparação já carregada, em seções-cartão: mesmo produto, precisa revisar,
-/// produtos com variantes (versões que dividem a mesma foto e onde cada uma está), possivelmente
-/// ausentes em cada loja (com a nota de quando a outra loja tem outra versão), não deu pra verificar
-/// e marcados como diferentes — com o
+/// produtos com variantes (versões que dividem a mesma foto e onde cada uma está), repetidos dentro
+/// de cada loja, possivelmente ausentes em cada loja (com a nota de quando a outra loja tem outra
+/// versão), não deu pra verificar e marcados como diferentes — com o
 /// aviso de comparação incompleta no topo, o filtro na barra de cima, a busca (no iPhone, a lupa na
 /// barra de baixo) e a seleção múltipla **só** dos possivelmente ausentes pra mandar pra fila de
 /// ações. Quem chama passa `.id(result.id)`: cada comparação nova nasce com busca/filtro/seleção
 /// zerados, mas uma revisão manual (mesmo `id`, `revision` nova) só atualiza as seções.
+///
+/// Desempenho com milhares de produtos: cada linha é filha direta da `LazyVStack` (o cartão é
+/// desenhado linha a linha, `ComparisonCardRow`), então só as linhas perto da tela existem — com
+/// foto, sheet e menu. As linhas são `Equatable` pelo dado que mostram: um render da lista (marcar um
+/// item, trocar a seleção) não refaz as que não mudaram.
 struct ComparisonResultView: View {
     let result: AccountComparisonResult
     let accountA: AccountSession
     let accountB: AccountSession
     let poster: CrossAccountPoster
     let postQueue: PostQueue
-    var onDecide: (ComparisonDecision.Verdict, ProductMatch) -> Void = { _, _ in }
-    var onUndo: (ProductMatch) -> Void = { _ in }
-    var onRetry: () -> Void = {}
+    var onDecide: (ComparisonDecision.Verdict, ProductMatch) -> Void
+    var onUndo: (ProductMatch) -> Void
+    var onDecideDuplicate: (ComparisonDecision.Verdict, StoreDuplicateGroup) -> Void
+    var onUndoDuplicate: (StoreDuplicateGroup) -> Void
+    var onRetry: () -> Void
 
     @State private var resultFilter: ComparisonResultFilter = .all
     @State private var searchText = ""
@@ -24,10 +31,36 @@ struct ComparisonResultView: View {
     @State private var selectedProductIDs: Set<Int> = []
     /// Cache do filtro + busca (ver `recomputeFilteredItems`) — sem isso, o filtro rodava sobre os
     /// três resultados inteiros a cada leitura no `body`, várias vezes por render, numa comparação
-    /// com muitos produtos. Mesmo raciocínio de `AccountPublishedTabView.sections`.
-    @State private var filtered = ComparisonFilteredResult()
+    /// com muitos produtos. Mesmo raciocínio de `AccountPublishedTabView.sections`. Já nasce montado
+    /// (sem filtro nem busca), pra o primeiro quadro não ser a tela de "nada encontrado".
+    @State private var filtered: ComparisonFilteredResult
     @State private var searchDebounceTask: Task<Void, Never>?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
+    init(
+        result: AccountComparisonResult,
+        accountA: AccountSession,
+        accountB: AccountSession,
+        poster: CrossAccountPoster,
+        postQueue: PostQueue,
+        onDecide: @escaping (ComparisonDecision.Verdict, ProductMatch) -> Void = { _, _ in },
+        onUndo: @escaping (ProductMatch) -> Void = { _ in },
+        onDecideDuplicate: @escaping (ComparisonDecision.Verdict, StoreDuplicateGroup) -> Void = { _, _ in },
+        onUndoDuplicate: @escaping (StoreDuplicateGroup) -> Void = { _ in },
+        onRetry: @escaping () -> Void = {}
+    ) {
+        self.result = result
+        self.accountA = accountA
+        self.accountB = accountB
+        self.poster = poster
+        self.postQueue = postQueue
+        self.onDecide = onDecide
+        self.onUndo = onUndo
+        self.onDecideDuplicate = onDecideDuplicate
+        self.onUndoDuplicate = onUndoDuplicate
+        self.onRetry = onRetry
+        _filtered = State(initialValue: ComparisonFilteredResult(result: result, filter: .all, searchText: ""))
+    }
 
     private var isCompact: Bool { horizontalSizeClass != .regular }
 
@@ -52,7 +85,6 @@ struct ComparisonResultView: View {
                 }
             }
             .toolbar(isSelecting ? .hidden : .automatic, for: .bottomBar)
-            .task { recomputeFilteredItems() }
             // Uma revisão manual recalcula o resultado com o mesmo `id` — só refiltra.
             .onChange(of: result.revision) { _, _ in recomputeFilteredItems() }
             .onChange(of: resultFilter) { _, _ in
@@ -116,6 +148,8 @@ struct ComparisonResultView: View {
                     pairSection("mesmo produto", filtered.matches)
                     pairSection("precisa revisar", filtered.reviews)
                     familySection
+                    duplicateSection(filtered.duplicatesA, storeName: accountA.user.name)
+                    duplicateSection(filtered.duplicatesB, storeName: accountB.user.name)
                     if !filtered.missingInB.isEmpty {
                         // Só existe em A — postar cria ele em B.
                         missingSection(filtered.missingInB, source: accountA, destination: accountB)
@@ -125,7 +159,7 @@ struct ComparisonResultView: View {
                         missingSection(filtered.missingInA, source: accountB, destination: accountA)
                     }
                     unverifiedSection
-                    pairSection("marcados como diferentes", filtered.rejected)
+                    rejectedSection
                 }
                 .frame(maxWidth: isCompact ? .infinity : 760)
                 .frame(maxWidth: .infinity)
@@ -142,51 +176,114 @@ struct ComparisonResultView: View {
     private func pairSection(_ title: String, _ matches: [ProductMatch]) -> some View {
         if !matches.isEmpty {
             sectionHeader(title, count: matches.count, selectableIDs: nil)
-            card {
-                ForEach(matches) { match in
-                    ProductMatchRowView(
-                        match: match,
-                        accountAName: accountA.user.name,
-                        accountBName: accountB.user.name,
-                        onDecide: { verdict in onDecide(verdict, match) },
-                        onUndo: { onUndo(match) }
-                    )
-                    if match.id != matches.last?.id {
-                        Divider().padding(.leading, 16 + 108 + 12)
-                    }
-                }
+            pairRows(matches, isFirstSegment: true, isLastSegment: true)
+        }
+    }
+
+    /// As linhas de pares, como um pedaço do cartão: `isFirstSegment`/`isLastSegment` dizem se a
+    /// primeira/última daqui também é a primeira/última do cartão (a seção de marcados como
+    /// diferentes junta pares e grupos de repetidos no mesmo cartão).
+    private func pairRows(_ matches: [ProductMatch], isFirstSegment: Bool, isLastSegment: Bool) -> some View {
+        let firstID = matches.first?.id
+        let lastID = matches.last?.id
+        return ForEach(matches) { match in
+            ProductMatchRowView(
+                match: match,
+                accountAName: accountA.user.name,
+                accountBName: accountB.user.name,
+                onDecide: { verdict in onDecide(verdict, match) },
+                onUndo: { onUndo(match) }
+            )
+            .equatable()
+            .comparisonCardRow(isFirst: isFirstSegment && match.id == firstID, isLast: isLastSegment && match.id == lastID)
+            if match.id != lastID || !isLastSegment {
+                rowDivider(inset: 108 + 12)
             }
         }
     }
 
     @ViewBuilder
     private var familySection: some View {
-        if !filtered.families.isEmpty {
-            sectionHeader("produtos com variantes", count: filtered.families.count, selectableIDs: nil)
-            card {
-                ForEach(filtered.families) { family in
-                    ProductFamilyCardView(family: family, accountAName: accountA.user.name, accountBName: accountB.user.name)
-                    if family.id != filtered.families.last?.id {
-                        Divider().padding(.leading, 16 + 52 + 12)
-                    }
+        let families = filtered.families
+        if !families.isEmpty {
+            sectionHeader("produtos com variantes", count: families.count, selectableIDs: nil)
+            let firstID = families.first?.id
+            let lastID = families.last?.id
+            ForEach(families) { family in
+                ProductFamilyCardView(family: family, accountAName: accountA.user.name, accountBName: accountB.user.name)
+                    .equatable()
+                    .comparisonCardRow(isFirst: family.id == firstID, isLast: family.id == lastID)
+                if family.id != lastID {
+                    rowDivider(inset: 52 + 12)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private var unverifiedSection: some View {
-        let listings = filtered.unverifiedA.map { ($0, accountA.user.name) } + filtered.unverifiedB.map { ($0, accountB.user.name) }
-        if !listings.isEmpty {
-            sectionHeader("não deu pra verificar", count: listings.count, selectableIDs: nil)
-            card {
-                ForEach(listings, id: \.0.id) { listing, storeName in
-                    UnverifiedProductRowView(listing: listing, storeName: storeName)
-                    if listing.id != listings.last?.0.id {
-                        Divider().padding(.leading, 16 + 64 + 12)
-                    }
-                }
+    private func duplicateSection(_ groups: [StoreDuplicateGroup], storeName: String) -> some View {
+        if !groups.isEmpty {
+            sectionHeader("repetidos em \(storeName)", count: groups.count, selectableIDs: nil)
+            duplicateRows(groups, isFirstSegment: true, isLastSegment: true)
+        }
+    }
+
+    private func duplicateRows(_ groups: [StoreDuplicateGroup], isFirstSegment: Bool, isLastSegment: Bool) -> some View {
+        let firstID = groups.first?.id
+        let lastID = groups.last?.id
+        return ForEach(groups) { group in
+            StoreDuplicateRowView(
+                group: group,
+                onDecide: { verdict in onDecideDuplicate(verdict, group) },
+                onUndo: { onUndoDuplicate(group) }
+            )
+            .equatable()
+            .comparisonCardRow(isFirst: isFirstSegment && group.id == firstID, isLast: isLastSegment && group.id == lastID)
+            if group.id != lastID || !isLastSegment {
+                rowDivider(inset: 52 + 12)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var unverifiedSection: some View {
+        let listingsA = filtered.unverifiedA
+        let listingsB = filtered.unverifiedB
+        if !listingsA.isEmpty || !listingsB.isEmpty {
+            sectionHeader("não deu pra verificar", count: listingsA.count + listingsB.count, selectableIDs: nil)
+            unverifiedRows(listingsA, storeName: accountA.user.name, isFirstSegment: true, isLastSegment: listingsB.isEmpty)
+            unverifiedRows(listingsB, storeName: accountB.user.name, isFirstSegment: listingsA.isEmpty, isLastSegment: true)
+        }
+    }
+
+    private func unverifiedRows(
+        _ listings: [UnverifiedListing],
+        storeName: String,
+        isFirstSegment: Bool,
+        isLastSegment: Bool
+    ) -> some View {
+        let firstID = listings.first?.id
+        let lastID = listings.last?.id
+        return ForEach(listings) { listing in
+            UnverifiedProductRowView(listing: listing, storeName: storeName)
+                .equatable()
+                .comparisonCardRow(isFirst: isFirstSegment && listing.id == firstID, isLast: isLastSegment && listing.id == lastID)
+            if listing.id != lastID || !isLastSegment {
+                rowDivider(inset: 64 + 12)
+            }
+        }
+    }
+
+    /// Pares marcados como produtos diferentes e grupos marcados como não repetidos — o que você
+    /// revisou como "não é", com o desfazer de cada um.
+    @ViewBuilder
+    private var rejectedSection: some View {
+        let pairs = filtered.rejected
+        let groups = filtered.dismissedDuplicates
+        if !pairs.isEmpty || !groups.isEmpty {
+            sectionHeader("marcados como diferentes", count: pairs.count + groups.count, selectableIDs: nil)
+            pairRows(pairs, isFirstSegment: true, isLastSegment: groups.isEmpty)
+            duplicateRows(groups, isFirstSegment: pairs.isEmpty, isLastSegment: true)
         }
     }
 
@@ -195,34 +292,43 @@ struct ComparisonResultView: View {
         source: AccountSession,
         destination: AccountSession
     ) -> some View {
-        Group {
+        let firstID = products.first?.id
+        let lastID = products.last?.id
+        return Group {
             sectionHeader(
                 "possivelmente ausentes em \(destination.user.name)",
                 count: products.count,
                 selectableIDs: products.map(\.id)
             )
-            card {
-                ForEach(products) { product in
-                    UnmatchedProductRowView(
-                        product: product,
-                        sourceAccount: source,
-                        destinationAccount: destination,
-                        poster: poster,
-                        postQueue: postQueue,
-                        otherVersionsNote: OtherVersion.summary(
-                            result.otherVersions[ListingKey(sellerID: source.user.id, productID: product.id)] ?? [],
-                            storeName: destination.user.name
-                        ),
-                        isSelecting: isSelecting,
-                        isSelected: selectedProductIDs.contains(product.id),
-                        onToggleSelection: { toggleSelection(productID: product.id) }
-                    )
-                    if product.id != products.last?.id {
-                        Divider().padding(.leading, 16 + 64 + 12 + (isSelecting ? 36 : 0))
-                    }
+            ForEach(products) { product in
+                UnmatchedProductRowView(
+                    product: product,
+                    sourceAccount: source,
+                    destinationAccount: destination,
+                    poster: poster,
+                    postQueue: postQueue,
+                    otherVersionsNote: OtherVersion.summary(
+                        result.otherVersions[ListingKey(sellerID: source.user.id, productID: product.id)] ?? [],
+                        storeName: destination.user.name
+                    ),
+                    isSelecting: isSelecting,
+                    isSelected: selectedProductIDs.contains(product.id),
+                    onToggleSelection: { toggleSelection(productID: product.id) }
+                )
+                .equatable()
+                .comparisonCardRow(isFirst: product.id == firstID, isLast: product.id == lastID)
+                if product.id != lastID {
+                    rowDivider(inset: 64 + 12 + (isSelecting ? 36 : 0))
                 }
             }
         }
+    }
+
+    /// Começa onde começa o texto da linha (margem + foto + espaçamento), dentro do cartão.
+    private func rowDivider(inset: CGFloat) -> some View {
+        Divider()
+            .padding(.leading, 16 + inset)
+            .padding(.horizontal, 16)
     }
 
     /// "mesmo produto · 90" — nas seções selecionáveis, com "todos"/"nenhum" daquela seção à
@@ -249,12 +355,6 @@ struct ComparisonResultView: View {
         .padding(.horizontal, 32)
         .padding(.top, 20)
         .padding(.bottom, 8)
-    }
-
-    private func card(@ViewBuilder content: () -> some View) -> some View {
-        VStack(spacing: 0, content: content)
-            .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-            .padding(.horizontal, 16)
     }
 
     // MARK: - Barras

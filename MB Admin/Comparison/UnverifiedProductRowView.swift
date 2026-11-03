@@ -3,7 +3,7 @@ import SwiftUI
 /// Uma linha de "não deu pra verificar": produto sem par que a comparação não pôde dar como ausente
 /// (foto que não carregou, lista incompleta, sem foto comparável…) — com o motivo. Sem botão de
 /// postar nem seleção: postar na outra loja presume que o produto não está lá.
-struct UnverifiedProductRowView: View {
+struct UnverifiedProductRowView: View, Equatable {
     let listing: UnverifiedListing
     let storeName: String
 

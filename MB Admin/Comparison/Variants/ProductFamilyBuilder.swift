@@ -5,7 +5,8 @@ import Foundation
 /// nas duas lojas, só numa, pra revisar ou não verificada. Só entra família que tem versões de
 /// verdade: 3 anúncios ou mais, 2 na mesma loja, ou um par em que os atributos discordam (aro 16 numa
 /// loja, aro 18 na outra). Um par 1:1 comum não é família. A mesma foto em anúncios de títulos que
-/// não têm nada a ver (`ListingAttributes.sharesBaseTitle`) não junta os dois.
+/// não têm nada a ver (`ListingAttributes.sharesBaseTitle`) não junta os dois, nem a mesma capa em
+/// anúncios repetidos da mesma loja (`StoreDuplicateFinder`) — repetido não é versão.
 nonisolated enum ProductFamilyBuilder {
     nonisolated struct Link: Hashable, Sendable {
         let indexA: Int
@@ -20,6 +21,9 @@ nonisolated enum ProductFamilyBuilder {
         let photoLinks: [Link]
         let coverGroupsA: [[Int]]
         let coverGroupsB: [[Int]]
+        /// Pares de anúncios repetidos (ou talvez repetidos) dentro de cada loja.
+        var duplicatePairsA: Set<ComparisonEvidenceBuilder.PairIndex> = []
+        var duplicatePairsB: Set<ComparisonEvidenceBuilder.PairIndex> = []
         /// Pares fortes ou confirmados.
         let matches: [Link]
         let reviewA: Set<Int>
@@ -44,10 +48,10 @@ nonisolated enum ProductFamilyBuilder {
             groups.union(link.indexA, countA + link.indexB)
         }
         for group in input.coverGroupsA {
-            unionRelated(group, of: input.listingsA, offset: 0, into: &groups)
+            unionRelated(group, of: input.listingsA, offset: 0, excluding: input.duplicatePairsA, into: &groups)
         }
         for group in input.coverGroupsB {
-            unionRelated(group, of: input.listingsB, offset: countA, into: &groups)
+            unionRelated(group, of: input.listingsB, offset: countA, excluding: input.duplicatePairsB, into: &groups)
         }
 
         let versionLinkedA = Set(input.versionLinks.map(\.indexA))
@@ -71,10 +75,19 @@ nonisolated enum ProductFamilyBuilder {
         return output
     }
 
-    /// Dentro de um grupo de capas iguais da mesma loja, junta só quem tem o título base parecido.
-    private static func unionRelated(_ group: [Int], of listings: [ComparableListing], offset: Int, into groups: inout DisjointSet) {
+    /// Dentro de um grupo de capas iguais da mesma loja, junta só quem tem o título base parecido e não
+    /// é repetido um do outro.
+    private static func unionRelated(
+        _ group: [Int],
+        of listings: [ComparableListing],
+        offset: Int,
+        excluding duplicates: Set<ComparisonEvidenceBuilder.PairIndex>,
+        into groups: inout DisjointSet
+    ) {
         for (position, first) in group.enumerated() {
             for second in group[(position + 1)...] where listings[first].attributes.sharesBaseTitle(with: listings[second].attributes) {
+                let pair = ComparisonEvidenceBuilder.PairIndex(indexA: min(first, second), indexB: max(first, second))
+                guard !duplicates.contains(pair) else { continue }
                 groups.union(offset + first, offset + second)
             }
         }

@@ -7,6 +7,9 @@ nonisolated struct ComparisonFilteredResult: Sendable {
     private(set) var matches: [ProductMatch] = []
     private(set) var reviews: [ProductMatch] = []
     private(set) var families: [ProductFamily] = []
+    /// Repetidos dentro da loja A / da loja B.
+    private(set) var duplicatesA: [StoreDuplicateGroup] = []
+    private(set) var duplicatesB: [StoreDuplicateGroup] = []
     /// Produtos de A sem indício em B.
     private(set) var missingInB: [EnjoeiProduct] = []
     /// Produtos de B sem indício em A.
@@ -14,6 +17,8 @@ nonisolated struct ComparisonFilteredResult: Sendable {
     private(set) var unverifiedA: [UnverifiedListing] = []
     private(set) var unverifiedB: [UnverifiedListing] = []
     private(set) var rejected: [ProductMatch] = []
+    /// Grupos marcados como não repetidos — junto dos pares marcados como diferentes.
+    private(set) var dismissedDuplicates: [StoreDuplicateGroup] = []
 
     init() {}
 
@@ -30,18 +35,26 @@ nonisolated struct ComparisonFilteredResult: Sendable {
         if filter.includes(.matches) { matches = result.matches.filter(pairMatches) }
         if filter.includes(.review) { reviews = result.reviews.filter(pairMatches) }
         if filter.includes(.variants) { families = result.families.filter { text.isEmpty || $0.matchesSearch(text) } }
+        if filter.includes(.duplicates) {
+            duplicatesA = result.duplicatesA.filter { text.isEmpty || $0.matchesSearch(text) }
+            duplicatesB = result.duplicatesB.filter { text.isEmpty || $0.matchesSearch(text) }
+        }
         if filter.includes(.missingInB) { missingInB = result.possiblyMissingInB.filter { matchesSearch($0.title) } }
         if filter.includes(.missingInA) { missingInA = result.possiblyMissingInA.filter { matchesSearch($0.title) } }
         if filter.includes(.unverified) {
             unverifiedA = result.unverifiedA.filter { matchesSearch($0.product.title) }
             unverifiedB = result.unverifiedB.filter { matchesSearch($0.product.title) }
         }
-        if filter.includes(.rejected) { rejected = result.rejected.filter(pairMatches) }
+        if filter.includes(.rejected) {
+            rejected = result.rejected.filter(pairMatches)
+            dismissedDuplicates = result.dismissedDuplicates.filter { text.isEmpty || $0.matchesSearch(text) }
+        }
     }
 
     var isEmpty: Bool {
-        matches.isEmpty && reviews.isEmpty && families.isEmpty && missingInB.isEmpty && missingInA.isEmpty
-            && unverifiedA.isEmpty && unverifiedB.isEmpty && rejected.isEmpty
+        matches.isEmpty && reviews.isEmpty && families.isEmpty && duplicatesA.isEmpty && duplicatesB.isEmpty
+            && missingInB.isEmpty && missingInA.isEmpty && unverifiedA.isEmpty && unverifiedB.isEmpty
+            && rejected.isEmpty && dismissedDuplicates.isEmpty
     }
 
     /// Só os "possivelmente ausentes" entram na seleção — postar na outra loja presume que o

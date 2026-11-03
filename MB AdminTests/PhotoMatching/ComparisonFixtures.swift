@@ -129,7 +129,10 @@ enum ComparisonFixtures {
         unverifiedA: [UnverifiedListing] = [],
         unverifiedB: [UnverifiedListing] = [],
         families: [ProductFamily] = [],
-        otherVersions: [ListingKey: [OtherVersion]] = [:]
+        otherVersions: [ListingKey: [OtherVersion]] = [:],
+        duplicatesA: [StoreDuplicateGroup] = [],
+        duplicatesB: [StoreDuplicateGroup] = [],
+        dismissedDuplicates: [StoreDuplicateGroup] = []
     ) -> AccountComparisonResult {
         AccountComparisonResult(
             storeA: summary(sellerA, name: "antonia"),
@@ -142,7 +145,29 @@ enum ComparisonFixtures {
             unverifiedA: unverifiedA,
             unverifiedB: unverifiedB,
             families: families,
-            otherVersions: otherVersions
+            otherVersions: otherVersions,
+            duplicatesA: duplicatesA,
+            duplicatesB: duplicatesB,
+            dismissedDuplicates: dismissedDuplicates
+        )
+    }
+
+    /// Um grupo de anúncios repetidos pronto, com os produtos dados (todos da mesma loja).
+    static func duplicates(
+        _ seller: Int,
+        _ products: [EnjoeiProduct],
+        status: StoreDuplicateGroup.Status = .repeated
+    ) -> StoreDuplicateGroup {
+        let keys = products.map { ListingKey(sellerID: seller, productID: $0.id) }
+        return StoreDuplicateGroup(
+            sellerID: seller,
+            storeName: seller == sellerA ? "antonia" : "loja B",
+            products: products,
+            status: status,
+            reasons: [.samePhoto],
+            index: .empty,
+            photoPublicID: products.first?.photoPublicID,
+            pairKeys: zip(keys, keys.dropFirst()).map { ListingPairKey($0, $1) }
         )
     }
 
