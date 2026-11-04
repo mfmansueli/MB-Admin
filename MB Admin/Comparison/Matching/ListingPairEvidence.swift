@@ -23,6 +23,18 @@ nonisolated struct ListingPairEvidence: Sendable {
         self.textSimilarity = textSimilarity
     }
 
+    /// A mesma evidência com outros índices — pra quando as listas das lojas perdem anúncios
+    /// (`PublishedSubset`).
+    func reindexed(indexA: Int, indexB: Int) -> ListingPairEvidence {
+        var copy = ListingPairEvidence(indexA: indexA, indexB: indexB, textSimilarity: textSimilarity)
+        copy.photo = photo
+        copy.photoA = photoA
+        copy.photoB = photoB
+        copy.linkedListingCount = linkedListingCount
+        copy.hasColorConflict = hasColorConflict
+        return copy
+    }
+
     mutating func consider(_ evidence: PhotoPairEvidence, photoA: String, photoB: String, linkedListingCount: Int) {
         if evidence.colorsDiffer { hasColorConflict = true }
         guard photo.map({ evidence.isStronger(than: $0) }) ?? true else { return }

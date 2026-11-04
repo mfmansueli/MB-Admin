@@ -99,6 +99,18 @@ final class AccountsStore {
             itemsPersistence: postQueueItemsPersistence ?? UserDefaultsPostQueueItemsPersistence()
         )
         postQueue.accountsProvider = { [weak self] in self?.accounts ?? [] }
+        // Só o que está publicado conta na comparação (`PublishedListingFilter`): ela lê o que a fila
+        // e a aba inativos sabem, e é refeita (sem rede) quando um anúncio sai da vitrine.
+        comparisonLoader.listingStateChanges = { [weak self] account in
+            ListingStateChange.known(for: account, history: self?.postQueue.history ?? [])
+        }
+        postQueue.onListingStateChange = { [weak self] entry in
+            guard let self, let change = ListingStateChange(entry: entry) else { return }
+            if change.state != .published {
+                comparisonMatches.forgetUnpublished([change.productID], in: entry.sourceAccountID)
+            }
+            Task { await self.comparisonLoader.refreshPublished() }
+        }
         // Os botões de pausar/parar da Live Activity rodam no processo do app, mas não enxergam as
         // contas — chegam aqui pelo id.
         MegaphoneLiveActivityCommands.shared.handler = { [weak self] command, accountID in
@@ -292,6 +304,12 @@ final class AccountsStore {
         )
         account.onCatalogRefreshed = { [weak self] in
             self?.persist()
+        }
+        // A aba inativos acabou de mostrar o que está fora da vitrine agora.
+        account.inactiveProductsLoader.onLoaded = { [weak self, weak account] in
+            guard let self, let account else { return }
+            comparisonMatches.forgetUnpublished(Set(account.inactiveProductsLoader.items.map(\.id)), in: account.id)
+            Task { await self.comparisonLoader.refreshPublished() }
         }
         account.runner.onRoundFinished = { [weak self, weak account] summary in
             account?.applyRoundFinished(summary)

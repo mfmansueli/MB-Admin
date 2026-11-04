@@ -19,6 +19,9 @@ nonisolated struct ComparisonSnapshot: Codable, Equatable, Sendable {
         let products: [EnjoeiProduct]
         /// Por que o template de um produto não veio, quando foi tentado nesta comparação e falhou.
         let detailsFailures: [Int: String]
+        /// Quando a listagem foi buscada — `nil` numa comparação salva antes de isso existir (vale
+        /// `savedAt`, um pouco depois).
+        var listedAt: Date?
     }
 
     let format: Int

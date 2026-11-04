@@ -41,6 +41,9 @@ final class PostQueue {
     /// `var`, não `let`: quem cria a fila às vezes não pode capturar `self` no provider ainda
     /// (dentro do próprio `init` de quem a possui) e liga ele de verdade logo em seguida.
     var accountsProvider: () -> [AccountSession]
+    /// Chamado quando uma ação tira um anúncio da vitrine (apagar, inativar) ou devolve (ativar), já
+    /// com a entrada no histórico — o `AccountsStore` usa pra tirar o anúncio da comparação na hora.
+    @ObservationIgnored var onListingStateChange: ((PostHistoryEntry) -> Void)?
     /// Intervalo antes de cada ação, por grupo — o menu da tela da fila deixa escolher um pra
     /// postar/repostar/apagar (30s a 5 min) e outro pra inativar (15s a 5 min).
     /// `waitInterval` relê o valor a cada pedaço da espera, e a escolha sobrevive a fechar e abrir
@@ -463,6 +466,7 @@ final class PostQueue {
         )
         history.insert(entry, at: 0)
         historyPersistence.insert(entry)
+        if ListingStateChange(entry: entry) != nil { onListingStateChange?(entry) }
     }
 
     /// Guarda em disco só os itens ainda `.pending` — os concluídos (sucesso ou erro) não

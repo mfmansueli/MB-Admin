@@ -220,8 +220,9 @@ struct AccountComparisonView: View {
                 "compare os produtos das duas contas",
                 systemImage: "rectangle.on.rectangle",
                 description: Text(
-                    "escolha as duas contas acima e toque em \"comparar\". a comparação procura a mesma foto nos "
-                        + "anúncios das duas lojas e usa título, descrição, preço inicial e marca pra separar as versões "
+                    "escolha as duas contas acima e toque em \"comparar\". só contam os anúncios publicados — "
+                        + "inativos e apagados ficam de fora, mesmo se saírem depois da comparação. a comparação procura "
+                        + "a mesma foto nos anúncios das duas lojas e usa título, descrição, preço inicial e marca pra separar as versões "
                         + "(aro, banho, cor). na primeira vez, uma loja grande demora mais: as fotos e os anúncios ficam "
                         + "salvos pras próximas."
                 )

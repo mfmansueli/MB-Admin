@@ -14,6 +14,12 @@ import Observation
 ///    de novo com tudo. Com `checkAllDetails`, busca o de todo anúncio (pares 1:1 com a mesma foto
 ///    inclusive).
 ///
+/// **Só o que está publicado conta** (`PublishedListingFilter`): a listagem é a vitrine de cada loja,
+/// e o que o app vê sair dela depois — inativado ou apagado pela fila de ações, ou na aba inativos
+/// carregada depois — sai do resultado (pares, revisões, ausentes, repetidos) e o resultado é refeito
+/// na hora, sem rede (`refreshPublished`). Um produto cujo único par na outra loja foi inativado
+/// passa a ser "possivelmente ausente" lá. Vale também pra comparação reaberta do disco.
+///
 /// Falha de rede nunca vira lista vazia: a listagem que falhou (ou veio faltando) fica marcada
 /// (`StoreListingStatus`) e nada da outra loja é dado como ausente nela. Cancelar deixa a fase em
 /// `.interrupted` — nunca em `.finished` — e "continuar" retoma de onde parou (templates e
@@ -57,6 +63,10 @@ final class AccountComparisonLoader {
     /// comparação", até outra comparação começar.
     private(set) var lastResult: AccountComparisonResult?
     private var task: Task<Void, Never>?
+    /// O que o app sabe dos anúncios de uma conta que saíram da vitrine (ou voltaram) — a fila de
+    /// ações e a aba inativos (`ListingStateChange.known`). Ligado pelo `AccountsStore`; sem ele, a
+    /// listagem da loja vale como está.
+    @ObservationIgnored var listingStateChanges: (AccountSession) -> [ListingStateChange] = { _ in [] }
 
     private var loadedA = 0
     private var totalA = 0
@@ -79,15 +89,23 @@ final class AccountComparisonLoader {
     /// O que a última rodada completa usou — pra uma revisão manual recalcular sem rede nenhuma.
     /// Pode ser solto (`releaseMemory`): é refeito do `ComparisonSnapshot` na próxima revisão.
     private struct ResolvedInputs {
+        /// As listagens inteiras, como vieram (o recorte de publicados é feito a cada resolução).
         let sideA: ComparisonSide
         let sideB: ComparisonSide
+        let listedAtA: Date
+        let listedAtB: Date
         let evidence: ComparisonEvidenceBuilder.Output
         let runID: UUID
         var revision: Int
     }
 
+    /// O recorte de publicados de cada loja que o resultado atual usou.
+    private typealias Scopes = (a: PublishedScope, b: PublishedScope)
+
     private var session: Session?
     private var lastInputs: ResolvedInputs?
+    /// Fica mesmo com `lastInputs` solto, pra `refreshPublished` saber se algo mudou sem ir ao disco.
+    private var lastScope: Scopes?
     /// Listagem da rodada interrompida — `resume()` não pagina a loja de novo.
     private var cachedListings: (a: StoreListing, b: StoreListing)?
     private let snapshots: ComparisonSnapshotStoring
@@ -125,6 +143,7 @@ final class AccountComparisonLoader {
         // rodada, antes de qualquer gravação nova).
         lastResult = nil
         lastInputs = nil
+        lastScope = nil
         accountAID = accountA.id
         accountBID = accountB.id
         session = Session(
@@ -150,6 +169,7 @@ final class AccountComparisonLoader {
         cachedListings = nil
         lastResult = nil
         lastInputs = nil
+        lastScope = nil
         start(reusingListings: false, discardingSnapshot: true)
     }
 
@@ -175,6 +195,8 @@ final class AccountComparisonLoader {
             accountAID = session.accountA.id
             accountBID = session.accountB.id
             phase = .finished(lastResult)
+            // Algo pode ter saído da vitrine enquanto a tela estava fechada (a aba inativos, por exemplo).
+            Task { await refreshPublished() }
             return
         }
         guard snapshots.hasSnapshot else { return }
@@ -203,6 +225,7 @@ final class AccountComparisonLoader {
             session = nil
             lastResult = nil
             lastInputs = nil
+            lastScope = nil
             cachedListings = nil
             phase = .idle
         }
@@ -277,16 +300,38 @@ final class AccountComparisonLoader {
         guard var inputs = lastInputs else { return }
         inputs.revision += 1
         lastInputs = inputs
-        let result = await AccountProductMatcher.resolveOffMain(
-            inputs.sideA, inputs.sideB,
-            evidence: inputs.evidence, decisions: Self.decisions(session, inputs.sideA, inputs.sideB),
-            runID: inputs.runID, revision: inputs.revision
-        )
+        let (result, scope) = await resolvePublished(session, inputs)
         // Outra rodada pode ter começado enquanto recalculava.
         guard lastInputs?.revision == inputs.revision, task == nil else { return }
         session.matchMemory?.record(result, accountA: session.accountA.id, accountB: session.accountB.id)
         lastResult = result
+        lastScope = scope
         phase = .finished(result)
+    }
+
+    // MARK: - Só o que está publicado
+
+    /// Tira do resultado o que saiu da vitrine depois da listagem — inativado ou apagado pela fila de
+    /// ações, ou visto na aba inativos — e recalcula, sem rede. Sem efeito quando nada mudou no
+    /// recorte, ou no meio de uma comparação (a própria rodada lê isso ao resolver, e chama de novo
+    /// quando termina).
+    func refreshPublished() async {
+        guard task == nil, let session, let scope = lastScope,
+              scope.a.refreshed(with: listingStateChanges(session.accountA)) != scope.a
+                || scope.b.refreshed(with: listingStateChanges(session.accountB)) != scope.b else { return }
+        await reresolve()
+    }
+
+    /// Resolve só com os anúncios publicados agora — toda resolução passa por aqui (rodada, revisão
+    /// manual, reabrir do disco).
+    private func resolvePublished(_ session: Session, _ inputs: ResolvedInputs) async -> (AccountComparisonResult, Scopes) {
+        let scopeA = PublishedScope(inputs.sideA, listedAt: inputs.listedAtA, changes: listingStateChanges(session.accountA))
+        let scopeB = PublishedScope(inputs.sideB, listedAt: inputs.listedAtB, changes: listingStateChanges(session.accountB))
+        let result = await AccountProductMatcher.resolveOffMain(
+            inputs.sideA, inputs.sideB, evidence: inputs.evidence, unpublishedA: scopeA.unpublished, unpublishedB: scopeB.unpublished,
+            decisions: Self.decisions(session, inputs.sideA, inputs.sideB), runID: inputs.runID, revision: inputs.revision
+        )
+        return (result, (scopeA, scopeB))
     }
 
     /// As revisões entre as duas lojas e as de dentro de cada loja (repetidos), uma por par.
@@ -319,6 +364,8 @@ final class AccountComparisonLoader {
             // Depois de soltar a tarefa: revisar o resultado não espera a gravação. A gravação entra na
             // fila do arquivo antes de qualquer outra comparação conseguir começar (e apagar).
             if let snapshot { await self?.snapshots.save(snapshot) }
+            // O que saiu da vitrine entre a última resolução e o fim da rodada.
+            await self?.refreshPublished()
         }
     }
 
@@ -328,13 +375,13 @@ final class AccountComparisonLoader {
         let accountA = session.accountA
         let accountB = session.accountB
 
-        // Etapa 1: o que já se sabe (capas + templates salvos).
+        // Etapa 1: o que já se sabe (capas + templates salvos). Foto só de quem está publicado — o resto
+        // fica no lado (a evidência é da listagem inteira), mas sai no recorte antes de resolver.
         var detailsA = accountA.productDetailsLoader.storedDetails(for: listings.a.products.map(\.id))
         var detailsB = accountB.productDetailsLoader.storedDetails(for: listings.b.products.map(\.id))
-        var photos = await analyzePhotos(
-            Self.photoIDs(listings.a.products, detailsA) + Self.photoIDs(listings.b.products, detailsB),
-            services: session.services
-        )
+        let publishedA = PublishedScope(listings.a, changes: listingStateChanges(accountA)).published(listings.a.products)
+        let publishedB = PublishedScope(listings.b, changes: listingStateChanges(accountB)).published(listings.b.products)
+        var photos = await analyzePhotos(Self.photoIDs(publishedA, detailsA) + Self.photoIDs(publishedB, detailsB), services: session.services)
         guard !photos.wasCancelled, !Task.isCancelled else { return interrupt() }
 
         let runID = UUID()
@@ -345,8 +392,8 @@ final class AccountComparisonLoader {
         // repetido na própria loja) e não tem template válido.
         let currentDate = now()
         let settled = session.checkAllDetails ? [] : outcome.matchedKeys.subtracting(outcome.result.keysWantingDetails)
-        let pendingA = Self.pending(listings.a.products, details: detailsA, sellerID: accountA.user.id, resolved: settled, now: currentDate)
-        let pendingB = Self.pending(listings.b.products, details: detailsB, sellerID: accountB.user.id, resolved: settled, now: currentDate)
+        let pendingA = Self.pending(outcome.scope.a.published(publishedA), details: detailsA, sellerID: accountA.user.id, resolved: settled, now: currentDate)
+        let pendingB = Self.pending(outcome.scope.b.published(publishedB), details: detailsB, sellerID: accountB.user.id, resolved: settled, now: currentDate)
         if !pendingA.isEmpty || !pendingB.isEmpty {
             phase = .fetchingDetails
             async let reportA = accountA.productDetailsLoader.fetchDetails(for: pendingA, now: now)
@@ -366,6 +413,7 @@ final class AccountComparisonLoader {
 
         lastInputs = outcome.inputs
         lastResult = outcome.result
+        lastScope = outcome.scope
         cachedListings = nil
         session.matchMemory?.record(outcome.result, accountA: accountA.id, accountB: accountB.id)
         phase = .finished(outcome.result)
@@ -392,6 +440,7 @@ final class AccountComparisonLoader {
     private struct Outcome {
         let inputs: ResolvedInputs
         let result: AccountComparisonResult
+        let scope: Scopes
         let matchedKeys: Set<ListingKey>
     }
 
@@ -412,15 +461,12 @@ final class AccountComparisonLoader {
             photos: photos
         )
         let evidence = await AccountProductMatcher.buildEvidenceOffMain(sideA, sideB)
-        let result = await AccountProductMatcher.resolveOffMain(
-            sideA, sideB, evidence: evidence, decisions: Self.decisions(session, sideA, sideB), runID: runID, revision: 0
+        let inputs = ResolvedInputs(
+            sideA: sideA, sideB: sideB, listedAtA: listings.a.listedAt, listedAtB: listings.b.listedAt, evidence: evidence, runID: runID, revision: 0
         )
+        let (result, scope) = await resolvePublished(session, inputs)
         let matchedKeys = Set(result.matches.flatMap { [$0.keyA, $0.keyB] })
-        return Outcome(
-            inputs: ResolvedInputs(sideA: sideA, sideB: sideB, evidence: evidence, runID: runID, revision: 0),
-            result: result,
-            matchedKeys: matchedKeys
-        )
+        return Outcome(inputs: inputs, result: result, scope: scope, matchedKeys: matchedKeys)
     }
 
     private static func source(
@@ -465,7 +511,8 @@ final class AccountComparisonLoader {
             name: account.user.name,
             status: listing.status,
             products: listing.products,
-            detailsFailures: failures
+            detailsFailures: failures,
+            listedAt: listing.listedAt
         )
     }
 
@@ -483,14 +530,11 @@ final class AccountComparisonLoader {
             phase = .idle
             return
         }
-        let result = await AccountProductMatcher.resolveOffMain(
-            inputs.sideA, inputs.sideB,
-            evidence: inputs.evidence, decisions: Self.decisions(session, inputs.sideA, inputs.sideB),
-            runID: inputs.runID, revision: 0
-        )
+        let (result, scope) = await resolvePublished(session, inputs)
         self.session = session
         lastInputs = inputs
         lastResult = result
+        lastScope = scope
         accountAID = accountA.id
         accountBID = accountB.id
         matchMemory?.record(result, accountA: accountA.id, accountB: accountB.id)
@@ -511,7 +555,11 @@ final class AccountComparisonLoader {
             photos: photos
         )
         let evidence = await AccountProductMatcher.buildEvidenceOffMain(sideA, sideB)
-        return ResolvedInputs(sideA: sideA, sideB: sideB, evidence: evidence, runID: snapshot.runID, revision: 0)
+        return ResolvedInputs(
+            sideA: sideA, sideB: sideB,
+            listedAtA: snapshot.storeA.listedAt ?? snapshot.savedAt, listedAtB: snapshot.storeB.listedAt ?? snapshot.savedAt,
+            evidence: evidence, runID: snapshot.runID, revision: 0
+        )
     }
 
     private static func source(_ store: ComparisonSnapshot.Store, _ details: [Int: ProductListingDetails]) -> ComparisonSideBuilder.Source {
@@ -546,13 +594,18 @@ final class AccountComparisonLoader {
     private func listings(for session: Session, reusing: Bool) async -> (a: StoreListing, b: StoreListing)? {
         if reusing, let cachedListings { return cachedListings }
         phase = .loadingProducts(loaded: 0, total: 0)
+        let startedAt = now()
         // As duas contas em paralelo — cada uma tem sua própria WebView/sessão.
-        async let listingA = StoreListingFetcher.load(sellerID: session.accountA.user.id, client: session.accountA.client) { [weak self] loaded, total in
+        async let listingA = StoreListingFetcher.load(
+            sellerID: session.accountA.user.id, client: session.accountA.client, startedAt: startedAt
+        ) { [weak self] loaded, total in
             self?.loadedA = loaded
             self?.totalA = total
             self?.updateLoadingPhase()
         }
-        async let listingB = StoreListingFetcher.load(sellerID: session.accountB.user.id, client: session.accountB.client) { [weak self] loaded, total in
+        async let listingB = StoreListingFetcher.load(
+            sellerID: session.accountB.user.id, client: session.accountB.client, startedAt: startedAt
+        ) { [weak self] loaded, total in
             self?.loadedB = loaded
             self?.totalB = total
             self?.updateLoadingPhase()

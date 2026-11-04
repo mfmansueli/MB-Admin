@@ -9,6 +9,9 @@ import Foundation
 ///
 /// `rejected` são os pares que você marcou como produtos diferentes (pra poder desfazer).
 ///
+/// Tudo aqui é só entre anúncios **publicados** (`PublishedListingFilter`): inativo, apagado ou fora
+/// da vitrine não aparece em lista nenhuma nem serve de par — a ausência é sempre entre o que está no ar.
+///
 /// Por cima dos estados, `families` agrupa os anúncios que dividem a mesma foto em versões (aro,
 /// banho, cor, medida) com onde cada versão está, e `otherVersions` diz, de um possivelmente
 /// ausente, quais versões dele a outra loja tem. `duplicatesA`/`duplicatesB` são o mesmo produto

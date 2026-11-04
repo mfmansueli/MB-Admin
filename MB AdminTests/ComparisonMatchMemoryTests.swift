@@ -113,4 +113,57 @@ struct ComparisonMatchMemoryTests {
         #expect(memory.presence(of: 10, from: storeB, to: storeA) == nil)
         #expect(memory.presence(of: 1, from: storeA, to: storeC) == .possible)
     }
+
+    // MARK: - Só o que está publicado
+
+    @Test("o par na outra loja saiu da vitrine: o produto passa a possivelmente ausente lá, e o que saiu perde o aviso")
+    func parForaDaVitrine() {
+        let memory = ComparisonMatchMemory()
+        memory.record(Fixtures.result(
+            matches: [Fixtures.match(1, 10)],
+            reviews: [Fixtures.match(2, 20, status: .needsReview), Fixtures.match(3, 10, status: .needsReview)]
+        ), accountA: storeA, accountB: storeB)
+
+        memory.forgetUnpublished([10], in: storeB)
+
+        #expect(memory.presence(of: 1, from: storeA, to: storeB) == .possiblyMissing)
+        #expect(memory.presence(of: 3, from: storeA, to: storeB) == .possiblyMissing)
+        // O que não tinha nada a ver com o anúncio que saiu fica igual.
+        #expect(memory.presence(of: 2, from: storeA, to: storeB) == .possible)
+        #expect(memory.presence(of: 20, from: storeB, to: storeA) == .possible)
+        // Fora da vitrine, o próprio anúncio não tem mais aviso nenhum.
+        #expect(memory.presence(of: 10, from: storeB, to: storeA) == nil)
+    }
+
+    @Test("com par forte e revisão em lojas diferentes, só perde o que saiu")
+    func continuaComOOutroPar() {
+        let memory = ComparisonMatchMemory()
+        memory.record(Fixtures.result(
+            matches: [Fixtures.match(1, 10)],
+            reviews: [Fixtures.match(1, 11, status: .needsReview)]
+        ), accountA: storeA, accountB: storeB)
+
+        memory.forgetUnpublished([10], in: storeB)
+        #expect(memory.presence(of: 1, from: storeA, to: storeB) == .possible)
+        memory.forgetUnpublished([11], in: storeB)
+        #expect(memory.presence(of: 1, from: storeA, to: storeB) == .possiblyMissing)
+    }
+
+    @Test("sem par e com a lista de lá incompleta, perder o par vira 'não verificado', não ausente")
+    func listaIncompletaViraNaoVerificado() {
+        let memory = ComparisonMatchMemory()
+        let base = Fixtures.result(matches: [Fixtures.match(1, 10)])
+        let result = AccountComparisonResult(
+            storeA: base.storeA,
+            storeB: ComparisonStoreSummary(
+                sellerID: Fixtures.sellerB, name: "loja B", status: .incomplete(loaded: 1, expected: 5), listingCount: 1,
+                listingsWithPhotoFailures: 0, listingsWithDetailsFailures: 0
+            ),
+            matches: base.matches
+        )
+        memory.record(result, accountA: storeA, accountB: storeB)
+
+        memory.forgetUnpublished([10], in: storeB)
+        #expect(memory.presence(of: 1, from: storeA, to: storeB) == .unverified)
+    }
 }

@@ -16,6 +16,13 @@ final class InactiveProductsLoader {
 
     private(set) var phase: Phase = .idle
     private(set) var items: [InactiveProduct] = []
+    /// Quando a lista em `items` foi buscada nesta sessão — `nil` enquanto ela é só a restaurada do
+    /// disco (sem hora, não dá pra saber se é mais nova que uma comparação). A comparação usa: tudo que
+    /// está aqui estava inativo nessa hora (`ListingStateChange.inactiveList`).
+    @ObservationIgnored private(set) var loadedAt: Date?
+    /// Chamado quando um carregamento termina (mesmo pela metade, se a rede falhou depois de alguma
+    /// página) — o `AccountsStore` usa pra tirar da comparação o que apareceu inativo.
+    @ObservationIgnored var onLoaded: (() -> Void)?
     private var task: Task<Void, Never>?
 
     /// Pra `AccountsStore.isEligibleForMemoryRelease` saber que essa conta está no meio de um
@@ -73,6 +80,8 @@ final class InactiveProductsLoader {
     }
 
     private func run() async {
+        let startedAt = Date()
+        defer { if loadedAt == startedAt { onLoaded?() } }
         do {
             // Página 1 sempre sozinha — nada se sabe da paginação antes dela. Só limpa o que essa
             // conta tinha persistido depois dela chegar de verdade — se a rede falhar logo aqui
@@ -84,6 +93,7 @@ final class InactiveProductsLoader {
             var collected: [InactiveProduct] = []
             appendNewProducts(first.products, to: &collected, seenIDs: &seenIDs)
             items = collected
+            loadedAt = startedAt
             // `maxPage` de UMA página é só o maior link de paginação que ela mostra, não o total
             // de verdade: no iPhone/iPad, confiar só no da página 1 parava na página 2 (20
             // inativos) numa loja com muito mais — ao que tudo indica a WebView recebe ali o

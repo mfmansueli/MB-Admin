@@ -220,6 +220,39 @@ struct InactiveProductsLoaderTests {
         #expect(persistence.loadItems().map(\.id) == [1])
     }
 
+    @Test("lista restaurada do disco não tem hora; a carregada agora tem, e avisa quando termina")
+    func horaDaCarga() async {
+        let persistence = InMemoryInactiveProductsPersistence()
+        persistence.appendPage([makeProduct(id: 9)], startingAt: 0)
+        let client = StubEnjoeiClient(inactivePagesByNumber: [1: InactiveProductsPage(products: [makeProduct(id: 1)], maxPage: 1)])
+        let loader = makeLoader(client: client, itemsPersistence: persistence)
+        #expect(loader.items.map(\.id) == [9])
+        #expect(loader.loadedAt == nil)
+
+        var loadedCount = 0
+        loader.onLoaded = { loadedCount += 1 }
+        let before = Date()
+        loader.load()
+        await waitUntil { loader.phase == .finished && loadedCount == 1 }
+
+        #expect(loader.items.map(\.id) == [1])
+        #expect(loadedCount == 1)
+        #expect((loader.loadedAt ?? .distantPast) >= before.addingTimeInterval(-1))
+    }
+
+    @Test("falha logo na primeira página não marca hora nem avisa — a lista continua a do disco")
+    func falhaSemHora() async {
+        let client = StubEnjoeiClient(inactiveProductsError: .http(status: 503, message: nil))
+        let loader = makeLoader(client: client)
+        var loadedCount = 0
+        loader.onLoaded = { loadedCount += 1 }
+        loader.load()
+        await waitUntil { if case .failed = loader.phase { true } else { false } }
+
+        #expect(loader.loadedAt == nil)
+        #expect(loadedCount == 0)
+    }
+
     @Test("search delega pra persistência")
     func searchDelegaParaPersistencia() async {
         let persistence = InMemoryInactiveProductsPersistence()
