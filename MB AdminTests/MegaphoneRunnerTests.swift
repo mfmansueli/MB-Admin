@@ -1281,4 +1281,145 @@ struct MegaphoneRunnerTests {
             await Task.yield()
         }
     }
+
+    /// Como `waitUntil`, mas por tempo de relógio — pra condições que dependem de uma espera real
+    /// do dublê (`setBatchItemDelay`), que um punhado de `Task.yield()` termina antes de alcançar.
+    private func waitUntil(within timeout: Duration, _ condition: () -> Bool) async {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        while !condition(), ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+    }
+
+    // MARK: - lote que trava ou falha no meio
+
+    /// Lote em pedaços de 3, prazo curto pra desistir de um pedaço calado e sem a espera de
+    /// recuperação — os testes não esperam 2 minutos nem 30 segundos.
+    private func makeRunnerWithShortStall(client: StubEnjoeiClient) -> MegaphoneRunner {
+        let runner = makeRunner(client: client)
+        runner.megaphoneBatchChunkSize = 3
+        runner.batchStallTimeout = .milliseconds(200)
+        runner.recoveryPause = .zero
+        return runner
+    }
+
+    @Test("pedaço que trava é abandonado: os que faltaram viram falha, a página recarrega e a rodada segue")
+    func pedacoTravadoNaoParaARodada() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3, 4, 5, 6], endCursor: nil)])
+        await client.setBatchHang(onceAt: 2)
+        let runner = makeRunnerWithShortStall(client: client)
+
+        runner.start(sellerID: 1, rounds: .once)
+        await runner.waitUntilFinished()
+
+        #expect(runner.phase == .finished)
+        #expect(await client.megaphonedIDs == [1, 4, 5, 6])
+        #expect(runner.totalSucceeded == 4)
+        #expect(runner.totalFailed == 2)
+        let message = EnjoeiError.noResponse.localizedDescription
+        #expect(runner.items.first { $0.id == 2 }?.status == .failed(message))
+        #expect(runner.items.first { $0.id == 3 }?.status == .failed(message))
+        #expect(runner.failureDetails[2]?.technicalDescription == "EnjoeiError.noResponse")
+        #expect(await client.reloadPageCallCount == 1)
+        #expect(runner.currentItemID == nil)
+        #expect(runner.activeItemID == nil)
+    }
+
+    @Test("a rodada seguinte megafona de novo o que ficou pra trás num pedaço travado")
+    func pedacoTravadoVoltaNaProximaRodada() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3, 4], endCursor: nil)])
+        await client.setBatchHang(onceAt: 2)
+        let runner = makeRunnerWithShortStall(client: client)
+
+        runner.start(sellerID: 1, rounds: .times(2))
+        await runner.waitUntilFinished()
+
+        #expect(runner.phase == .finished)
+        #expect(await client.megaphonedIDs == [1, 4, 1, 2, 3, 4])
+        #expect(runner.totalSucceeded == 6)
+        #expect(runner.totalFailed == 2)
+        #expect(runner.items.allSatisfy { $0.status == .succeeded })
+    }
+
+    @Test("lote que falha no meio não repete nem conta de novo o que já tinha saído")
+    func loteQueFalhaNoMeioNaoDuplica() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1, 2, 3, 4, 5, 6], endCursor: nil)])
+        await client.setBatchError(.unexpectedResponse, onceAt: 2)
+        let runner = makeRunnerWithShortStall(client: client)
+
+        runner.start(sellerID: 1, rounds: .once)
+        await runner.waitUntilFinished()
+
+        #expect(runner.phase == .finished)
+        #expect(await client.megaphonedIDs == [1, 4, 5, 6])
+        #expect(runner.totalSucceeded == 4)
+        #expect(runner.totalFailed == 2)
+        let message = EnjoeiError.unexpectedResponse.localizedDescription
+        #expect(runner.items.first { $0.id == 2 }?.status == .failed(message))
+        #expect(runner.items.first { $0.id == 3 }?.status == .failed(message))
+        #expect(await client.reloadPageCallCount == 1)
+    }
+
+    @Test("sem resposta num produto para o pedaço ali, e o laço segue no próximo")
+    func semRespostaParaOPedaco() async {
+        let client = StubEnjoeiClient(
+            pages: [EnjoeiFixtures.page(ids: [1, 2, 3, 4, 5, 6], endCursor: nil)],
+            failuresByProductID: [2: .noResponse]
+        )
+        let runner = makeRunnerWithShortStall(client: client)
+
+        runner.start(sellerID: 1, rounds: .once)
+        await runner.waitUntilFinished()
+
+        #expect(runner.phase == .finished)
+        #expect(await client.megaphonedIDs == [1, 4, 5, 6])
+        #expect(runner.totalFailed == 2)
+        let message = EnjoeiError.noResponse.localizedDescription
+        #expect(runner.items.first { $0.id == 2 }?.status == .failed(message))
+        #expect(runner.items.first { $0.id == 3 }?.status == .failed(message))
+        #expect(await client.reloadPageCallCount == 1)
+    }
+
+    @Test("lote lento que continua dando notícia não é abandonado")
+    func loteLentoNaoEhAbandonado() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: Array(1...60), endCursor: nil)])
+        await client.setBatchItemDelay(.milliseconds(20))
+        let runner = makeRunner(client: client)
+        // Um pedaço só, que leva mais que o prazo inteiro (60 × 20ms) — cada produto reportado
+        // reinicia o prazo, e nenhum intervalo chega perto dele.
+        runner.megaphoneBatchChunkSize = 60
+        runner.batchStallTimeout = .seconds(1)
+        runner.recoveryPause = .zero
+
+        runner.start(sellerID: 1, rounds: .once)
+        await runner.waitUntilFinished()
+
+        #expect(runner.phase == .finished)
+        #expect(await client.megaphonedIDs == Array(1...60))
+        #expect(runner.totalFailed == 0)
+        #expect(await client.reloadPageCallCount == 0)
+    }
+
+    @Test("pausa pedida enquanto a rodada terminava continua valendo na seguinte, sem fingir que megafona")
+    func pausaNaViradaDeRodada() async {
+        let client = StubEnjoeiClient(pages: [EnjoeiFixtures.page(ids: [1], endCursor: nil)])
+        await client.setBatchItemDelay(.milliseconds(100))
+        let runner = makeRunner(client: client)
+
+        runner.start(sellerID: 1, rounds: .times(2))
+        await waitUntil(within: .seconds(30)) { runner.items.first?.status == .megaphoning }
+        #expect(runner.phase == .megaphoning(round: 1, of: .times(2)))
+        // O único pedaço da rodada 1 já está em voo: termina mesmo pausado.
+        runner.pause()
+        await waitUntil(within: .seconds(30)) { runner.round == 2 }
+
+        #expect(runner.phase == .paused(round: 2, of: .times(2), reason: .user))
+        for _ in 0..<200 { await Task.yield() }
+        #expect(await client.megaphonedIDs == [1])
+
+        runner.resume()
+        await runner.waitUntilFinished()
+        #expect(runner.phase == .finished)
+        #expect(await client.megaphonedIDs == [1, 1])
+    }
 }

@@ -84,16 +84,23 @@ nonisolated enum EnjoeiJavaScript {
     return meta ? (meta.getAttribute("content") || "") : "";
     """
 
-    /// Nome do `WKScriptMessageHandler` que recebe o progresso de `megaphoneBatch` (ver
-    /// `MegaphoneBatchMessageHandler`) — usado tanto para registrar o handler quanto dentro do
-    /// script abaixo, pra `window.webkit.messageHandlers.<nome>` bater com o que foi registrado.
-    static let megaphoneBatchHandlerName = "megaphoneBatchProgress"
+    /// Começo do nome do `WKScriptMessageHandler` que recebe o progresso de `megaphoneBatch` (ver
+    /// `MegaphoneBatchMessageHandler`). Cada lote registra o seu, com um sufixo único (ver
+    /// `EnjoeiWebSession.runBatch`), e o script recebe o nome completo em `handlerName`: um lote
+    /// abandonado por travar (ver `MegaphoneRunner.batchStallTimeout`) pode ainda estar vivo na
+    /// página quando o próximo começa, e dois handlers com o mesmo nome derrubam o app.
+    static let megaphoneBatchHandlerPrefix = "megaphoneBatchProgress"
+
+    /// Quanto tempo cada pedido do lote espera resposta antes de desistir. Sem isso o `fetch` não
+    /// tem prazo nenhum: uma conexão que morre calada (Wi-Fi que cai e volta, servidor segurando o
+    /// pedido) deixava o lote, e com ele o megafone da loja inteira, esperando pra sempre.
+    static let megaphoneRequestTimeoutMilliseconds = 30_000
 
     /// Megafona uma lista de produtos em lote, sem sair da página — evita o round-trip de IPC por
     /// produto que `megaphone` (acima) custa quando chamado um a um em Swift (ver
-    /// `MegaphoneRunner.megaphoneAll()`, que hoje monta a lista de pendentes e chama este script uma
-    /// vez só). Mesmo endpoint/corpo/cabeçalhos do `megaphone` de cima, um produto de cada vez, com
-    /// a mesma pausa entre produtos que existia no laço em Swift (`delayMilliseconds`, equivalente a
+    /// `MegaphoneRunner.megaphoneAll()`, que manda a lista de pendentes em pedaços). Mesmo
+    /// endpoint/corpo/cabeçalhos do `megaphone` de cima, um produto de cada vez, com a mesma pausa
+    /// entre produtos que existia no laço em Swift (`delayMilliseconds`, equivalente a
     /// `MegaphoneRunner.delayBetweenProducts`).
     ///
     /// Token CSRF: renova sozinho (relendo a meta tag) e tenta de novo uma vez quando o servidor
@@ -102,10 +109,14 @@ nonisolated enum EnjoeiJavaScript {
     /// para o lote na hora: sem sessão, os produtos restantes não seriam megafonados de qualquer
     /// jeito.
     ///
+    /// Sem resposta (`requestTimeoutMilliseconds` estourado, rede fora): o produto é reportado com
+    /// status 0 (vira `EnjoeiError.noResponse`) e o lote para ali — se um pedido não chegou ao
+    /// servidor, os seguintes provavelmente também não chegariam; quem chamou decide como seguir.
+    ///
     /// Cada produto processado é reportado ao Swift assim que o fetch dele termina — via
-    /// `window.webkit.messageHandlers` (ver `MegaphoneBatchMessageHandler`) — pra tela acompanhar o
-    /// andamento enquanto o `callAsyncJavaScript` do lote inteiro ainda está rodando. Devolve o
-    /// token em uso ao final (pode ter sido renovado no meio).
+    /// `window.webkit.messageHandlers[handlerName]` (ver `MegaphoneBatchMessageHandler`) — pra
+    /// tela acompanhar o andamento enquanto o `callAsyncJavaScript` do lote inteiro ainda está
+    /// rodando. Devolve o token em uso ao final (pode ter sido renovado no meio).
     static let megaphoneBatch = """
     async function sendMegaphone(productID, csrfToken) {
         const headers = {
@@ -114,13 +125,20 @@ nonisolated enum EnjoeiJavaScript {
             "X-Requested-With": "XMLHttpRequest"
         };
         if (csrfToken) { headers["X-CSRF-Token"] = csrfToken; }
-        const response = await fetch("/api/megaphones", {
-            method: "POST",
-            credentials: "include",
-            headers: headers,
-            body: JSON.stringify({ version: "v2", product_id: productID })
-        });
-        return { status: response.status, body: await response.text() };
+        const controller = new AbortController();
+        const timer = setTimeout(function () { controller.abort(); }, requestTimeoutMilliseconds);
+        try {
+            const response = await fetch("/api/megaphones", {
+                method: "POST",
+                credentials: "include",
+                headers: headers,
+                body: JSON.stringify({ version: "v2", product_id: productID }),
+                signal: controller.signal
+            });
+            return { status: response.status, body: await response.text() };
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     function readCSRFToken() {
@@ -131,17 +149,22 @@ nonisolated enum EnjoeiJavaScript {
     let currentToken = token;
     for (let index = 0; index < productIDs.length; index++) {
         const productID = productIDs[index];
-        let result = await sendMegaphone(productID, currentToken);
-        if (result.status === 422 || result.status === 403) {
-            currentToken = readCSRFToken();
+        let result;
+        try {
             result = await sendMegaphone(productID, currentToken);
+            if (result.status === 422 || result.status === 403) {
+                currentToken = readCSRFToken();
+                result = await sendMegaphone(productID, currentToken);
+            }
+        } catch (error) {
+            result = { status: 0, body: String(error) };
         }
-        window.webkit.messageHandlers.\(megaphoneBatchHandlerName).postMessage({
+        window.webkit.messageHandlers[handlerName].postMessage({
             productID: productID,
             status: result.status,
             body: result.body
         });
-        if (result.status === 401) { break; }
+        if (result.status === 401 || result.status === 0) { break; }
         if (index < productIDs.length - 1 && delayMilliseconds > 0) {
             await new Promise(function (resolve) { setTimeout(resolve, delayMilliseconds); });
         }

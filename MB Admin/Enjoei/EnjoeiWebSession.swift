@@ -18,7 +18,7 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
     private let navigationDelegate = WebSessionNavigationDelegate()
     /// Quantas chamadas (`run`/`clearSession`) estão em andamento agora — a rede de segurança de
     /// `releaseMemoryIfIdle()`: nunca libera memória no meio de uma chamada real, não importa qual
-    /// subsistema a disparou (todos passam por `run`/`runBatch`, que delega pra `run`).
+    /// subsistema a disparou (todos passam por `run` ou `runBatch`).
     private var inFlightCallCount = 0
 
     init(dataStoreIdentifier: EnjoeiAccountID) {
@@ -30,6 +30,12 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
 
     private var isOnEnjoeiPage: Bool {
         webView.url?.host()?.hasSuffix(EnjoeiAPI.cookieDomainSuffix) == true
+    }
+
+    /// A página precisa ser carregada antes de rodar um script: não está no Enjoei, ou o processo
+    /// dela morreu (a URL continua lá, mas não tem mais página nenhuma por trás).
+    private var needsPageLoad: Bool {
+        !isOnEnjoeiPage || navigationDelegate.contentProcessTerminated
     }
 
     func load(_ url: URL) async {
@@ -48,7 +54,7 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
     ) async throws -> Any? {
         inFlightCallCount += 1
         defer { inFlightCallCount -= 1 }
-        if reloadingPage || !isOnEnjoeiPage {
+        if reloadingPage || needsPageLoad {
             await load(EnjoeiAPI.webBaseURL)
         }
         do {
@@ -62,18 +68,34 @@ final class EnjoeiWebSession: EnjoeiSessionClearing {
 
     /// Roda um script de lote (ver `EnjoeiJavaScript.megaphoneBatch`) que reporta o progresso de
     /// cada item por um `WKScriptMessageHandler` enquanto o `callAsyncJavaScript` do lote inteiro
-    /// ainda está em andamento. Registra o handler antes de rodar e desregistra depois — só um
-    /// megafone roda por vez por conta (o `task` do `MegaphoneRunner` garante isso), então não tem
-    /// risco de duas mensagens de lotes diferentes se cruzarem.
+    /// ainda está em andamento.
+    ///
+    /// Cada chamada registra o próprio handler, com nome único (passado ao script em
+    /// `handlerName`), e o tira no fim: um lote abandonado por travar (ver
+    /// `MegaphoneRunner.batchStallTimeout`) pode continuar pendurado aqui enquanto o próximo já
+    /// começou, e registrar dois handlers com o mesmo nome derruba o app.
+    ///
+    /// Ao contrário de `run`, não roda o script de novo quando ele falha: repetir o lote inteiro
+    /// megafonava (e contava) de novo os produtos que já tinham saído antes da falha. Quem chamou
+    /// sabe, pelo `onProgress`, quais faltaram.
     func runBatch(
         _ script: String,
         arguments: [String: Any] = [:],
         onProgress: @escaping (Int, MegaphoneWebResponse) -> Void
     ) async throws -> Any? {
+        inFlightCallCount += 1
+        defer { inFlightCallCount -= 1 }
+        if needsPageLoad {
+            await load(EnjoeiAPI.webBaseURL)
+        }
+        let handlerName = EnjoeiJavaScript.megaphoneBatchHandlerPrefix
+            + UUID().uuidString.replacingOccurrences(of: "-", with: "")
         let controller = webView.configuration.userContentController
-        controller.add(MegaphoneBatchMessageHandler(onProgress: onProgress), name: EnjoeiJavaScript.megaphoneBatchHandlerName)
-        defer { controller.removeScriptMessageHandler(forName: EnjoeiJavaScript.megaphoneBatchHandlerName) }
-        return try await run(script, arguments: arguments)
+        controller.add(MegaphoneBatchMessageHandler(onProgress: onProgress), name: handlerName)
+        defer { controller.removeScriptMessageHandler(forName: handlerName) }
+        var arguments = arguments
+        arguments["handlerName"] = handlerName
+        return try await evaluate(script, arguments: arguments)
     }
 
     private func evaluate(_ script: String, arguments: [String: Any]) async throws -> Any? {

@@ -55,7 +55,12 @@ final class WebViewEnjoeiClient: EnjoeiClientProtocol {
         guard !productIDs.isEmpty else { return csrfToken }
         let result = try await webSession.runBatch(
             EnjoeiJavaScript.megaphoneBatch,
-            arguments: ["productIDs": productIDs, "token": csrfToken, "delayMilliseconds": delayMilliseconds],
+            arguments: [
+                "productIDs": productIDs,
+                "token": csrfToken,
+                "delayMilliseconds": delayMilliseconds,
+                "requestTimeoutMilliseconds": EnjoeiJavaScript.megaphoneRequestTimeoutMilliseconds
+            ],
             onProgress: onProgress
         )
         return result as? String ?? csrfToken

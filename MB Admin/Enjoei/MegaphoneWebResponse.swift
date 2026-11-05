@@ -21,6 +21,10 @@ nonisolated struct MegaphoneWebResponse: Equatable, Sendable {
     var failure: EnjoeiError? {
         if (200..<300).contains(status) { return nil }
         switch status {
+        // Sem status nenhum: o `fetch` nem chegou a ter resposta (tempo esgotado, rede fora) — ver
+        // o `catch` de `EnjoeiJavaScript.megaphoneBatch`.
+        case 0:
+            return .noResponse
         case 401:
             return .notAuthenticated
         case 422:

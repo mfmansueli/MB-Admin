@@ -17,6 +17,9 @@ nonisolated enum EnjoeiError: LocalizedError, Equatable {
     /// Detectado em `EnjoeiError.isStalePersistedQuery(in:)`, a partir do corpo GraphQL da
     /// resposta, pra não aparecer pro usuário como um genérico "resposta que não entendi".
     case stalePersistedQuery
+    /// Nenhuma resposta HTTP: o pedido estourou o tempo, a rede caiu ou a página de bastidores
+    /// parou de responder (ver `EnjoeiJavaScript.megaphoneBatch` e `MegaphoneRunner.batchStallTimeout`).
+    case noResponse
 
     var errorDescription: String? {
         switch self {
@@ -35,6 +38,8 @@ nonisolated enum EnjoeiError: LocalizedError, Equatable {
         case .stalePersistedQuery:
             "o enjoei atualizou o site e a busca de produtos parou de funcionar. "
                 + "recapture o query_id na aba network do site e atualize EnjoeiAPI.searchQueryID."
+        case .noResponse:
+            "o enjoei não respondeu a tempo (sem conexão ou página travada)."
         }
     }
 
@@ -56,6 +61,8 @@ nonisolated enum EnjoeiError: LocalizedError, Equatable {
             "EnjoeiError.unexpectedResponse"
         case .stalePersistedQuery:
             "EnjoeiError.stalePersistedQuery"
+        case .noResponse:
+            "EnjoeiError.noResponse"
         }
     }
 

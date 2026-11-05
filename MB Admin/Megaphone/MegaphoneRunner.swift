@@ -98,6 +98,19 @@ final class MegaphoneRunner {
     /// cada reload, rolando por cima de fronteira de rodada (a contagem é da sessão toda, não por
     /// rodada).
     private var itemsSinceLastPageReload = 0
+    /// Quanto tempo um pedaço do lote pode passar sem reportar nenhum produto antes de o laço
+    /// desistir dele (ver `StallTimeout`). Sem isso, um `callAsyncJavaScript` que nunca volta
+    /// (página travada, processo dela suspenso ou morto no meio, pedido sem resposta) deixava a
+    /// rodada parada pra sempre: contagem congelada, lista parada e a fase ainda dizendo
+    /// "megafonando". Folgado de propósito — cada pedido do lote já desiste sozinho em
+    /// `EnjoeiJavaScript.megaphoneRequestTimeoutMilliseconds` (30s), até dois por produto contando a
+    /// renovação do token, mais o intervalo; só um lote que parou de vez passa disso. `var`, não
+    /// `let`: os testes usam um prazo curto.
+    var batchStallTimeout: Duration = .seconds(120)
+    /// Espera depois de um pedaço que terminou mal (travou, falhou ou ficou sem resposta), antes do
+    /// próximo — com a rede fora, sem isso o laço passaria a loja inteira marcando erro em poucos
+    /// minutos e gastaria as rodadas à toa. `var`, não `let`: os testes não esperam.
+    var recoveryPause: Duration = .seconds(30)
 
     /// Chamado ao fim de uma rodada (concluída, cancelada ou interrompida por falha), para quem
     /// guarda o resumo entre execuções — a tela só observa `phase`, que reseta a cada novo `start`.
@@ -119,6 +132,10 @@ final class MegaphoneRunner {
     /// testes/previews não precisam pensar em concorrência entre contas pra funcionar.
     private let megaphoneQueue: MegaphoneQueue
     private var task: Task<Void, Never>?
+    /// Identifica o pedaço em voo em `megaphoneAll` — avisos de progresso de qualquer outro
+    /// (um pedaço abandonado por travar, ver `batchStallTimeout`, que ainda solte um aviso
+    /// atrasado) são descartados.
+    private var currentChunkID: UUID?
     private var pauseGate: CheckedContinuation<Void, Never>?
 
     /// - Parameter itemsPersistence: em memória por padrão, pra um runner criado sem pensar em
@@ -320,7 +337,14 @@ final class MegaphoneRunner {
             while rounds.includes(round: currentRound) {
                 round = currentRound
                 if currentRound > 1 { resetItemsForNewRound() }
-                setPhase(.megaphoning(round: currentRound, of: rounds))
+                // Uma pausa pedida enquanto o último pedaço da rodada anterior terminava continua
+                // valendo: sem isso a fase voltava pra "megafonando" (ícone pulsando) com o laço
+                // parado em `waitWhilePaused`, e o botão continuar não aparecia.
+                if let pauseReason {
+                    setPhase(.paused(round: currentRound, of: rounds, reason: pauseReason))
+                } else {
+                    setPhase(.megaphoning(round: currentRound, of: rounds))
+                }
                 token = try await megaphoneAll(token: token)
                 currentRound += 1
             }
@@ -405,7 +429,8 @@ final class MegaphoneRunner {
     /// então uma ação manual num produto ainda não alcançado é vista quando o pedaço dele chegar (ao
     /// contrário do laço antigo, que revia o pulo item a item, ela ainda não é vista dentro do
     /// pedaço já disparado — só no próximo). Erro num produto não para os demais — só sessão caída
-    /// (`notAuthenticated`) interrompe a rodada de verdade.
+    /// (`notAuthenticated`) interrompe a rodada de verdade. Um pedaço que trava ou fica sem
+    /// resposta também não: ver `megaphoneChunk`/`recoverFromFailedChunk`.
     private func megaphoneAll(token: String) async throws -> String {
         var token = token
 
@@ -424,37 +449,12 @@ final class MegaphoneRunner {
             // manual pode ter acontecido enquanto pedaços anteriores rodavam.
             let liveChunk = chunk.filter { deleteStatuses[$0] != .succeeded && inactivateStatuses[$0] != .succeeded }
             guard !liveChunk.isEmpty else { continue }
-            for id in liveChunk {
-                setStatus(.megaphoning, for: id)
-            }
-            activeItemID = liveChunk.first
 
-            var sessionExpired = false
-            token = try await client.megaphoneBatch(
-                productIDs: liveChunk,
-                csrfToken: token,
-                delayMilliseconds: delayBetweenProductsMilliseconds
-            ) { [weak self] productID, response in
-                guard let self else { return }
-                self.currentItemID = productID
-                self.activeItemID = Self.activeItemID(after: productID, in: liveChunk)
-                if let error = response.failure {
-                    self.setStatus(.failed(error.localizedDescription), for: productID)
-                    self.failureDetails[productID] = MegaphoneFailureDetail(action: .megaphone, error: error)
-                    self.totalFailed += 1
-                    if case .notAuthenticated = error { sessionExpired = true }
-                } else {
-                    self.setStatus(.succeeded, for: productID)
-                    self.totalSucceeded += 1
-                }
-                self.itemsSinceLastPageReload += 1
-                self.refreshProgressSnapshot(force: false)
-            }
-
-            if sessionExpired {
-                currentItemID = nil
-                activeItemID = nil
-                throw EnjoeiError.notAuthenticated
+            let outcome = try await megaphoneChunk(liveChunk, token: token)
+            token = outcome.token
+            if let failure = outcome.failure {
+                try await recoverFromFailedChunk(failure, unreported: liveChunk.filter(isMegaphoning))
+                continue
             }
 
             // Mesma cadência que já existia entre um produto e o seguinte — sem isso, o último
@@ -477,11 +477,110 @@ final class MegaphoneRunner {
         return token
     }
 
+    /// Megafona um pedaço num lote só, desistindo dele se passar `batchStallTimeout` sem notícia.
+    /// Só lança sessão caída; qualquer outro jeito de o pedaço terminar mal (travou, falhou no
+    /// meio, ficou sem resposta, ou deixou produto sem reportar) volta em `failure`, pra
+    /// `megaphoneAll` se recuperar e seguir.
+    private func megaphoneChunk(_ liveChunk: [Int], token: String) async throws -> (token: String, failure: (any Error)?) {
+        for id in liveChunk {
+            setStatus(.megaphoning, for: id)
+        }
+        activeItemID = liveChunk.first
+        let chunkID = UUID()
+        currentChunkID = chunkID
+        defer { currentChunkID = nil }
+
+        var token = token
+        var sessionExpired = false
+        var failure: (any Error)?
+        do {
+            let chunkToken = token
+            token = try await StallTimeout.run(timeout: batchStallTimeout, stalledError: EnjoeiError.noResponse) { markProgress in
+                try await self.client.megaphoneBatch(
+                    productIDs: liveChunk,
+                    csrfToken: chunkToken,
+                    delayMilliseconds: self.delayBetweenProductsMilliseconds
+                ) { [weak self] productID, response in
+                    // Só conta produto ainda em andamento do pedaço em voo: um aviso atrasado de um
+                    // pedaço já abandonado (ver `StallTimeout`) não pode contar de novo.
+                    guard let self, self.currentChunkID == chunkID, liveChunk.contains(productID),
+                          self.isMegaphoning(productID) else { return }
+                    markProgress()
+                    switch self.recordBatchProgress(productID: productID, response: response, in: liveChunk) {
+                    case .notAuthenticated?: sessionExpired = true
+                    case .noResponse?: failure = EnjoeiError.noResponse
+                    default: break
+                    }
+                }
+            }
+        } catch EnjoeiError.notAuthenticated {
+            sessionExpired = true
+        } catch {
+            failure = error
+        }
+
+        if sessionExpired {
+            currentItemID = nil
+            activeItemID = nil
+            throw EnjoeiError.notAuthenticated
+        }
+        if failure == nil, liveChunk.contains(where: isMegaphoning) {
+            failure = EnjoeiError.noResponse
+        }
+        return (token, failure)
+    }
+
+    /// Aplica a resposta de um produto do lote. Devolve o erro dele, quando falhou.
+    private func recordBatchProgress(productID: Int, response: MegaphoneWebResponse, in chunk: [Int]) -> EnjoeiError? {
+        currentItemID = productID
+        activeItemID = Self.activeItemID(after: productID, in: chunk)
+        let failure = response.failure
+        if let failure {
+            setStatus(.failed(failure.localizedDescription), for: productID)
+            failureDetails[productID] = MegaphoneFailureDetail(action: .megaphone, error: failure)
+            totalFailed += 1
+        } else {
+            setStatus(.succeeded, for: productID)
+            totalSucceeded += 1
+        }
+        itemsSinceLastPageReload += 1
+        refreshProgressSnapshot(force: false)
+        return failure
+    }
+
+    /// Depois de um pedaço que terminou mal: os produtos que o lote não reportou contam como falha
+    /// desta rodada (a próxima tenta de novo), a página é recarregada — o que também mata um laço em
+    /// JS que tenha ficado pendurado lá — e o laço espera `recoveryPause` antes de seguir.
+    private func recoverFromFailedChunk(_ failure: any Error, unreported: [Int]) async throws {
+        failUnreported(unreported, error: failure)
+        itemsSinceLastPageReload = 0
+        await client.reloadPage()
+        if recoveryPause > .zero {
+            try await Task.sleep(for: recoveryPause)
+        }
+    }
+
     /// O laço em JS passa pelo pedaço em ordem, um de cada vez — terminado `productID`, o da vez
     /// passa a ser o seguinte dele no pedaço; depois do último, nenhum (até o próximo pedaço).
     nonisolated static func activeItemID(after productID: Int, in chunk: [Int]) -> Int? {
         guard let index = chunk.firstIndex(of: productID), chunk.indices.contains(index + 1) else { return nil }
         return chunk[index + 1]
+    }
+
+    private func isMegaphoning(_ productID: Int) -> Bool {
+        items.first(where: { $0.id == productID })?.status == .megaphoning
+    }
+
+    /// Fecha como falha os produtos de um pedaço que o lote não chegou a reportar.
+    private func failUnreported(_ productIDs: [Int], error: any Error) {
+        for productID in productIDs {
+            setStatus(.failed(error.localizedDescription), for: productID)
+            failureDetails[productID] = MegaphoneFailureDetail(action: .megaphone, error: error)
+            totalFailed += 1
+        }
+        currentItemID = nil
+        activeItemID = nil
+        if !productIDs.isEmpty { refreshProgressSnapshot() }
     }
 
     /// Ids que `megaphoneAll` ainda tem que megafonar nesta rodada — nem já megafonados (ou em

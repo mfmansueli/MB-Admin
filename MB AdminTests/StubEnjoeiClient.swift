@@ -215,8 +215,16 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
         delayMilliseconds: Int,
         onProgress: @escaping (Int, MegaphoneWebResponse) -> Void
     ) async throws -> String {
+        megaphoneBatchCallCount += 1
         var currentToken = csrfToken
         for productID in productIDs {
+            if hangOnceProductIDs.remove(productID) != nil {
+                // Cancelável só pro teste não deixar uma espera de uma hora pra trás — o
+                // `callAsyncJavaScript` de verdade nem isso respeita.
+                try await Task.sleep(for: .seconds(3600))
+            }
+            if let error = throwOnceProductIDs.removeValue(forKey: productID) { throw error }
+            if batchItemDelay > .zero { try await Task.sleep(for: batchItemDelay) }
             let response: MegaphoneWebResponse
             do {
                 try await megaphone(productID: productID, csrfToken: currentToken, newPrice: nil)
@@ -232,8 +240,10 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
             } catch {
                 response = (error as? EnjoeiError)?.stubWebResponse ?? MegaphoneWebResponse(status: 500)
             }
-            onProgress(productID, response)
-            if response.status == 401 { break }
+            // Na WebView de verdade o progresso chega pelo `WKScriptMessageHandler`, no main thread.
+            await MainActor.run { onProgress(productID, response) }
+            // Mesmo critério do laço em JS: sessão caída ou sem resposta param o lote ali.
+            if response.status == 401 || response.status == 0 { break }
         }
         return currentToken
     }
@@ -309,6 +319,29 @@ actor StubEnjoeiClient: EnjoeiClientProtocol {
     }
 
     private(set) var reloadPageCallCount = 0
+    /// Produtos em que o próximo lote trava (nunca responde, como um `callAsyncJavaScript` que não
+    /// volta) — uma vez só cada: a próxima tentativa do mesmo produto passa normal.
+    private var hangOnceProductIDs: Set<Int> = []
+    /// Produtos em que o próximo lote lança um erro no meio (como a página morrendo com o
+    /// `callAsyncJavaScript` em andamento) — uma vez só cada.
+    private var throwOnceProductIDs: [Int: EnjoeiError] = [:]
+    /// Quantos lotes foram pedidos, contando os que travaram.
+    private(set) var megaphoneBatchCallCount = 0
+
+    /// Espera antes de cada produto do lote — um lote lento, mas que continua dando notícia.
+    private var batchItemDelay: Duration = .zero
+
+    func setBatchItemDelay(_ delay: Duration) {
+        batchItemDelay = delay
+    }
+
+    func setBatchHang(onceAt productID: Int) {
+        hangOnceProductIDs.insert(productID)
+    }
+
+    func setBatchError(_ error: EnjoeiError, onceAt productID: Int) {
+        throwOnceProductIDs[productID] = error
+    }
 
     func reloadPage() async {
         reloadPageCallCount += 1
@@ -338,6 +371,7 @@ private extension EnjoeiError {
         switch self {
         case .notAuthenticated: 401
         case .invalidCSRFToken: 422
+        case .noResponse: 0
         case .http(let status, _): status
         default: 500
         }

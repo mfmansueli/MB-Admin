@@ -27,6 +27,12 @@ struct MegaphoneWebResponseTests {
         #expect(MegaphoneWebResponse(status: 422).failure?.isCSRFRejection == true)
     }
 
+    @Test("sem status nenhum é falta de resposta, não um erro do servidor")
+    func semResposta() {
+        #expect(MegaphoneWebResponse(status: 0, body: "AbortError: Fetch is aborted").failure == .noResponse)
+        #expect(MegaphoneWebResponse(javaScriptResult: nil).failure == .noResponse)
+    }
+
     @Test("lê o dicionário devolvido pelo javascript")
     func leResultadoDoJavaScript() {
         let response = MegaphoneWebResponse(javaScriptResult: [
