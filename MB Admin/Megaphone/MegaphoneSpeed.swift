@@ -2,10 +2,11 @@ import Foundation
 
 /// Intervalo entre um megafone e o próximo.
 ///
-/// Existe um piso de 0,3s: abaixo disso a chance de o Enjoei tratar a sequência como abuso — e
-/// bloquear a conta — deixa de compensar o tempo economizado.
+/// Existe um piso de 0,1s. Abaixo de 0,3s a chance de o Enjoei tratar a sequência como abuso — e
+/// bloquear a conta — cresce; 0,1s e 0,2s ficam no menu como opção consciente, o padrão continua
+/// 0,9s.
 nonisolated struct MegaphoneSpeed: Equatable, Hashable, Identifiable, Sendable {
-    static let minimumMilliseconds = 300
+    static let minimumMilliseconds = 100
 
     let milliseconds: Int
 
@@ -23,6 +24,8 @@ nonisolated struct MegaphoneSpeed: Equatable, Hashable, Identifiable, Sendable {
     /// Opções oferecidas no menu, da mais rápida para a mais cautelosa.
     static let presets: [MegaphoneSpeed] = [
         .fastest,
+        MegaphoneSpeed(milliseconds: 200),
+        MegaphoneSpeed(milliseconds: 300),
         MegaphoneSpeed(milliseconds: 500),
         .standard,
         MegaphoneSpeed(milliseconds: 1_500),
